@@ -34,6 +34,7 @@ internal val TRANSLATOR_OPTIONS = listOf(SelectOption("box64", "Box64"), SelectO
 @Composable
 fun ContainersScreen(
     onContainerClick: (String) -> Unit,
+    onOpenAssets: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = remember(context) { FableApp.from(context) }
@@ -64,6 +65,10 @@ fun ContainersScreen(
             defaultFullscreen = appSettings.defaultFullscreen,
             defaultTranslator = appSettings.defaultTranslator,
             onDismiss = { showCreate = false },
+            onOpenAssets = {
+                showCreate = false
+                onOpenAssets()
+            },
             onCreate = { name, resolution, wineVersion, fullscreen, translator ->
                 scope.launch {
                     repository.create(
@@ -129,6 +134,7 @@ private fun CreateContainerSheet(
     defaultFullscreen: Boolean,
     defaultTranslator: String,
     onDismiss: () -> Unit,
+    onOpenAssets: () -> Unit,
     onCreate: (name: String, resolution: String, wineVersion: String, fullscreen: Boolean, translator: String) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
@@ -163,7 +169,11 @@ private fun CreateContainerSheet(
                 )
             } else {
                 // Only bionic (Winlator .wcp) Wine runs in Fable; glibc builds are never listed.
-                InfoRow(label = "Wine", value = "Download one in Assets")
+                InfoRow(
+                    label = "Wine",
+                    value = "Download one in Assets",
+                    onClick = { close(onOpenAssets) },
+                )
             }
             CardDivider()
             OptionSelector(

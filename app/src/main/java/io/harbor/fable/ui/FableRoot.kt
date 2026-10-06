@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -124,6 +125,32 @@ private val DetailPopEnter: AnimatedContentTransitionScope<NavBackStackEntry>.()
 }
 private val DetailPopExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
     slideOutHorizontally(Motion.exit(Motion.Slow)) { it } + fadeOut(Motion.exit(Motion.Standard))
+}
+
+/**
+ * Switches to the top-level tab [route]. Every tab sits directly on top of Home, so back from any
+ * tab returns Home and back from Home leaves the app.
+ *
+ * Home is reached by popping back to it rather than navigating with `restoreState`: a
+ * non-inclusive `popUpTo(HOME) { saveState = true }` also files the popped tab's saved stack under
+ * Home's id, so `navigate(HOME) { restoreState = true }` brought the previous tab (Containers after
+ * "See all") straight back instead of Home, and the stale mapping later made other tabs (Assets)
+ * fail to open. Other tabs keep their state across switches with save/restore.
+ */
+private fun NavHostController.navigateToTab(route: String) {
+    if (route == Routes.HOME) {
+        // Save the tab being left so its scroll position survives the round trip.
+        if (currentDestination?.route != Routes.HOME) {
+            popBackStack(Routes.HOME, inclusive = false, saveState = true)
+        }
+        return
+    }
+    if (currentDestination?.route == route) return
+    navigate(route) {
+        popUpTo(Routes.HOME) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
 }
 
 /**
@@ -249,7 +276,8 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
                 popExitTransition = TabPopExit,
             ) {
                 HomeScreen(
-                    onNavigateToContainers = { navController.navigate(Routes.CONTAINERS) },
+                    // "See all" is the Containers tab, so it uses the tab back stack: back returns Home.
+                    onNavigateToContainers = { navController.navigateToTab(Routes.CONTAINERS) },
                     onAddApp = { showAddApp = true },
                     onContainerClick = { id -> navController.navigate("container/$id") },
                 )
@@ -265,6 +293,7 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
                     onContainerClick = { id ->
                         navController.navigate("container/$id")
                     },
+                    onOpenAssets = { navController.navigateToTab(Routes.ASSETS) },
                 )
             }
             composable(
@@ -368,13 +397,7 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
                         4 -> Routes.SETTINGS
                         else -> Routes.HOME
                     }
-                    navController.navigate(route) {
-                        popUpTo(navController.graph.startDestinationId) {
-                            saveState = true
-                        }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
+                    navController.navigateToTab(route)
                 },
             )
         }
