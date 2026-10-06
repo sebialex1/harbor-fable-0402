@@ -78,7 +78,7 @@ internal fun HomeContent(
                             modifier = Modifier.entrance(appear, index + 2),
                             title = exe.name,
                             subtitle = containerNames[exe.containerId] ?: "Unassigned",
-                            icon = Icons.Outlined.SportsEsports,
+                            leading = { ExeIcon(name = exe.name, iconPath = exe.icon) },
                             showChevron = false,
                             trailing = {
                                 FableIconButton(

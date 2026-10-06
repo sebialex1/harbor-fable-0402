@@ -105,6 +105,7 @@ fun ListRow(
     subtitleMaxLines: Int = 1,
     titleBadge: (@Composable RowScope.() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
+    leading: (@Composable () -> Unit)? = null,
 ) {
     val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
     Row(
@@ -115,7 +116,11 @@ fun ListRow(
             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (icon != null) {
+        if (leading != null) {
+            // Custom leading tile (an app icon); same footprint as the icon tile.
+            leading()
+            Spacer(Modifier.width(Spacing.md))
+        } else if (icon != null) {
             IconTile(icon = icon, tint = iconTint)
             Spacer(Modifier.width(Spacing.md))
         }

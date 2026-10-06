@@ -221,6 +221,7 @@ internal fun ContainerDetailContent(
                     ListRow(
                         title = exe.name,
                         subtitle = if (container.exePath == exe.path) "Primary" else null,
+                        leading = { ExeIcon(name = exe.name, iconPath = exe.icon) },
                         showChevron = false,
                         trailing = {
                             FableIconButton(
@@ -235,7 +236,7 @@ internal fun ContainerDetailContent(
                         },
                         onClick = { onSetPrimary(exe) },
                     )
-                    CardDivider()
+                    CardDivider(afterIcon = true)
                 }
             }
         }
