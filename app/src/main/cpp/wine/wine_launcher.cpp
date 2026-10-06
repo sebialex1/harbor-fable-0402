@@ -51,8 +51,9 @@ bool is_wine_builtin_name(const std::string& path) {
 }
 
 #if defined(__aarch64__)
-// ELF e_machine value of an x86_64 binary.
+// ELF e_machine values.
 constexpr uint16_t kMachineX86_64 = 62;
+constexpr uint16_t kMachineAarch64 = 183;
 
 // ELF e_machine of path, or 0 when it is not a readable ELF file.
 uint16_t elf_machine(const std::string& path) {
@@ -279,15 +280,13 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         add_env(&env, "FABLE_VULKAN_DRIVER", request.driver_path);
         add_env(&env, "VK_ICD_FILENAMES", icd);
         add_env(&env, "VK_DRIVER_FILES", icd);
+        // The driver is found through the ICD manifest only. It is deliberately NOT put in
+        // LD_PRELOAD: the child is box64 (or FEXInterpreter), and preloading a host Vulkan
+        // driver into the translator before main() runs its constructors in a process that
+        // never uses it directly; with some drivers that aborts the child at start-up.
+        // Winlator does not preload the driver either. driver_dir stays on LD_LIBRARY_PATH so
+        // the driver's own dependencies resolve when the loader dlopen()s it.
         prepend_path(&env, "LD_LIBRARY_PATH", driver_dir);
-        // Preload the ICD into the Wine process. A later user env var can
-        // replace LD_PRELOAD if a particular driver cannot be preloaded.
-        auto preload = env.find("LD_PRELOAD");
-        if (preload == env.end() || preload->second.empty()) {
-            add_env(&env, "LD_PRELOAD", request.driver_path);
-        } else if (preload->second.find(request.driver_path) == std::string::npos) {
-            preload->second = request.driver_path + ":" + preload->second;
-        }
     }
 
     for (const auto& item : request.env) {
@@ -340,7 +339,15 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
 #if defined(__ANDROID__) && defined(__LP64__)
     // Android 10+ refuses execve() on files in an app's data directory for apps targeting
     // API 29 and up. The system linker can still map such an executable, so it is the fallback.
+    // That only works for an ARM64 (bionic) ELF: the bionic Box64/FEX builds qualify, an x86_64
+    // or glibc binary does not, so the fallback is armed only for an aarch64 program.
     const std::string linker = "/system/bin/linker64";
+#if defined(__aarch64__)
+    const bool linker_fallback = elf_machine(program) == kMachineAarch64;
+#else
+    const bool linker_fallback = false;
+#endif
+    const char kFallbackNote[] = "[fable] execve: EACCES, retrying through /system/bin/linker64\n";
     std::vector<char*> linker_argv;
     linker_argv.push_back(const_cast<char*>(linker.c_str()));
     for (char* item : argv) linker_argv.push_back(item);
@@ -354,7 +361,17 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
 
     const std::string log_path = request.container_path + "/" + kLaunchLogName;
     const int log_fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-    if (log_fd >= 0) dprintf(log_fd, "[fable] %s\n", printable.c_str());
+    if (log_fd >= 0) {
+        dprintf(log_fd, "[fable] %s\n", printable.c_str());
+        for (const auto& item : storage) {
+            // The full child environment, so a failed start can be reproduced from the log.
+            if (item.rfind("DISPLAY=", 0) == 0 || item.rfind("WINE", 0) == 0 || item.rfind("BOX64", 0) == 0 ||
+                item.rfind("LD_", 0) == 0 || item.rfind("PATH=", 0) == 0 || item.rfind("HOME=", 0) == 0 ||
+                item.rfind("TMPDIR=", 0) == 0 || item.rfind("VK_", 0) == 0 || item.rfind("FEX", 0) == 0) {
+                dprintf(log_fd, "[fable] env %s\n", item.c_str());
+            }
+        }
+    }
     const int null_fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
 
     // The child reports a failed exec through this pipe; it closes on a successful exec.
@@ -385,7 +402,13 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         execve(program.c_str(), argv.data(), envp.data());
         const int exec_errno = errno;
 #if defined(__ANDROID__) && defined(__LP64__)
-        if (exec_errno == EACCES) execve(linker.c_str(), linker_argv.data(), envp.data());
+        if (exec_errno == EACCES && linker_fallback) {
+            if (log_fd >= 0) {
+                const ssize_t noted = write(STDERR_FILENO, kFallbackNote, sizeof(kFallbackNote) - 1);
+                (void)noted;
+            }
+            execve(linker.c_str(), linker_argv.data(), envp.data());
+        }
 #endif
         const ssize_t ignored = write(status_pipe[1], &exec_errno, sizeof(exec_errno));
         (void)ignored;
@@ -405,7 +428,18 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
     if (got == static_cast<ssize_t>(sizeof(child_errno))) {
         int ignored_status = 0;
         waitpid(pid, &ignored_status, 0);
-        return fail("Couldn't run " + basename_of(program) + ": " + std::strerror(child_errno));
+        std::string reason = std::strerror(child_errno);
+#if defined(__ANDROID__) && defined(__LP64__)
+        if (child_errno == EACCES && !linker_fallback) {
+            reason += " (not an ARM64 executable, so the linker64 fallback can't start it)";
+        }
+#endif
+        const int note_fd = open(log_path.c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
+        if (note_fd >= 0) {
+            dprintf(note_fd, "[fable] exec failed: %s\n", reason.c_str());
+            close(note_fd);
+        }
+        return fail("Couldn't run " + basename_of(program) + ": " + reason);
     }
 
     // Reap the child when it exits and note how it ended in the launch log.
