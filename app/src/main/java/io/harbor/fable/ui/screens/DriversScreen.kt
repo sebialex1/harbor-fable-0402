@@ -195,9 +195,9 @@ internal fun DriversContent(
                 ListRow(
                     title = "Vulkan extensions",
                     subtitle = when {
-                        installed?.vulkanVersion != null -> "What ${installed.tag} reports · Vulkan ${installed.vulkanVersion}"
-                        installed != null -> "What ${installed.tag} reports through Vulkan"
-                        else -> "What the system driver reports through Vulkan"
+                        installed?.vulkanVersion != null -> "${installed.tag} · Vulkan ${installed.vulkanVersion}"
+                        installed != null -> installed.tag
+                        else -> "System driver"
                     },
                     icon = Icons.Outlined.Extension,
                     showChevron = true,
@@ -219,7 +219,7 @@ internal fun DriversContent(
                 NoticeCard(
                     icon = Icons.Outlined.CloudOff,
                     title = "Offline",
-                    lines = listOf("Showing the last release list that was fetched"),
+                    lines = listOf("Showing the last fetched release list"),
                     modifier = Modifier.animateItem().liquidAppear(appear, 3),
                 )
             }
@@ -337,7 +337,7 @@ internal fun ActiveDriverCard(
                         Column(Modifier.weight(1f).padding(start = Spacing.md)) {
                             Text("Installing ${installing ?: lastInstalling[0].orEmpty()}", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                text = if (installed != null) "Removing ${installed.tag}, then extracting the new package" else "Extracting the driver package",
+                                text = if (installed != null) "Replacing ${installed.tag}" else "Extracting the package",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -351,7 +351,7 @@ internal fun ActiveDriverCard(
                 ) {
                     Text("No driver installed", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        text = "Install the latest RADV Xclipse release below. One driver is active at a time; installing another replaces it.",
+                        text = "Install the latest RADV Xclipse release below",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = Spacing.xxs),
                     )
@@ -377,14 +377,16 @@ private fun InstalledDriverFace(
 ) {
     if (driver == null) return
     Column(Modifier.fillMaxWidth()) {
+        // Short title and short facts: "v1.5.0 · Vulkan 1.4" fits one line next to the pill, and
+        // the full Mesa build string gets its own line instead of being cut off.
         DriverSummaryRow(
-            title = driver.name ?: "RADV Xclipse ${driver.tag}",
+            title = "RADV Xclipse",
             lines = listOf(
                 listOfNotNull(
                     driver.tag,
-                    driver.mesaVersion?.let { "Mesa $it" },
-                    driver.vulkanVersion?.let { "Vulkan $it" },
+                    driver.vulkanVersion?.let { "Vulkan ${it.split('.').take(2).joinToString(".")}" },
                 ).joinToString(" · "),
+                driver.mesaVersion?.let { "Mesa $it" }.orEmpty(),
             ),
             trailing = { Pill(text = "Active", color = FableSuccess, icon = Icons.Outlined.Check) },
         )

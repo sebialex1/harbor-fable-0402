@@ -103,6 +103,8 @@ fun ListRow(
     titleColor: Color = FableText,
     onClick: (() -> Unit)? = null,
     showChevron: Boolean = onClick != null,
+    titleMaxLines: Int = 1,
+    subtitleMaxLines: Int = 1,
     titleBadge: (@Composable RowScope.() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
@@ -126,7 +128,7 @@ fun ListRow(
                         text = title,
                         style = MaterialTheme.typography.titleSmall,
                         color = titleColor,
-                        maxLines = 1,
+                        maxLines = titleMaxLines,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
@@ -138,7 +140,7 @@ fun ListRow(
                     text = title,
                     style = MaterialTheme.typography.titleSmall,
                     color = titleColor,
-                    maxLines = 1,
+                    maxLines = titleMaxLines,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -146,7 +148,7 @@ fun ListRow(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
+                    maxLines = subtitleMaxLines,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

@@ -23,6 +23,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.data.DownloadStatus
@@ -109,6 +111,8 @@ fun DriverReleaseRow(
             iconTint = tint,
             onClick = onClick,
             showChevron = false,
+            // Mesa version, size and date do not fit one line on narrow screens.
+            subtitleMaxLines = 2,
             titleBadge = {
                 when (release.channel) {
                     ReleaseChannel.LATEST -> Pill(text = "Latest", color = FableAccent)
@@ -160,14 +164,21 @@ fun DriverReleaseRow(
 }
 
 /**
- * Compact two-line summary used for the active driver: a label row and a value row, no card of
- * its own so it can share a surface with its actions.
+ * Compact summary used for the active driver and the probed Vulkan device: a title that may
+ * wrap to two lines, short detail [lines] beneath it, and an optional [trailing] pill. No card
+ * of its own so it can share a surface with its actions.
+ *
+ * The trailing content is measured first and the text column takes what is left, so a long
+ * title truncates instead of running under the pill.
  */
 @Composable
 fun DriverSummaryRow(
     title: String,
     lines: List<String>,
     modifier: Modifier = Modifier,
+    icon: ImageVector = Icons.Outlined.Memory,
+    iconTint: Color = FableSuccess,
+    titleMaxLines: Int = 2,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -177,17 +188,27 @@ fun DriverSummaryRow(
             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconTile(icon = Icons.Outlined.Memory, tint = FableSuccess)
+        IconTile(icon = icon, tint = iconTint)
         Spacer(Modifier.width(Spacing.md))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = titleMaxLines,
+                overflow = TextOverflow.Ellipsis,
+            )
             lines.filter { it.isNotBlank() }.forEach { line ->
-                Text(line, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
         if (trailing != null) {
             Spacer(Modifier.width(Spacing.sm))
-            trailing()
+            Box(contentAlignment = Alignment.CenterEnd) { trailing() }
         }
     }
 }

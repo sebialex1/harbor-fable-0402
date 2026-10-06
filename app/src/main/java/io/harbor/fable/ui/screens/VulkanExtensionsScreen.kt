@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -168,23 +169,13 @@ internal fun VulkanExtensionsContent(
                 NoticeCard(
                     icon = Icons.Outlined.WarningAmber,
                     title = "No device extensions",
-                    lines = listOf(result.deviceError, "Only the instance-level list could be read."),
+                    lines = listOf(result.deviceError),
                     modifier = Modifier.animateItem(),
                 )
             }
         }
 
         if (result?.ok == true && result.totalCount > 0) {
-            item(key = "about") {
-                Text(
-                    text = "What the driver advertises on this device. Which of these a game can use is up to DXVK, " +
-                        "Wine and the game itself; this list does not enable or disable anything.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier
-                        .animateItem()
-                        .padding(horizontal = Spacing.sm, vertical = Spacing.xxs),
-                )
-            }
             item(key = "filters") {
                 Column(Modifier.animateItem(), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     GlassTextField(
@@ -244,7 +235,7 @@ internal fun VulkanExtensionsContent(
                 EmptyState(
                     icon = Icons.Outlined.Extension,
                     title = "No extensions reported",
-                    message = "The driver created an instance but advertised no extensions",
+                    message = "The driver advertised no extensions",
                     modifier = Modifier.animateItem(),
                 )
             }
@@ -262,9 +253,13 @@ private fun VulkanSummaryCard(
     modifier: Modifier = Modifier,
 ) {
     GlassCard(modifier.fillMaxWidth()) {
+        // Each face is a single Column: AnimatedContent lays its content out in a Box, so sibling
+        // rows placed directly in the lambda would stack on top of each other.
         AnimatedContent(
             targetState = Triple(probing && result == null, result?.ok, result?.primaryDevice?.name),
             transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) },
+            contentAlignment = Alignment.TopStart,
+            modifier = Modifier.fillMaxWidth(),
             label = "vulkanSummary",
         ) { (loading, ok, _) ->
             when {
@@ -281,7 +276,7 @@ private fun VulkanSummaryCard(
                             style = MaterialTheme.typography.titleSmall,
                         )
                         Text(
-                            text = "Creating an instance and enumerating devices",
+                            text = "Enumerating devices",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -293,24 +288,31 @@ private fun VulkanSummaryCard(
                         else -> "System Vulkan"
                     }
                     val subtitle = when {
-                        source == VulkanSource.INSTALLED_DRIVER && installed == null -> "Install a RADV Xclipse release from the Drivers tab, or switch to the system driver."
-                        source == VulkanSource.INSTALLED_DRIVER -> "The driver could not be opened on this device."
-                        else -> "libvulkan.so could not be opened on this device."
+                        source == VulkanSource.INSTALLED_DRIVER && installed == null -> "Install a driver or switch to the system driver"
+                        source == VulkanSource.INSTALLED_DRIVER -> "The driver could not be opened"
+                        else -> "libvulkan.so could not be opened"
                     }
-                    Column(Modifier.padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingHorizontal)) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingHorizontal),
+                    ) {
                         Text(title, style = MaterialTheme.typography.titleSmall)
                         Text(subtitle, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = Spacing.xxs))
                     }
                 }
-                else -> {
+                else -> Column(Modifier.fillMaxWidth()) {
                     val device = result.primaryDevice
                     val sourceLine = when (source) {
-                        VulkanSource.INSTALLED_DRIVER -> "Installed driver · opened through the adrenotools loader"
-                        VulkanSource.SYSTEM -> "System driver · opened through libvulkan.so"
+                        VulkanSource.INSTALLED_DRIVER -> "Installed driver · adrenotools loader"
+                        VulkanSource.SYSTEM -> "System driver · libvulkan.so"
                     }
                     DriverSummaryRow(
                         title = device?.name ?: "No physical device",
                         lines = listOf(sourceLine),
+                        icon = Icons.Outlined.Extension,
+                        iconTint = if (device != null) FableSuccess else FableWarn,
+                        titleMaxLines = 1,
                         trailing = {
                             Pill(
                                 text = "${result.totalCount} ext",
@@ -328,6 +330,8 @@ private fun VulkanSummaryCard(
                             value = listOfNotNull(device.driverName, device.driverInfo).joinToString(" · ")
                                 .ifBlank { device.driverVersion },
                             icon = Icons.Outlined.Memory,
+                            // Driver info strings carry the full Mesa version and commit; too long for one line.
+                            stacked = true,
                         )
                         CardDivider()
                         InfoRow(
@@ -359,6 +363,10 @@ private fun VulkanSummaryCard(
 /**
  * Collapsible card of extension rows under a label that carries the count. While a search or
  * family filter is active the badge shows "matching/total".
+ *
+ * Only the first [EXTENSION_PAGE] rows are composed when the group opens; a "Show all" row at
+ * the bottom brings in the rest. Composing all 200-odd rows of a device list at once inside the
+ * expand animation is what made opening a group stutter.
  */
 @Composable
 private fun ExtensionSection(
@@ -389,13 +397,30 @@ private fun ExtensionSection(
                 modifier = Modifier.padding(horizontal = RowPaddingHorizontal, vertical = Spacing.md),
             )
         } else {
-            extensions.forEachIndexed { index, extension ->
+            // Collapsing the group or changing the list resets back to the first page.
+            var showAll by remember(expanded, extensions.size) { mutableStateOf(false) }
+            val visible = if (showAll) extensions else extensions.take(EXTENSION_PAGE)
+            visible.forEachIndexed { index, extension ->
                 if (index > 0) CardDivider()
                 ExtensionRow(extension)
+            }
+            if (!showAll && extensions.size > visible.size) {
+                CardDivider()
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Spacing.xs),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    SectionAction(text = "Show all ${extensions.size}", onClick = { showAll = true })
+                }
             }
         }
     }
 }
+
+/** How many extension rows a group composes before asking the user to show the rest. */
+private const val EXTENSION_PAGE = 50
 
 /** One extension: the name with its vendor tag coloured, and the revision as a pill. */
 @Composable

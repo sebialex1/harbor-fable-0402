@@ -37,9 +37,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableDivider
+import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
@@ -104,9 +106,10 @@ fun CardDivider(modifier: Modifier = Modifier, inset: Boolean = true) {
 }
 
 /**
- * A [SectionLabel] that doubles as the toggle for the card beneath it. The title, an optional
- * [badge] (a count, say) and a rotating chevron share the label row, so a collapsed group costs
- * one line and an expanded one is a single continuous card with no header of its own.
+ * One glass surface for a collapsible group: the header row (title, optional [badge] such as a
+ * count, rotating chevron) is the top of the card and toggles it; the rows flow directly below a
+ * hairline inside the same card. There is no card inside a card and no floating label, so a
+ * collapsed group is one quiet row and an expanded one is a single continuous surface.
  */
 @Composable
 fun CollapsibleSection(
@@ -118,20 +121,20 @@ fun CollapsibleSection(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, Motion.inPlace(), label = "sectionChevron")
-    Column(modifier.fillMaxWidth()) {
+    GlassCard(modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(top = LabelTopPadding - Spacing.xs)
-                .clip(RoundedCornerShape(10.dp))
                 .clickable(role = Role.Button, onClick = onToggle)
-                .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+                .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = FableTextDim,
+                style = MaterialTheme.typography.titleSmall,
+                color = if (expanded) FableText else FableTextDim,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             badge?.invoke()
@@ -147,10 +150,13 @@ fun CollapsibleSection(
         }
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
+            enter = expandVertically(Motion.enter()) + fadeIn(Motion.enter()),
+            exit = shrinkVertically(Motion.exit()) + fadeOut(Motion.exit()),
         ) {
-            GlassCard(Modifier.padding(top = Spacing.xs)) { content() }
+            Column(Modifier.fillMaxWidth()) {
+                CardDivider()
+                content()
+            }
         }
     }
 }
