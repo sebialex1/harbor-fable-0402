@@ -142,8 +142,8 @@ class AssetRepository internal constructor(
                 try {
                     // Newest release first, so "first match" consumers (setup picks) see the latest build.
                     for ((release, filtered) in resolveReleases(source, forceRefresh)) {
-                        for (asset in filtered) {
-                            val entry = AssetEntry(
+                        val builds = filtered.map { asset ->
+                            AssetEntry(
                                 id = "${source.slug}/${asset.name}",
                                 name = asset.name,
                                 version = release.tagName,
@@ -154,6 +154,9 @@ class AssetRepository internal constructor(
                                 fileSizeBytes = asset.sizeBytes,
                                 sha256 = asset.sha256,
                             ).let { reconcileDownloadStatus(it) }
+                        }
+                        // One build per release for Wine; see CatalogPolicy.buildsToList.
+                        for (entry in CatalogPolicy.buildsToList(source.type, builds)) {
                             newEntries[entry.id] = entry
                         }
                     }
@@ -186,10 +189,9 @@ class AssetRepository internal constructor(
 
     /**
      * The releases whose assets a source lists, newest first, each with the assets that match
-     * its globs: up to [MAX_RELEASES_PER_SOURCE] of them, so the catalog offers a few recent
-     * versions (DXVK publishes one tarball per release, so listing only the latest release is
-     * what left it with a single version). Pre-releases only count when no stable release
-     * matches. When the release list is unavailable this falls back to [resolveRelease].
+     * its globs: up to [CatalogPolicy.releaseLimit] of them (a few recent versions of Wine and
+     * Box64, only the latest DXVK). Pre-releases only count when no stable release matches.
+     * When the release list is unavailable this falls back to [resolveRelease].
      */
     private suspend fun resolveReleases(
         source: CatalogSource,
@@ -207,7 +209,7 @@ class AssetRepository internal constructor(
                 .map { release -> release to fetcher.filterAssets(release, source.assetGlobs) }
                 .filter { (_, assets) -> assets.isNotEmpty() }
             val stable = matching.filter { (release, _) -> !release.prerelease }
-            val picked = (stable.ifEmpty { matching }).take(MAX_RELEASES_PER_SOURCE)
+            val picked = (stable.ifEmpty { matching }).take(CatalogPolicy.releaseLimit(source.type))
             if (picked.isNotEmpty()) return picked
         }
         return listOf(resolveRelease(source, forceRefresh))
@@ -469,9 +471,6 @@ class AssetRepository internal constructor(
     }
 
     companion object {
-        /** How many recent releases of each source the catalog lists (see [resolveReleases]). */
-        const val MAX_RELEASES_PER_SOURCE = 5
-
         private const val TAG = "AssetRepository"
 
         private const val DEFAULTS_VERSION_KEY = "defaultsVersion"

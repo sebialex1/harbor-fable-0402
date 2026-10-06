@@ -280,19 +280,8 @@ class SetupManager internal constructor(
     companion object {
         private const val TAG = "SetupManager"
 
-        private val STABLE_WOW64 = Regex("""^wine-[0-9][0-9.]*-amd64-wow64\.tar\.(xz|gz)$""", RegexOption.IGNORE_CASE)
-        private val STABLE_AMD64 = Regex("""^wine-[0-9][0-9.]*-amd64\.tar\.(xz|gz)$""", RegexOption.IGNORE_CASE)
-
-        /**
-         * Lower is better. The stable WoW64 build comes first: it is x86_64 like every other
-         * build here, and it also runs 32-bit programs without a separate Box86.
-         */
-        internal fun wineRank(name: String): Int = when {
-            STABLE_WOW64.matches(name) -> 0
-            STABLE_AMD64.matches(name) -> 1
-            !name.contains("staging", ignoreCase = true) -> 2
-            else -> 3
-        }
+        /** Lower is better; the same ranking the catalog uses to keep one Wine build per version. */
+        internal fun wineRank(name: String): Int = CatalogPolicy.wineRank(name)
 
         private val NIGHTLY_MARKER = Regex("""(?i)nightly|-[0-9a-f]{7,}(?=[.-])""")
         private val VERSION_NUMBER = Regex("""(\d+)\.(\d+)(?:\.(\d+))?""")
