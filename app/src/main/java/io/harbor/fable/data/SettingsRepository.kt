@@ -32,6 +32,8 @@ data class AppSettings(
     val vsync: Boolean = true,
     val framePacing: FramePacing = FramePacing.ADAPTIVE,
     val refreshCatalogOnLaunch: Boolean = true,
+    /** True once the first-run setup screen has been finished or skipped. */
+    val setupComplete: Boolean = false,
 )
 
 /**
@@ -53,7 +55,12 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
         write(_settings.value)
     }
 
-    fun reset() = update { AppSettings() }
+    /** Restores defaults but keeps first-run state: resetting settings is not a reason to redo setup. */
+    fun reset() = update { AppSettings(setupComplete = it.setupComplete) }
+
+    fun markSetupComplete() {
+        if (!current.setupComplete) update { it.copy(setupComplete = true) }
+    }
 
     private fun read(): AppSettings {
         val defaults = AppSettings()
@@ -71,6 +78,7 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
                 ?.let { name -> FramePacing.entries.firstOrNull { it.name == name } }
                 ?: defaults.framePacing,
             refreshCatalogOnLaunch = prefs.getBoolean(KEY_REFRESH_ON_LAUNCH, defaults.refreshCatalogOnLaunch),
+            setupComplete = prefs.getBoolean(KEY_SETUP_COMPLETE, defaults.setupComplete),
         )
     }
 
@@ -85,6 +93,7 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
             .putBoolean(KEY_VSYNC, settings.vsync)
             .putString(KEY_FRAME_PACING, settings.framePacing.name)
             .putBoolean(KEY_REFRESH_ON_LAUNCH, settings.refreshCatalogOnLaunch)
+            .putBoolean(KEY_SETUP_COMPLETE, settings.setupComplete)
             .apply()
     }
 
@@ -99,6 +108,7 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
         private const val KEY_VSYNC = "vsync"
         private const val KEY_FRAME_PACING = "frame_pacing"
         private const val KEY_REFRESH_ON_LAUNCH = "refresh_catalog_on_launch"
+        private const val KEY_SETUP_COMPLETE = "setup_complete"
 
         @Volatile
         private var instance: SettingsRepository? = null

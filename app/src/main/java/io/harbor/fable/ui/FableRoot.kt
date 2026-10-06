@@ -1,5 +1,6 @@
 package io.harbor.fable.ui
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -9,10 +10,13 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -31,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -51,6 +56,7 @@ import io.harbor.fable.ui.theme.FableBg
 import io.harbor.fable.ui.theme.FableControlBorder
 import io.harbor.fable.ui.theme.FableSurfaceRaised
 import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.Motion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -111,9 +117,13 @@ private val DetailPopExit: AnimatedContentTransitionScope<NavBackStackEntry>.() 
     slideOutHorizontally(tween(340, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(240))
 }
 
+/**
+ * Root of the UI. Shows the first-run [SetupScreen] until setup has been finished or skipped,
+ * then the main shell (tabs, dock, sheets). The hand-over is one continuous motion: the setup
+ * canvas zooms through and fades while the shell settles in from slightly below.
+ */
 @Composable
 fun FableRoot() {
-    val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
     val fableUi = remember {
         FableUi(
@@ -121,6 +131,60 @@ fun FableRoot() {
             snackbarHostState = snackbarHostState,
         )
     }
+    val context = LocalContext.current
+    val app = remember(context) { FableApp.from(context) }
+    val settings by app.settingsRepository.settings.collectAsStateWithLifecycle()
+
+    // An install that predates the setup screen but already has containers is not a first run.
+    LaunchedEffect(Unit) {
+        if (!app.settingsRepository.current.setupComplete && app.containerRepository.list().isNotEmpty()) {
+            app.settingsRepository.markSetupComplete()
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalFableUi provides fableUi,
+        LocalDockClearance provides DockMetrics.Clearance,
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(FableBg),
+        ) {
+            AnimatedContent(
+                targetState = settings.setupComplete,
+                transitionSpec = {
+                    if (targetState) {
+                        // Setup -> app: the shell rises and settles while setup zooms away.
+                        (
+                            fadeIn(Motion.enter(Motion.Slow, delay = 120)) +
+                                scaleIn(Motion.enter(Motion.Entrance, delay = 120), initialScale = 0.94f) +
+                                slideInVertically(Motion.enter(Motion.Entrance, delay = 120)) { it / 14 }
+                            ) togetherWith (
+                            fadeOut(Motion.exit(Motion.Standard)) +
+                                scaleOut(Motion.exit(Motion.Slow), targetScale = 1.06f)
+                            )
+                    } else {
+                        fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit())
+                    }
+                },
+                label = "rootShell",
+                modifier = Modifier.fillMaxSize(),
+            ) { setupComplete ->
+                if (setupComplete) {
+                    MainShell(snackbarHostState = snackbarHostState)
+                } else {
+                    SetupScreen(onFinished = { app.settingsRepository.markSetupComplete() })
+                }
+            }
+        }
+    }
+}
+
+/** Tabs, dock, snackbar and sheets: the app once setup is out of the way. */
+@Composable
+private fun MainShell(snackbarHostState: SnackbarHostState) {
+    val navController = rememberNavController()
 
     // Refresh the catalog once per app launch when the user has it enabled.
     val context = LocalContext.current
@@ -128,6 +192,7 @@ fun FableRoot() {
         val app = FableApp.from(context)
         if (app.settingsRepository.current.refreshCatalogOnLaunch) {
             runCatching { app.assetRepository.refresh() }
+            runCatching { app.driverRepository.refresh() }
         }
     }
 
@@ -156,140 +221,135 @@ fun FableRoot() {
         else -> 0
     }
 
-    CompositionLocalProvider(
-        LocalFableUi provides fableUi,
-        LocalDockClearance provides DockMetrics.Clearance,
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(FableBg),
     ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(FableBg)
+        NavHost(
+            navController = navController,
+            startDestination = Routes.HOME,
+            modifier = Modifier.fillMaxSize(),
         ) {
-            NavHost(
-                navController = navController,
-                startDestination = Routes.HOME,
-                modifier = Modifier.fillMaxSize(),
+            composable(
+                Routes.HOME,
+                enterTransition = TabEnter,
+                exitTransition = TabExit,
+                popEnterTransition = TabPopEnter,
+                popExitTransition = TabPopExit,
             ) {
-                composable(
-                    Routes.HOME,
-                    enterTransition = TabEnter,
-                    exitTransition = TabExit,
-                    popEnterTransition = TabPopEnter,
-                    popExitTransition = TabPopExit,
-                ) {
-                    HomeScreen(
-                        onNavigateToContainers = { navController.navigate(Routes.CONTAINERS) },
-                        onAddApp = { showAddApp = true },
-                        onContainerClick = { id -> navController.navigate("container/$id") },
-                    )
-                }
-                composable(
-                    Routes.CONTAINERS,
-                    enterTransition = TabEnter,
-                    exitTransition = TabExit,
-                    popEnterTransition = TabPopEnter,
-                    popExitTransition = TabPopExit,
-                ) {
-                    ContainersScreen(
-                        onContainerClick = { id ->
-                            navController.navigate("container/$id")
-                        },
-                    )
-                }
-                composable(
-                    route = Routes.CONTAINER_DETAIL,
-                    arguments = listOf(navArgument("containerId") { type = NavType.StringType }),
-                    enterTransition = DetailEnter,
-                    exitTransition = DetailExit,
-                    popEnterTransition = DetailPopEnter,
-                    popExitTransition = DetailPopExit,
-                ) { entry ->
-                    val containerId = entry.arguments?.getString("containerId").orEmpty()
-                    ContainerDetailScreen(
-                        containerId = containerId,
-                        onBack = { navController.popBackStack() },
-                    )
-                }
-                composable(
-                    Routes.DRIVERS,
-                    enterTransition = TabEnter,
-                    exitTransition = TabExit,
-                    popEnterTransition = TabPopEnter,
-                    popExitTransition = TabPopExit,
-                ) { DriversScreen() }
-                composable(
-                    Routes.ASSETS,
-                    enterTransition = TabEnter,
-                    exitTransition = TabExit,
-                    popEnterTransition = TabPopEnter,
-                    popExitTransition = TabPopExit,
-                ) { AssetsScreen() }
-                composable(
-                    Routes.SETTINGS,
-                    enterTransition = TabEnter,
-                    exitTransition = TabExit,
-                    popEnterTransition = TabPopEnter,
-                    popExitTransition = TabPopExit,
-                ) { SettingsScreen() }
-            }
-
-            if (showAddApp) {
-                AddAppSheet(onDismiss = { showAddApp = false })
-            }
-
-            // Floats above the dock on tabs and near the bottom edge on pushed screens.
-            val snackbarBottom by animateDpAsState(
-                targetValue = if (isTopLevel) DockMetrics.Clearance else Dp.Hairline,
-                animationSpec = tween(250),
-                label = "snackbarBottom",
-            )
-            SnackbarHost(
-                hostState = snackbarHostState,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = snackbarBottom + 8.dp, start = 12.dp, end = 12.dp),
-            ) { data ->
-                val shape = RoundedCornerShape(16.dp)
-                Snackbar(
-                    snackbarData = data,
-                    modifier = Modifier.border(Dp.Hairline, FableControlBorder, shape),
-                    shape = shape,
-                    containerColor = FableSurfaceRaised,
-                    contentColor = FableText,
-                    actionColor = FableAccent,
+                HomeScreen(
+                    onNavigateToContainers = { navController.navigate(Routes.CONTAINERS) },
+                    onAddApp = { showAddApp = true },
+                    onContainerClick = { id -> navController.navigate("container/$id") },
                 )
             }
-
-            // Floating glass dock — only on top-level tabs
-            AnimatedVisibility(
-                visible = isTopLevel,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter),
+            composable(
+                Routes.CONTAINERS,
+                enterTransition = TabEnter,
+                exitTransition = TabExit,
+                popEnterTransition = TabPopEnter,
+                popExitTransition = TabPopExit,
             ) {
-                GlassDock(
-                    items = tabs,
-                    activeIndex = activeTab,
-                    onTabSelected = { index ->
-                        val route = when (index) {
-                            0 -> Routes.HOME
-                            1 -> Routes.CONTAINERS
-                            2 -> Routes.DRIVERS
-                            3 -> Routes.ASSETS
-                            4 -> Routes.SETTINGS
-                            else -> Routes.HOME
-                        }
-                        navController.navigate(route) {
-                            popUpTo(navController.graph.startDestinationId) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
+                ContainersScreen(
+                    onContainerClick = { id ->
+                        navController.navigate("container/$id")
                     },
                 )
             }
+            composable(
+                route = Routes.CONTAINER_DETAIL,
+                arguments = listOf(navArgument("containerId") { type = NavType.StringType }),
+                enterTransition = DetailEnter,
+                exitTransition = DetailExit,
+                popEnterTransition = DetailPopEnter,
+                popExitTransition = DetailPopExit,
+            ) { entry ->
+                val containerId = entry.arguments?.getString("containerId").orEmpty()
+                ContainerDetailScreen(
+                    containerId = containerId,
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(
+                Routes.DRIVERS,
+                enterTransition = TabEnter,
+                exitTransition = TabExit,
+                popEnterTransition = TabPopEnter,
+                popExitTransition = TabPopExit,
+            ) { DriversScreen() }
+            composable(
+                Routes.ASSETS,
+                enterTransition = TabEnter,
+                exitTransition = TabExit,
+                popEnterTransition = TabPopEnter,
+                popExitTransition = TabPopExit,
+            ) { AssetsScreen() }
+            composable(
+                Routes.SETTINGS,
+                enterTransition = TabEnter,
+                exitTransition = TabExit,
+                popEnterTransition = TabPopEnter,
+                popExitTransition = TabPopExit,
+            ) { SettingsScreen() }
+        }
+
+        if (showAddApp) {
+            AddAppSheet(onDismiss = { showAddApp = false })
+        }
+
+        // Floats above the dock on tabs and near the bottom edge on pushed screens.
+        val snackbarBottom by animateDpAsState(
+            targetValue = if (isTopLevel) DockMetrics.Clearance else Dp.Hairline,
+            animationSpec = tween(250),
+            label = "snackbarBottom",
+        )
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = snackbarBottom + 8.dp, start = 12.dp, end = 12.dp),
+        ) { data ->
+            val shape = RoundedCornerShape(16.dp)
+            Snackbar(
+                snackbarData = data,
+                modifier = Modifier.border(Dp.Hairline, FableControlBorder, shape),
+                shape = shape,
+                containerColor = FableSurfaceRaised,
+                contentColor = FableText,
+                actionColor = FableAccent,
+            )
+        }
+
+        // Floating glass dock — only on top-level tabs
+        AnimatedVisibility(
+            visible = isTopLevel,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            GlassDock(
+                items = tabs,
+                activeIndex = activeTab,
+                onTabSelected = { index ->
+                    val route = when (index) {
+                        0 -> Routes.HOME
+                        1 -> Routes.CONTAINERS
+                        2 -> Routes.DRIVERS
+                        3 -> Routes.ASSETS
+                        4 -> Routes.SETTINGS
+                        else -> Routes.HOME
+                    }
+                    navController.navigate(route) {
+                        popUpTo(navController.graph.startDestinationId) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+            )
         }
     }
 }

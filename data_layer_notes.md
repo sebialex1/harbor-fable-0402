@@ -135,7 +135,14 @@ Windows programs are x86_64, so on an ARM64 device Wine runs through Box64:
 x86 library bundles), so the Box64 entry stays empty until a release that matches its globs
 appears or the globs are pointed at another source.
 
-## First-run setup (`SetupManager`)
+## First-run setup (`SetupManager`, `SetupScreen`)
+
+`AppSettings.setupComplete` (SharedPreferences key `setup_complete`) gates the first-open
+`SetupScreen` in `FableRoot`. It is set when the user finishes or skips setup, and
+automatically for installs that already have containers. `SettingsRepository.reset()` keeps it.
+The screen has three steps (welcome, download, ready) on one animated liquid-glass canvas; the
+download step renders `SetupManager.state` directly, so every percentage is a real download
+(or the driver extraction), never a timer.
 
 `SetupManager.installRecommended()` refreshes the catalog and queues the latest Wine (amd64),
 Box64, RADV Xclipse and DXVK packages on `DownloadManager`. Progress shows in the Assets list
