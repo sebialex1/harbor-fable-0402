@@ -17,6 +17,10 @@
 // libraryName may be aliased as "library". Optional "abi" must be arm64-v8a
 // or aarch64 when present. The named library must be an ELF64 AArch64 shared
 // object inside the zip.
+//
+// "vulkan" is optional: packages in the common adrenotools layout only carry
+// the API version inside driverVersion ("Vulkan 1.4.358"), which is parsed
+// when the explicit field is absent. An unparsable version is left as 0.0.0.
 
 #pragma once
 

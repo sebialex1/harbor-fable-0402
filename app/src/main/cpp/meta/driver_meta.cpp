@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
@@ -126,6 +127,28 @@ bool parse_vulkan_version(const std::string& text, DriverMeta* meta, std::string
 std::string optional_string(const Json& obj, const char* key) {
     auto v = obj.string_field(key);
     return v ? *v : std::string();
+}
+
+// First "major.minor.patch" run of digits in text ("Vulkan 1.4.358" -> "1.4.358"), or "".
+std::string extract_version_triplet(const std::string& text) {
+    size_t i = 0;
+    while (i < text.size()) {
+        if (text[i] < '0' || text[i] > '9') {
+            ++i;
+            continue;
+        }
+        size_t j = i;
+        int dots = 0;
+        while (j < text.size() && ((text[j] >= '0' && text[j] <= '9') || text[j] == '.')) {
+            if (text[j] == '.') ++dots;
+            ++j;
+        }
+        std::string candidate = text.substr(i, j - i);
+        while (!candidate.empty() && candidate.back() == '.') candidate.pop_back();
+        if (dots >= 2 && candidate.find("..") == std::string::npos) return candidate;
+        i = j;
+    }
+    return {};
 }
 
 bool is_arm64_elf(const std::vector<uint8_t>& bytes, std::string* error) {
@@ -289,6 +312,29 @@ bool on_external_storage(const std::string& path) {
            path.find("/mnt/media_rw/") != std::string::npos;
 }
 
+std::string json_escape(const std::string& text) {
+    std::string out;
+    out.reserve(text.size() + 8);
+    for (unsigned char c : text) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out.push_back(static_cast<char>(c));
+                }
+        }
+    }
+    return out;
+}
+
 std::string parent_dir(const std::string& path) {
     auto slash = path.rfind('/');
     if (slash == std::string::npos) return ".";
@@ -358,20 +404,27 @@ bool parse_driver_meta_json(const std::string& json_text, DriverMeta* out, std::
         return false;
     }
 
-    auto vulkan = root.string_field("vulkan");
-    if (!vulkan) vulkan = root.string_field("vulkanVersion");
-    if (!vulkan) {
-        if (error) *error = "meta.json vulkan version is missing or invalid";
-        return false;
-    }
-    if (!parse_vulkan_version(*vulkan, out, error)) return false;
-
     out->name = optional_string(root, "name");
     out->description = optional_string(root, "description");
     out->author = optional_string(root, "author");
     out->vendor = optional_string(root, "vendor");
     out->driver_version = optional_string(root, "driverVersion");
     if (out->driver_version.empty()) out->driver_version = optional_string(root, "version");
+
+    // The Vulkan API version is optional. Packages in the common adrenotools layout
+    // (RADV Xclipse, Winlator-style zips) only carry it inside driverVersion, e.g.
+    // "Vulkan 1.4.358"; an explicit "vulkan" / "vulkanVersion" field wins when present.
+    auto vulkan = root.string_field("vulkan");
+    if (!vulkan) vulkan = root.string_field("vulkanVersion");
+    if (vulkan) {
+        if (!parse_vulkan_version(*vulkan, out, error)) return false;
+    } else {
+        const std::string embedded = extract_version_triplet(out->driver_version);
+        if (!embedded.empty()) {
+            std::string ignored;
+            parse_vulkan_version(embedded, out, &ignored);
+        }
+    }
     out->abi = optional_string(root, "abi");
     if (!out->abi.empty() && out->abi != "arm64-v8a" && out->abi != "aarch64") {
         if (error) *error = "Driver ABI is not arm64-v8a";
@@ -454,12 +507,15 @@ std::string install_driver_zip(const std::string& zip_path, const std::string& d
     const std::string sidecar = dest_dir + "/fable-driver.json";
     std::string json = std::string("{\n") +
                        "  \"schemaVersion\": 1,\n" +
-                       "  \"libraryName\": \"" + meta.library_name + "\",\n" +
+                       "  \"libraryName\": \"" + json_escape(meta.library_name) + "\",\n" +
                        "  \"minApi\": " + std::to_string(meta.min_api) + ",\n" +
-                       "  \"vulkan\": \"" + meta.vulkan + "\",\n" +
-                       "  \"libraryPath\": \"" + installed + "\"";
-    if (!meta.name.empty()) json += ",\n  \"name\": \"" + meta.name + "\"";
-    if (!meta.driver_version.empty()) json += ",\n  \"driverVersion\": \"" + meta.driver_version + "\"";
+                       "  \"vulkan\": \"" + json_escape(meta.vulkan) + "\",\n" +
+                       "  \"libraryPath\": \"" + json_escape(installed) + "\"";
+    if (!meta.name.empty()) json += ",\n  \"name\": \"" + json_escape(meta.name) + "\"";
+    if (!meta.description.empty()) json += ",\n  \"description\": \"" + json_escape(meta.description) + "\"";
+    if (!meta.vendor.empty()) json += ",\n  \"vendor\": \"" + json_escape(meta.vendor) + "\"";
+    if (!meta.author.empty()) json += ",\n  \"author\": \"" + json_escape(meta.author) + "\"";
+    if (!meta.driver_version.empty()) json += ",\n  \"driverVersion\": \"" + json_escape(meta.driver_version) + "\"";
     json += "\n}\n";
     std::vector<uint8_t> side(json.begin(), json.end());
     std::string side_error;

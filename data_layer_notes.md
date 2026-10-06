@@ -61,6 +61,19 @@ offers no Turnip packages.
   Layout under `filesDir/drivers/`: `packages/<asset>.zip` (one per version),
   `active/<tag>/` (the extracted driver), `active.json`.
 - Download tasks use `RecordKind.DRIVER` and `assetId = "radv-xclipse/<tag>"`.
+- **One active driver.** `install(tag)` validates the zip (native
+  `validateDriverZip`), then clears `active/` and `active.json`, extracts the new
+  package with `installDriver` into `active/<tag>/`, and records the result
+  (name, Vulkan version, Mesa version from the `fable-driver.json` sidecar).
+  A rejected package never removes the working driver; a failed extraction
+  leaves the "no driver" state, never two drivers. `uninstall()` removes the
+  active files and record; downloaded zips are kept for reinstall/rollback.
+  `downloadAndInstall(tag)` chains the two for setup.
+- `WineRuntime.activeDriverLibrary()` is what the launcher passes to Wine; every
+  container uses the same active driver.
+- The native meta.json parser accepts the common adrenotools layout, where the
+  Vulkan API version only appears inside `driverVersion` ("Vulkan 1.4.358");
+  the real JimVulkan packages have no `vulkan` field.
 
 ### `FableApp.kt`
 Wired up as the application entry point.

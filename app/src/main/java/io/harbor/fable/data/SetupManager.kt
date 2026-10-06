@@ -135,14 +135,16 @@ class SetupManager internal constructor(
         assets.assets,
         drivers.releases,
         drivers.installed,
+        drivers.installing,
         downloads.snapshot,
-    ) { entries, releases, installed, snapshot ->
-        compute(entries, releases, installed, snapshot)
+    ) { entries, releases, installed, installing, snapshot ->
+        compute(entries, releases, installed, installing, snapshot)
     }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), SetupState())
 
     /**
      * Refreshes the catalog, then downloads the latest Wine (amd64), Box64, RADV Xclipse and DXVK
-     * packages that are not on disk yet.
+     * packages that are not on disk yet. The driver is installed as the active driver as soon as
+     * its download completes.
      */
     suspend fun installRecommended(): SetupResult {
         if (!_installing.compareAndSet(false, true)) {
@@ -167,8 +169,14 @@ class SetupManager internal constructor(
                     continue
                 }
                 try {
-                    val task = if (pick.isDriver) drivers.download(pick.id) else assets.download(pick.id)
-                    if (task != null) started += kind else installed += kind
+                    if (pick.isDriver) {
+                        // Either queues the download (install follows) or starts the install now.
+                        drivers.downloadAndInstall(pick.id)
+                        started += kind
+                    } else {
+                        val task = assets.download(pick.id)
+                        if (task != null) started += kind else installed += kind
+                    }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -188,6 +196,7 @@ class SetupManager internal constructor(
         entries: List<AssetEntry>,
         releases: List<RadvRelease>,
         installedDriver: InstalledDriver?,
+        installingDriver: String?,
         snapshot: DownloadSnapshot,
     ): SetupState {
         val picks = pickRecommended(entries, releases)
@@ -198,6 +207,13 @@ class SetupManager internal constructor(
             }
             when {
                 isInstalled(kind, installedDriver) -> RecommendedItem(kind, RecommendedStatus.INSTALLED)
+                // Extraction after the download: nearly done, but not yet usable.
+                kind == RecommendedKind.DRIVER && installingDriver != null -> RecommendedItem(
+                    kind = kind,
+                    status = RecommendedStatus.DOWNLOADING,
+                    sizeBytes = pick?.sizeBytes ?: 0L,
+                    progress = 1f,
+                )
                 pick != null && task != null && task.keepsServiceAlive -> RecommendedItem(
                     kind = kind,
                     status = RecommendedStatus.DOWNLOADING,
@@ -212,14 +228,14 @@ class SetupManager internal constructor(
     }
 
     /**
-     * "Installed" means a usable file is on disk. For the driver that is either an active
-     * (extracted) driver or a downloaded release package waiting to be installed.
+     * "Installed" means usable: a package on disk for Wine, Box64 and DXVK, and an extracted,
+     * active driver for the graphics driver (a downloaded zip alone is not enough).
      */
     private fun isInstalled(kind: RecommendedKind, installedDriver: InstalledDriver?): Boolean = when (kind) {
         RecommendedKind.WINE -> assets.downloadedFiles(AssetType.WINE).isNotEmpty()
         RecommendedKind.BOX64 -> assets.downloadedFiles(AssetType.BOX64).isNotEmpty()
         RecommendedKind.DXVK -> assets.downloadedFiles(AssetType.DXVK).isNotEmpty()
-        RecommendedKind.DRIVER -> installedDriver != null || drivers.hasDownloadedPackage()
+        RecommendedKind.DRIVER -> installedDriver != null
     }
 
     /**
