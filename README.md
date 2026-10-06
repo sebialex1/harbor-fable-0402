@@ -1,6 +1,6 @@
 # harbor-fable
 
-A minimal Android Wine container manager with refraction glass UI.
+A minimal Android Wine container manager with a dark, premium glass UI.
 
 ## Features
 
@@ -9,7 +9,7 @@ A minimal Android Wine container manager with refraction glass UI.
 - **Custom Vulkan driver** — RADV Xclipse (Mesa) for Samsung Xclipse GPUs
 - **One-tap setup** — download the recommended Wine, Box64, driver and DXVK from the Assets tab
 - **Asset downloads** — Wine builds, DXVK and drivers from GitHub releases, with resume and checksum checks
-- **Refraction glass design** — frosted translucent surfaces, animated transitions, custom dock
+- **Glass design** — charcoal glass cards with hairline edges, Inter typography, animated transitions, floating dock
 
 ## Architecture
 

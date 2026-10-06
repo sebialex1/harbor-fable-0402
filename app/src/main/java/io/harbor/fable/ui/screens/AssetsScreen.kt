@@ -1,8 +1,13 @@
 package io.harbor.fable.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,25 +16,23 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
-import io.harbor.fable.data.DownloadStatus
 import io.harbor.fable.data.DownloadTask
 import io.harbor.fable.data.SetupState
 import io.harbor.fable.data.formatBytes
@@ -41,6 +44,7 @@ import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.Spacing
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -48,10 +52,9 @@ fun AssetsScreen() {
     val context = LocalContext.current
     val app = remember(context) { FableApp.from(context) }
     val repository = app.assetRepository
-    val downloadManager = app.downloadManager
     val assets by repository.assets.collectAsStateWithLifecycle()
     val isRefreshing by repository.isRefreshing.collectAsStateWithLifecycle()
-    val downloadSnapshot by downloadManager.snapshot.collectAsStateWithLifecycle()
+    val downloadSnapshot by app.downloadManager.snapshot.collectAsStateWithLifecycle()
     val setupManager = app.setupManager
     val setup by setupManager.state.collectAsStateWithLifecycle()
     val installing by setupManager.installing.collectAsStateWithLifecycle()
@@ -61,16 +64,35 @@ fun AssetsScreen() {
     // Re-runs on every button press; the initial value (0) refreshes from cache on entry.
     var refreshTrigger by remember { mutableIntStateOf(0) }
     LaunchedEffect(refreshTrigger) { repository.refresh(forceRefresh = refreshTrigger > 0) }
+
+    AssetsContent(
+        assets = assets,
+        isRefreshing = isRefreshing,
+        tasks = downloadSnapshot.tasks,
+        setup = setup,
+        installing = installing,
+        onRefresh = { refreshTrigger++ },
+        // Runs on the app-level scope so leaving the screen does not cancel the catalog refresh.
+        onDownloadRecommended = {
+            fableUi.scope.launch { fableUi.showMessage(setupManager.installRecommended().message, long = true) }
+        },
+        onDownload = { asset -> scope.launch { repository.download(asset.id) } },
+    )
+}
+
+@Composable
+internal fun AssetsContent(
+    assets: List<AssetEntry>,
+    isRefreshing: Boolean,
+    tasks: List<DownloadTask>,
+    setup: SetupState,
+    installing: Boolean,
+    onRefresh: () -> Unit,
+    onDownloadRecommended: () -> Unit,
+    onDownload: (AssetEntry) -> Unit,
+) {
     val expansion = rememberExpansionState()
-
-    // Runs on the app-level scope so leaving the screen does not cancel the catalog refresh.
-    val downloadRecommended: () -> Unit = {
-        fableUi.scope.launch { fableUi.showMessage(setupManager.installRecommended().message, long = true) }
-    }
-
-    val grouped = remember(assets) {
-        assets.groupBy { it.type }
-    }
+    val grouped = remember(assets) { assets.groupBy { it.type } }
     val orderedTypes = remember {
         listOf(
             AssetType.WINE,
@@ -83,6 +105,18 @@ fun AssetsScreen() {
         )
     }
 
+    // The banner stays in the list just long enough to slide away once everything is downloaded.
+    val bannerVisible = setup.needsSetup
+    var bannerInList by remember { mutableStateOf(bannerVisible) }
+    LaunchedEffect(bannerVisible) {
+        if (bannerVisible) {
+            bannerInList = true
+        } else {
+            delay(450)
+            bannerInList = false
+        }
+    }
+
     FableScreen(
         title = "Assets",
         actions = {
@@ -90,30 +124,31 @@ fun AssetsScreen() {
                 icon = Icons.Outlined.CloudDownload,
                 contentDescription = "Download recommended",
                 enabled = setup.needsSetup && !setup.isDownloading && !installing,
-                onClick = downloadRecommended,
+                onClick = onDownloadRecommended,
             )
             GlassIconButton(
                 icon = Icons.Outlined.Refresh,
                 contentDescription = "Refresh assets",
                 enabled = !isRefreshing,
-                onClick = { refreshTrigger++ },
+                onClick = onRefresh,
             )
         },
     ) {
-        // Shown until every recommended package is downloaded, then it fades away.
-        if (setup.needsSetup) {
+        if (bannerInList || bannerVisible) {
             item(key = "setup-banner") {
-                SetupBanner(
-                    state = setup,
-                    installing = installing,
-                    onDownloadAll = downloadRecommended,
-                    modifier = Modifier.animateItem(),
-                )
+                AnimatedVisibility(
+                    visible = bannerVisible,
+                    enter = fadeIn(tween(250)) + expandVertically(tween(300)),
+                    exit = fadeOut(tween(250)) + slideOutVertically(tween(300)) { -it / 2 } +
+                        shrinkVertically(tween(300)),
+                ) {
+                    SetupBanner(state = setup, installing = installing, onDownloadAll = onDownloadRecommended)
+                }
             }
         }
 
         if (isRefreshing) {
-            item(key = "refreshing") { LoadingCard(message = "Refreshing…") }
+            item(key = "refreshing") { LoadingCard(message = "Refreshing…", modifier = Modifier.animateItem()) }
         }
 
         if (assets.isEmpty() && !isRefreshing) {
@@ -122,6 +157,7 @@ fun AssetsScreen() {
                     icon = Icons.Outlined.Download,
                     title = "No assets",
                     message = "Refresh to load the catalog",
+                    modifier = Modifier.animateItem(),
                 )
             }
         } else {
@@ -131,35 +167,32 @@ fun AssetsScreen() {
                     val typeKey = type.name
                     val downloadedCount = typeAssets.count { it.isDownloaded }
 
-                    item(key = "label-$typeKey") { SectionLabel(typeDisplayName(type)) }
-                    item(key = "card-$typeKey") {
-                        CollapsibleCard(
-                            expanded = expansion.isExpanded(typeKey, default = true),
+                    item(key = "section-$typeKey") {
+                        val expanded = expansion.isExpanded(typeKey, default = true)
+                        CollapsibleSection(
+                            title = typeDisplayName(type),
+                            expanded = expanded,
                             onToggle = { expansion.toggle(typeKey, default = true) },
-                            header = {
+                            modifier = Modifier.animateItem(),
+                            badge = {
                                 Pill(
                                     text = "$downloadedCount/${typeAssets.size}",
                                     color = if (downloadedCount > 0) FableSuccess else FableTextDim,
                                 )
-                                Spacer(Modifier.weight(1f))
-                                if (typeAssets.size > 3) {
-                                    SectionAction(
-                                        text = if (expansion.isExpanded(typeKey, default = true)) "Collapse" else "Expand",
-                                        onClick = { expansion.toggle(typeKey, default = true) },
-                                    )
-                                }
                             },
                         ) {
                             typeAssets.forEachIndexed { index, asset ->
-                                val task = downloadSnapshot.tasks
+                                val task = tasks
                                     .filter { it.assetId == asset.id }
                                     .maxByOrNull { it.updatedAt }
-                                AssetRow(
-                                    asset = asset,
+                                DownloadRow(
+                                    title = asset.name,
+                                    version = asset.version,
+                                    sizeBytes = asset.fileSizeBytes,
+                                    icon = assetTypeIcon(asset.type),
+                                    isDownloaded = asset.isDownloaded,
                                     task = task,
-                                    onDownload = {
-                                        scope.launch { repository.download(asset.id) }
-                                    },
+                                    onDownload = { onDownload(asset) },
                                 )
                                 if (index != typeAssets.lastIndex) {
                                     CardDivider()
@@ -175,7 +208,7 @@ fun AssetsScreen() {
 
 /** First-run card: what is missing, one button to download it, and live progress. */
 @Composable
-private fun SetupBanner(
+internal fun SetupBanner(
     state: SetupState,
     installing: Boolean,
     onDownloadAll: () -> Unit,
@@ -208,7 +241,7 @@ private fun SetupBanner(
             }
             AnimatedContent(
                 targetState = busy,
-                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
                 label = "setupAction",
             ) { working ->
                 if (working) {
@@ -232,53 +265,6 @@ private fun SetupBanner(
             }
         }
     }
-}
-
-@Composable
-private fun AssetRow(
-    asset: AssetEntry,
-    task: DownloadTask?,
-    onDownload: () -> Unit,
-) {
-    val isDownloaded = asset.isDownloaded || task?.status == DownloadStatus.COMPLETED
-    val isActive = task?.status == DownloadStatus.QUEUED ||
-        task?.status == DownloadStatus.DOWNLOADING ||
-        task?.status == DownloadStatus.VERIFYING
-    val statusText = when {
-        isDownloaded -> "Downloaded"
-        task?.status == DownloadStatus.QUEUED -> "Queued"
-        task?.status == DownloadStatus.DOWNLOADING -> {
-            val percent = (task.progressFraction * 100).toInt()
-            "Downloading · $percent%"
-        }
-        task?.status == DownloadStatus.PAUSED -> "Paused"
-        task?.status == DownloadStatus.VERIFYING -> "Verifying"
-        task?.status == DownloadStatus.FAILED -> "Failed"
-        task?.status == DownloadStatus.CANCELLED -> "Cancelled"
-        else -> "Available"
-    }
-
-    ListRow(
-        title = asset.name,
-        subtitle = "${asset.version} · ${formatBytes(asset.fileSizeBytes)} · $statusText",
-        icon = assetTypeIcon(asset.type),
-        iconTint = if (isDownloaded) FableSuccess else FableAccent,
-        showChevron = false,
-        trailing = {
-            if (!isDownloaded && !isActive) {
-                GlassIconButton(
-                    icon = Icons.Outlined.Download,
-                    contentDescription = "Download ${asset.name}",
-                    size = 36.dp,
-                    onClick = onDownload,
-                )
-            } else if (isDownloaded) {
-                Pill(text = "Ready", color = FableSuccess, icon = Icons.Outlined.Check)
-            } else if (isActive) {
-                Pill(text = statusText, color = FableAccent)
-            }
-        },
-    )
 }
 
 private fun typeDisplayName(type: AssetType): String = when (type) {

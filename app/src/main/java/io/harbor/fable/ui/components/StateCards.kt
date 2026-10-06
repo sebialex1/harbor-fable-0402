@@ -27,6 +27,7 @@ import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
+import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
 
 /** Centered empty state with an optional call to action. */
@@ -44,18 +45,18 @@ fun EmptyState(
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = Spacing.xxl, vertical = Spacing.xxxl),
+                .padding(horizontal = Spacing.xxl, vertical = Spacing.xxl),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            IconTile(icon = icon, tint = FableTextDim, size = 56.dp)
-            Spacer(Modifier.height(Spacing.lg))
+            IconTile(icon = icon, tint = FableTextDim, size = 44.dp)
+            Spacer(Modifier.height(Spacing.md))
             Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             if (message.isNotBlank()) {
                 Spacer(Modifier.height(Spacing.xs))
                 Text(message, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
             }
             if (actionLabel != null && onAction != null) {
-                Spacer(Modifier.height(Spacing.xl))
+                Spacer(Modifier.height(Spacing.lg))
                 GlassButton(text = actionLabel, onClick = onAction, primary = true, icon = actionIcon)
             }
         }
@@ -69,12 +70,12 @@ fun LoadingCard(message: String, modifier: Modifier = Modifier) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = RowPaddingHorizontal, vertical = 18.dp),
+                .padding(horizontal = RowPaddingHorizontal, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         ) {
             CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
                 color = FableAccent,
                 strokeWidth = 2.dp,
             )
@@ -96,10 +97,10 @@ fun NoticeCard(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.md),
-            verticalAlignment = Alignment.Top,
+                .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical + 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(Spacing.md))
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall)

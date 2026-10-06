@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,17 +29,16 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import io.harbor.fable.ui.theme.DockItemActive
 import io.harbor.fable.ui.theme.DockItemIdle
 import io.harbor.fable.ui.theme.FableAccent
 
 /**
- * Glass dock item — icon + label that glows when active and scales down on press.
- * Width comes from the caller (the dock gives every item an equal weight).
+ * Dock item: icon and label that light up when active. Selecting a tab springs the icon up a
+ * little; pressing settles the whole item. Width comes from the caller (the dock gives every
+ * item an equal weight).
  */
 @Composable
 fun GlassDockItem(
@@ -50,10 +50,15 @@ fun GlassDockItem(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.9f else 1f,
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.92f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label = "dockScale",
+        label = "dockPress",
+    )
+    val iconScale by animateFloatAsState(
+        targetValue = if (active) 1.12f else 1f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium),
+        label = "dockIconScale",
     )
     val glow by animateFloatAsState(
         targetValue = if (active) 1f else 0f,
@@ -68,13 +73,13 @@ fun GlassDockItem(
 
     Column(
         modifier = modifier
-            .height(56.dp)
+            .height(52.dp)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                scaleX = pressScale
+                scaleY = pressScale
             }
             .clip(RoundedCornerShape(20.dp))
-            .background(FableAccent.copy(alpha = 0.16f * glow))
+            .background(FableAccent.copy(alpha = 0.14f * glow))
             .semantics { selected = active }
             .clickable(
                 interactionSource = interactionSource,
@@ -89,13 +94,17 @@ fun GlassDockItem(
             imageVector = icon,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier
+                .size(22.dp)
+                .graphicsLayer {
+                    scaleX = iconScale
+                    scaleY = iconScale
+                },
         )
         Spacer(Modifier.height(3.dp))
         Text(
             text = label,
-            fontSize = 11.sp,
-            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+            style = MaterialTheme.typography.labelSmall,
             color = tint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

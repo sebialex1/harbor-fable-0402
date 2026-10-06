@@ -15,16 +15,16 @@ object Spacing {
 }
 
 /** Horizontal padding applied to all screen content. */
-val ScreenPadding = 20.dp
+val ScreenPadding = 12.dp
 
 /** Horizontal/vertical padding inside list rows and card headers. */
-val RowPaddingHorizontal = 16.dp
-val RowPaddingVertical = 12.dp
+val RowPaddingHorizontal = 14.dp
+val RowPaddingVertical = 10.dp
 
 /** Floating dock geometry. Screens reserve [Clearance] (plus the nav-bar inset) at the bottom. */
 object DockMetrics {
-    val Height = 68.dp
-    val Margin = 12.dp
+    val Height = 64.dp
+    val Margin = 10.dp
 
     /** Vertical space the dock occupies above the navigation-bar inset. */
     val Clearance = Height + Margin * 2

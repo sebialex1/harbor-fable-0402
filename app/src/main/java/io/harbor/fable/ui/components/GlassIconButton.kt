@@ -24,13 +24,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import io.harbor.fable.ui.theme.FableGlass
-import io.harbor.fable.ui.theme.FableGlassBorder
+import io.harbor.fable.ui.theme.FableControl
+import io.harbor.fable.ui.theme.FableControlBorder
 import io.harbor.fable.ui.theme.FableText
 
 /**
- * Circular glass icon button used for top-bar actions (settings, back, refresh) and
- * compact inline actions such as the download button on catalog rows.
+ * Circular glass icon button used for top-bar actions (back, refresh, add) and compact inline
+ * actions such as the download and play buttons on rows.
  */
 @Composable
 fun GlassIconButton(
@@ -38,9 +38,9 @@ fun GlassIconButton(
     contentDescription: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 40.dp,
+    size: Dp = 36.dp,
     tint: Color = FableText,
-    containerColor: Color = FableGlass,
+    containerColor: Color = FableControl,
     bordered: Boolean = true,
     enabled: Boolean = true,
 ) {
@@ -51,7 +51,7 @@ fun GlassIconButton(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "iconButtonScale",
     )
-    val borderModifier = if (bordered) Modifier.border(1.dp, FableGlassBorder, CircleShape) else Modifier
+    val borderModifier = if (bordered) Modifier.border(Dp.Hairline, FableControlBorder, CircleShape) else Modifier
 
     Box(
         modifier = modifier

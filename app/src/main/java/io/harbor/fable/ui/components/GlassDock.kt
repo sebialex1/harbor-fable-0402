@@ -15,19 +15,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.DockBg
+import io.harbor.fable.ui.theme.DockBorder
 import io.harbor.fable.ui.theme.DockMetrics
 import io.harbor.fable.ui.theme.DockRadius
-import io.harbor.fable.ui.theme.FableGlassBorder
 
 /**
  * The floating glass dock that holds the primary tabs.
  *
  * It sits above the system navigation bar (gesture handle or 3-button bar) and items share
- * the width equally, so it never clips on narrow screens. Screens reserve
- * [DockMetrics.Clearance] plus the navigation-bar inset so their last item stays visible.
+ * the width equally, so it never clips on narrow screens. A soft dark shadow lifts it off the
+ * content scrolling underneath. Screens reserve [DockMetrics.Clearance] plus the navigation-bar
+ * inset so their last item stays visible.
  */
 @Composable
 fun GlassDock(
@@ -41,7 +45,7 @@ fun GlassDock(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = DockMetrics.Margin),
+            .padding(horizontal = 16.dp, vertical = DockMetrics.Margin),
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -49,12 +53,18 @@ fun GlassDock(
                 .widthIn(max = 520.dp)
                 .fillMaxWidth()
                 .height(DockMetrics.Height)
+                .shadow(
+                    elevation = 18.dp,
+                    shape = shape,
+                    ambientColor = Color.Black.copy(alpha = 0.5f),
+                    spotColor = Color.Black.copy(alpha = 0.9f),
+                )
                 .clip(shape)
                 .background(DockBg)
-                .background(GlassSpecular)
-                .border(1.dp, FableGlassBorder, shape)
+                .background(GlassSheen)
+                .border(Dp.Hairline, DockBorder, shape)
                 .padding(horizontal = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             items.forEachIndexed { index, tab ->

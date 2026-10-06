@@ -9,7 +9,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -45,9 +44,12 @@ import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.Spacing
 
+private val LabelTopPadding = 6.dp
+
 /**
- * Small uppercase label that starts a group of items. The extra top padding, combined
- * with the list's item spacing, separates groups visually.
+ * Quiet, dimmed heading that starts a group of rows. The group's rows share one card below it,
+ * so sections read as one flowing list rather than separate floating panels. The small top
+ * padding, combined with the list's item spacing, separates groups.
  */
 @Composable
 fun SectionLabel(
@@ -58,12 +60,13 @@ fun SectionLabel(
     Row(
         modifier
             .fillMaxWidth()
-            .padding(top = Spacing.md, start = Spacing.xs),
+            .padding(top = LabelTopPadding, start = Spacing.sm, end = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = text.uppercase(),
-            style = MaterialTheme.typography.labelMedium,
+            text = text,
+            style = MaterialTheme.typography.titleMedium,
+            color = FableTextDim,
             modifier = Modifier.weight(1f),
         )
         trailing?.invoke(this)
@@ -84,65 +87,69 @@ fun SectionAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifi
     )
 }
 
-/** Hairline divider between rows inside a card. */
+/**
+ * Hairline divider between rows inside a card. Inset by default so the rows read as one
+ * continuous surface; the line stops short of the card edge on both sides.
+ */
 @Composable
-fun CardDivider(modifier: Modifier = Modifier, inset: Boolean = false) {
+fun CardDivider(modifier: Modifier = Modifier, inset: Boolean = true) {
     Box(
         modifier
             .fillMaxWidth()
-            .padding(start = if (inset) RowPaddingHorizontal else 0.dp)
-            .height(1.dp)
+            .padding(horizontal = if (inset) RowPaddingHorizontal else 0.dp)
+            .height(0.5.dp)
             .background(FableDivider),
     )
 }
 
 /**
- * Glass card with a tappable header that expands/collapses its [content].
- *
- * [header] is laid out in a row before the rotating chevron; [headerOverlay] is drawn on
- * top of the header area (e.g. a thin progress bar along its bottom edge).
+ * A [SectionLabel] that doubles as the toggle for the card beneath it. The title, an optional
+ * [badge] (a count, say) and a rotating chevron share the label row, so a collapsed group costs
+ * one line and an expanded one is a single continuous card with no header of its own.
  */
 @Composable
-fun CollapsibleCard(
+fun CollapsibleSection(
+    title: String,
     expanded: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
-    headerOverlay: @Composable BoxScope.() -> Unit = {},
-    header: @Composable RowScope.() -> Unit,
+    badge: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
-    GlassCard(modifier = modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(role = Role.Button, onClick = onToggle)
-                    .padding(start = RowPaddingHorizontal, end = Spacing.md, top = 14.dp, bottom = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                header()
-                Spacer(Modifier.width(Spacing.sm))
-                Icon(
-                    imageVector = Icons.Outlined.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
-                    tint = FableTextDim,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .rotate(chevronRotation),
-                )
-            }
-            headerOverlay()
+    val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, label = "sectionChevron")
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = LabelTopPadding - Spacing.xs)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(role = Role.Button, onClick = onToggle)
+                .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = FableTextDim,
+                modifier = Modifier.weight(1f),
+            )
+            badge?.invoke()
+            Spacer(Modifier.width(Spacing.sm))
+            Icon(
+                imageVector = Icons.Outlined.ExpandMore,
+                contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+                tint = FableTextDim,
+                modifier = Modifier
+                    .size(20.dp)
+                    .rotate(chevronRotation),
+            )
         }
         AnimatedVisibility(
             visible = expanded,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut(),
         ) {
-            Column(Modifier.fillMaxWidth()) {
-                CardDivider()
-                content()
-            }
+            GlassCard(Modifier.padding(top = Spacing.xs)) { content() }
         }
     }
 }

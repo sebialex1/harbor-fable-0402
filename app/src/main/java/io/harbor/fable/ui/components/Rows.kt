@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -32,10 +33,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.Crossfade
+import io.harbor.fable.data.models.ContainerStatus
+import io.harbor.fable.ui.theme.FableSuccess
+import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.ChipRadius
 import io.harbor.fable.ui.theme.FableAccent
-import io.harbor.fable.ui.theme.FableGlassBorder
-import io.harbor.fable.ui.theme.FableSurface
+import io.harbor.fable.ui.theme.FableControl
+import io.harbor.fable.ui.theme.FableControlBorder
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
@@ -48,7 +53,7 @@ fun IconTile(
     icon: ImageVector,
     modifier: Modifier = Modifier,
     tint: Color = FableAccent,
-    size: Dp = 40.dp,
+    size: Dp = 34.dp,
 ) {
     Box(
         modifier
@@ -57,7 +62,7 @@ fun IconTile(
             .background(tint.copy(alpha = 0.14f)),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.5f))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.52f))
     }
 }
 
@@ -68,7 +73,7 @@ fun Chevron(modifier: Modifier = Modifier) {
         imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
         contentDescription = null,
         tint = FableTextDim,
-        modifier = modifier.size(22.dp),
+        modifier = modifier.size(20.dp),
     )
 }
 
@@ -83,6 +88,7 @@ fun ListRow(
     subtitle: String? = null,
     icon: ImageVector? = null,
     iconTint: Color = FableAccent,
+    titleColor: Color = FableText,
     onClick: (() -> Unit)? = null,
     showChevron: Boolean = onClick != null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
@@ -91,7 +97,7 @@ fun ListRow(
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
+            .heightIn(min = 48.dp)
             .then(clickModifier)
             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
         verticalAlignment = Alignment.CenterVertically,
@@ -104,6 +110,7 @@ fun ListRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
+                color = titleColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -129,7 +136,8 @@ fun ListRow(
 
 /**
  * Label/value row for read-only details and settings. With [stacked] the value goes on
- * its own line (for long values such as paths).
+ * its own line (for long values such as paths); [valueContent] replaces the value text with
+ * custom content such as a status pill.
  */
 @Composable
 fun InfoRow(
@@ -140,18 +148,19 @@ fun InfoRow(
     valueColor: Color = FableTextDim,
     stacked: Boolean = false,
     onClick: (() -> Unit)? = null,
+    valueContent: (@Composable () -> Unit)? = null,
 ) {
     val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = 44.dp)
             .then(clickModifier)
             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, tint = FableTextDim, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = null, tint = FableTextDim, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(Spacing.md))
         }
         if (stacked) {
@@ -168,15 +177,20 @@ fun InfoRow(
         } else {
             Text(label, style = MaterialTheme.typography.titleSmall, maxLines = 1)
             Spacer(Modifier.width(Spacing.md))
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyMedium,
-                color = valueColor,
-                textAlign = TextAlign.End,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            if (valueContent != null) {
+                Spacer(Modifier.weight(1f))
+                valueContent()
+            } else {
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = valueColor,
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
         if (onClick != null) {
             Spacer(Modifier.width(Spacing.xs))
@@ -198,13 +212,13 @@ fun ToggleRow(
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
+            .heightIn(min = 48.dp)
             .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, tint = FableTextDim, modifier = Modifier.size(20.dp))
+            Icon(icon, contentDescription = null, tint = FableTextDim, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(Spacing.md))
         }
         Column(Modifier.weight(1f)) {
@@ -217,13 +231,14 @@ fun ToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = null,
+            modifier = Modifier.scale(0.88f),
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = FableAccent,
                 checkedBorderColor = FableAccent,
                 uncheckedThumbColor = FableTextDim,
-                uncheckedTrackColor = FableSurface,
-                uncheckedBorderColor = FableGlassBorder,
+                uncheckedTrackColor = FableControl,
+                uncheckedBorderColor = FableControlBorder,
             ),
         )
     }
@@ -242,7 +257,7 @@ fun Pill(
         modifier
             .clip(RoundedCornerShape(ChipRadius))
             .background(containerColor)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
@@ -270,7 +285,7 @@ fun GlassChip(
     Box(
         modifier
             .clip(RoundedCornerShape(ChipRadius + 2.dp))
-            .background(if (selected) FableAccent.copy(alpha = 0.22f) else FableSurface)
+            .background(if (selected) FableAccent.copy(alpha = 0.22f) else FableControl)
             .clickable(role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
@@ -281,5 +296,22 @@ fun GlassChip(
             color = if (selected) FableText else FableTextDim,
             maxLines = 1,
         )
+    }
+}
+
+/** Label and colour for a container's lifecycle state. */
+internal fun containerStatusLabel(status: ContainerStatus): String = status.name.lowercase()
+
+internal fun containerStatusColor(status: ContainerStatus): Color = when (status) {
+    ContainerStatus.READY, ContainerStatus.RUNNING -> FableSuccess
+    ContainerStatus.ERROR -> FableWarn
+    else -> FableAccent
+}
+
+/** Container state as a pill. A change of state crossfades instead of snapping. */
+@Composable
+fun StatusPill(status: ContainerStatus, modifier: Modifier = Modifier) {
+    Crossfade(targetState = status, label = "containerStatus", modifier = modifier) { current ->
+        Pill(text = containerStatusLabel(current), color = containerStatusColor(current))
     }
 }

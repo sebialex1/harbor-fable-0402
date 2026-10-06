@@ -1,7 +1,5 @@
 package io.harbor.fable.ui.screens
 
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
@@ -14,8 +12,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.BuildConfig
 import io.harbor.fable.app.FableApp
+import io.harbor.fable.data.AppSettings
 import io.harbor.fable.data.FramePacing
 import io.harbor.fable.data.models.ContainerDefaults
+import io.harbor.fable.nativebridge.DeviceGpuInfo
 import io.harbor.fable.nativebridge.DeviceProbe
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableError
@@ -29,159 +29,13 @@ fun SettingsScreen() {
     val deviceInfo = remember { DeviceProbe.read() }
     var showResetConfirm by remember { mutableStateOf(false) }
 
-    val resolutionOptions = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) }
-    val framePacingOptions = FramePacing.entries.map {
-        SelectOption(it, it.label)
-    }
-
-    FableScreen(
-        title = "Settings",
-    ) {
-        // Default container settings
-        item { SectionLabel("Container Defaults") }
-        item {
-            GlassCard {
-                InfoRow(
-                    label = "Wine version",
-                    value = settings.defaultWineVersion,
-                    icon = Icons.Outlined.WineBar,
-                )
-                CardDivider()
-                OptionSelector(
-                    label = "Default resolution",
-                    options = resolutionOptions,
-                    selected = settings.defaultResolution,
-                    onSelect = { res ->
-                        settingsRepo.update { it.copy(defaultResolution = res) }
-                    },
-                    icon = Icons.Outlined.AspectRatio,
-                )
-                CardDivider()
-                ToggleRow(
-                    title = "Fullscreen by default",
-                    checked = settings.defaultFullscreen,
-                    onCheckedChange = { fs ->
-                        settingsRepo.update { it.copy(defaultFullscreen = fs) }
-                    },
-                    icon = Icons.Outlined.Fullscreen,
-                )
-            }
-        }
-
-        // Graphics
-        item { SectionLabel("Graphics") }
-        item {
-            GlassCard {
-                InfoRow(
-                    label = "Default driver",
-                    value = settings.defaultGraphicsDriver,
-                    icon = Icons.Outlined.Memory,
-                )
-                CardDivider()
-                ToggleRow(
-                    title = "VSync",
-                    checked = settings.vsync,
-                    onCheckedChange = { v ->
-                        settingsRepo.update { it.copy(vsync = v) }
-                    },
-                    icon = Icons.Outlined.Sync,
-                )
-                CardDivider()
-                OptionSelector(
-                    label = "Frame pacing",
-                    options = framePacingOptions,
-                    selected = settings.framePacing,
-                    onSelect = { fp ->
-                        settingsRepo.update { it.copy(framePacing = fp) }
-                    },
-                    icon = Icons.Outlined.Speed,
-                )
-            }
-        }
-
-        // Catalog
-        item { SectionLabel("Catalog") }
-        item {
-            GlassCard {
-                ToggleRow(
-                    title = "Refresh on launch",
-                    checked = settings.refreshCatalogOnLaunch,
-                    onCheckedChange = { r ->
-                        settingsRepo.update { it.copy(refreshCatalogOnLaunch = r) }
-                    },
-                    icon = Icons.Outlined.Refresh,
-                )
-            }
-        }
-
-        // Device info
-        item { SectionLabel("Device") }
-        item {
-            GlassCard {
-                InfoRow(
-                    label = "GPU",
-                    value = deviceInfo.gpu,
-                    icon = Icons.Outlined.Memory,
-                )
-                CardDivider()
-                InfoRow(
-                    label = "Vendor",
-                    value = deviceInfo.vendor,
-                    icon = Icons.Outlined.Business,
-                )
-                CardDivider()
-                InfoRow(
-                    label = "Device",
-                    value = deviceInfo.device,
-                    icon = Icons.Outlined.Smartphone,
-                )
-                CardDivider()
-                InfoRow(
-                    label = "Architecture",
-                    value = deviceInfo.abi,
-                    icon = Icons.Outlined.Architecture,
-                )
-                CardDivider()
-                InfoRow(
-                    label = "SDK",
-                    value = deviceInfo.sdk,
-                    icon = Icons.Outlined.Code,
-                )
-            }
-        }
-
-        // About
-        item { SectionLabel("About") }
-        item {
-            GlassCard {
-                InfoRow(
-                    label = "Version",
-                    value = BuildConfig.VERSION_NAME,
-                    icon = Icons.Outlined.Info,
-                )
-                CardDivider()
-                InfoRow(
-                    label = "License",
-                    value = "MIT",
-                    icon = Icons.Outlined.Description,
-                )
-            }
-        }
-
-        // Reset
-        item { SectionLabel("Reset") }
-        item {
-            GlassCard {
-                ListRow(
-                    title = "Reset to defaults",
-                    icon = Icons.Outlined.Restore,
-                    iconTint = FableError,
-                    showChevron = true,
-                    onClick = { showResetConfirm = true },
-                )
-            }
-        }
-    }
+    SettingsContent(
+        settings = settings,
+        deviceInfo = deviceInfo,
+        versionName = BuildConfig.VERSION_NAME,
+        onUpdate = { transform -> settingsRepo.update(transform) },
+        onResetClick = { showResetConfirm = true },
+    )
 
     if (showResetConfirm) {
         ConfirmDialog(
@@ -195,5 +49,116 @@ fun SettingsScreen() {
             },
             onDismiss = { showResetConfirm = false },
         )
+    }
+}
+
+@Composable
+internal fun SettingsContent(
+    settings: AppSettings,
+    deviceInfo: DeviceGpuInfo,
+    versionName: String,
+    onUpdate: ((AppSettings) -> AppSettings) -> Unit,
+    onResetClick: () -> Unit,
+) {
+    val resolutionOptions = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) }
+    val framePacingOptions = FramePacing.entries.map { SelectOption(it, it.label) }
+
+    FableScreen(title = "Settings") {
+        item(key = "defaults-label") { SectionLabel("Container Defaults", Modifier.animateItem()) }
+        item(key = "defaults") {
+            GlassCard(Modifier.animateItem()) {
+                InfoRow(
+                    label = "Wine version",
+                    value = settings.defaultWineVersion,
+                    icon = Icons.Outlined.WineBar,
+                )
+                CardDivider()
+                OptionSelector(
+                    label = "Default resolution",
+                    options = resolutionOptions,
+                    selected = settings.defaultResolution,
+                    onSelect = { res -> onUpdate { it.copy(defaultResolution = res) } },
+                    icon = Icons.Outlined.AspectRatio,
+                )
+                CardDivider()
+                ToggleRow(
+                    title = "Fullscreen by default",
+                    checked = settings.defaultFullscreen,
+                    onCheckedChange = { fs -> onUpdate { it.copy(defaultFullscreen = fs) } },
+                    icon = Icons.Outlined.Fullscreen,
+                )
+            }
+        }
+
+        item(key = "graphics-label") { SectionLabel("Graphics", Modifier.animateItem()) }
+        item(key = "graphics") {
+            GlassCard(Modifier.animateItem()) {
+                InfoRow(
+                    label = "Default driver",
+                    value = settings.defaultGraphicsDriver,
+                    icon = Icons.Outlined.Memory,
+                )
+                CardDivider()
+                ToggleRow(
+                    title = "VSync",
+                    checked = settings.vsync,
+                    onCheckedChange = { v -> onUpdate { it.copy(vsync = v) } },
+                    icon = Icons.Outlined.Sync,
+                )
+                CardDivider()
+                OptionSelector(
+                    label = "Frame pacing",
+                    options = framePacingOptions,
+                    selected = settings.framePacing,
+                    onSelect = { fp -> onUpdate { it.copy(framePacing = fp) } },
+                    icon = Icons.Outlined.Speed,
+                )
+            }
+        }
+
+        item(key = "catalog-label") { SectionLabel("Catalog", Modifier.animateItem()) }
+        item(key = "catalog") {
+            GlassCard(Modifier.animateItem()) {
+                ToggleRow(
+                    title = "Refresh on launch",
+                    checked = settings.refreshCatalogOnLaunch,
+                    onCheckedChange = { r -> onUpdate { it.copy(refreshCatalogOnLaunch = r) } },
+                    icon = Icons.Outlined.Refresh,
+                )
+            }
+        }
+
+        item(key = "device-label") { SectionLabel("Device", Modifier.animateItem()) }
+        item(key = "device") {
+            GlassCard(Modifier.animateItem()) {
+                InfoRow(label = "GPU", value = deviceInfo.gpu, icon = Icons.Outlined.Memory)
+                CardDivider()
+                InfoRow(label = "Vendor", value = deviceInfo.vendor, icon = Icons.Outlined.Business)
+                CardDivider()
+                InfoRow(label = "Device", value = deviceInfo.device, icon = Icons.Outlined.Smartphone)
+                CardDivider()
+                InfoRow(label = "Architecture", value = deviceInfo.abi, icon = Icons.Outlined.Architecture)
+                CardDivider()
+                InfoRow(label = "SDK", value = deviceInfo.sdk, icon = Icons.Outlined.Code)
+            }
+        }
+
+        item(key = "about-label") { SectionLabel("About", Modifier.animateItem()) }
+        item(key = "about") {
+            GlassCard(Modifier.animateItem()) {
+                InfoRow(label = "Version", value = versionName, icon = Icons.Outlined.Info)
+                CardDivider()
+                InfoRow(label = "License", value = "MIT", icon = Icons.Outlined.Description)
+                CardDivider()
+                ListRow(
+                    title = "Reset to defaults",
+                    titleColor = FableError,
+                    icon = Icons.Outlined.Restore,
+                    iconTint = FableError,
+                    showChevron = false,
+                    onClick = onResetClick,
+                )
+            }
+        }
     }
 }

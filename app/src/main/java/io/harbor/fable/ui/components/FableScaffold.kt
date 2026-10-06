@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -69,11 +70,12 @@ fun FableTopBar(
         Row(
             Modifier
                 .fillMaxWidth()
+                .heightIn(min = 52.dp)
                 .padding(
-                    start = if (onBack != null) Spacing.md else ScreenPadding,
-                    end = Spacing.md,
-                    top = Spacing.md,
-                    bottom = Spacing.md,
+                    start = if (onBack != null) ScreenPadding else ScreenPadding + Spacing.sm,
+                    end = ScreenPadding,
+                    top = Spacing.sm,
+                    bottom = Spacing.sm,
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -99,7 +101,7 @@ fun FableTopBar(
                 if (!subtitle.isNullOrBlank()) {
                     Text(
                         text = subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -127,7 +129,8 @@ fun FableTopBar(
  *
  * Bottom padding always includes the navigation-bar inset plus [LocalDockClearance], so
  * the last item is never hidden behind the floating dock. Content items are spaced by
- * [Spacing.md]; use `SectionLabel` to start a new group.
+ * [Spacing.sm]; use `SectionLabel` to start a new group. Give items a stable `key` and apply
+ * `Modifier.animateItem()` so insertions, removals and reordering animate.
  */
 @Composable
 fun FableScreen(
@@ -140,7 +143,7 @@ fun FableScreen(
     content: LazyListScope.() -> Unit,
 ) {
     val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val bottomPadding = LocalDockClearance.current + navigationBottom + Spacing.xxl
+    val bottomPadding = LocalDockClearance.current + navigationBottom + Spacing.lg
     val scrolled by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
     }
@@ -166,10 +169,10 @@ fun FableScreen(
             contentPadding = PaddingValues(
                 start = ScreenPadding,
                 end = ScreenPadding,
-                top = Spacing.sm,
+                top = Spacing.xs,
                 bottom = bottomPadding,
             ),
-            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             content = content,
         )
     }

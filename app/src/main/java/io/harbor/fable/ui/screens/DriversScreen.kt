@@ -1,30 +1,24 @@
 package io.harbor.fable.ui.screens
 
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
-import io.harbor.fable.data.DownloadStatus
 import io.harbor.fable.data.DownloadTask
-import io.harbor.fable.data.formatBytes
 import io.harbor.fable.data.models.DriverPackage
+import io.harbor.fable.nativebridge.DeviceGpuInfo
 import io.harbor.fable.nativebridge.DeviceProbe
 import io.harbor.fable.ui.components.*
-import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.FableTextDim
 import kotlinx.coroutines.launch
@@ -34,18 +28,37 @@ fun DriversScreen() {
     val context = LocalContext.current
     val app = remember(context) { FableApp.from(context) }
     val repository = app.assetRepository
-    val downloadManager = app.downloadManager
     val drivers by repository.drivers.collectAsStateWithLifecycle()
     val isRefreshing by repository.isRefreshing.collectAsStateWithLifecycle()
-    val downloadSnapshot by downloadManager.snapshot.collectAsStateWithLifecycle()
+    val downloadSnapshot by app.downloadManager.snapshot.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     // Re-runs on every button press; the initial value (0) refreshes from cache on entry.
     var refreshTrigger by remember { mutableIntStateOf(0) }
     LaunchedEffect(refreshTrigger) { repository.refresh(forceRefresh = refreshTrigger > 0) }
-    val expansion = rememberExpansionState()
 
     val deviceInfo = remember { DeviceProbe.read() }
+
+    DriversContent(
+        drivers = drivers,
+        isRefreshing = isRefreshing,
+        tasks = downloadSnapshot.tasks,
+        deviceInfo = deviceInfo,
+        onRefresh = { refreshTrigger++ },
+        onDownload = { driver -> scope.launch { repository.downloadDriver(driver.id) } },
+    )
+}
+
+@Composable
+internal fun DriversContent(
+    drivers: List<DriverPackage>,
+    isRefreshing: Boolean,
+    tasks: List<DownloadTask>,
+    deviceInfo: DeviceGpuInfo,
+    onRefresh: () -> Unit,
+    onDownload: (DriverPackage) -> Unit,
+) {
+    val expansion = rememberExpansionState()
 
     // One source (RADV Xclipse) is listed flat; extra sources get a collapsible group each,
     // with RADV Xclipse first.
@@ -62,78 +75,60 @@ fun DriversScreen() {
                 icon = Icons.Outlined.Refresh,
                 contentDescription = "Refresh drivers",
                 enabled = !isRefreshing,
-                onClick = { refreshTrigger++ },
+                onClick = onRefresh,
             )
         },
     ) {
-        // Device info card
-        item {
-            GlassCard {
-                InfoRow(
-                    label = "Device",
-                    value = deviceInfo.device,
-                    icon = Icons.Outlined.Smartphone,
-                )
+        item(key = "device") {
+            GlassCard(Modifier.animateItem()) {
+                InfoRow(label = "Device", value = deviceInfo.device, icon = Icons.Outlined.Smartphone)
                 CardDivider()
-                InfoRow(
-                    label = "Vendor",
-                    value = deviceInfo.vendor,
-                    icon = Icons.Outlined.Business,
-                )
+                InfoRow(label = "Vendor", value = deviceInfo.vendor, icon = Icons.Outlined.Business)
                 CardDivider()
-                InfoRow(
-                    label = "ABI",
-                    value = deviceInfo.abi,
-                    icon = Icons.Outlined.Architecture,
-                )
+                InfoRow(label = "ABI", value = deviceInfo.abi, icon = Icons.Outlined.Architecture)
                 CardDivider()
-                InfoRow(
-                    label = "Graphics",
-                    value = deviceInfo.gpu,
-                    icon = Icons.Outlined.Memory,
-                )
+                InfoRow(label = "Graphics", value = deviceInfo.gpu, icon = Icons.Outlined.Memory)
             }
         }
 
         if (isRefreshing) {
-            item { LoadingCard(message = "Refreshing…") }
+            item(key = "refreshing") { LoadingCard(message = "Refreshing…", modifier = Modifier.animateItem()) }
         }
 
         if (drivers.isEmpty() && !isRefreshing) {
-            item {
+            item(key = "empty") {
                 EmptyState(
                     icon = Icons.Outlined.Memory,
                     title = "No drivers",
                     message = "Refresh to load the catalog",
+                    modifier = Modifier.animateItem(),
                 )
             }
-        } else {
-            item { SectionLabel("Available Packages") }
+        } else if (drivers.isNotEmpty()) {
+            item(key = "packages-label") { SectionLabel("Packages", Modifier.animateItem()) }
             if (groups.size == 1) {
-                item {
-                    GlassCard {
-                        DriverRows(groups.first().second, downloadSnapshot.tasks) { driver ->
-                            scope.launch { repository.downloadDriver(driver.id) }
-                        }
+                item(key = "packages") {
+                    GlassCard(Modifier.animateItem()) {
+                        DriverRows(groups.first().second, tasks, onDownload)
                     }
                 }
             } else {
-                items(groups, key = { it.first }) { (groupName, groupDrivers) ->
-                    val downloadedCount = groupDrivers.count { it.isDownloaded }
-                    CollapsibleCard(
-                        expanded = expansion.isExpanded(groupName, default = true),
-                        onToggle = { expansion.toggle(groupName, default = true) },
-                        header = {
-                            Pill(text = groupName, color = FableAccent)
-                            Spacer(Modifier.weight(1f))
-                            Pill(
-                                text = "$downloadedCount/${groupDrivers.size}",
-                                color = FableSuccess,
-                            )
-                        },
-                    ) {
-                        DriverRows(groupDrivers, downloadSnapshot.tasks) { driver ->
-                            scope.launch { repository.downloadDriver(driver.id) }
+                groups.forEach { (groupName, groupDrivers) ->
+                    item(key = "group-$groupName") {
+                        val downloadedCount = groupDrivers.count { it.isDownloaded }
+                        CollapsibleSection(
+                            title = groupName,
+                            expanded = expansion.isExpanded(groupName, default = true),
+                            onToggle = { expansion.toggle(groupName, default = true) },
+                            modifier = Modifier.animateItem(),
+                            badge = {
+                                Pill(
+                                    text = "$downloadedCount/${groupDrivers.size}",
+                                    color = if (downloadedCount > 0) FableSuccess else FableTextDim,
+                                )
+                            },
+                        ) {
+                            DriverRows(groupDrivers, tasks, onDownload)
                         }
                     }
                 }
@@ -153,8 +148,12 @@ private fun ColumnScope.DriverRows(
         val task = tasks
             .filter { it.assetId == driver.id }
             .maxByOrNull { it.updatedAt }
-        DriverRow(
-            driver = driver,
+        DownloadRow(
+            title = driverTitle(driver),
+            version = driver.version,
+            sizeBytes = driver.fileSizeBytes,
+            icon = Icons.Outlined.Memory,
+            isDownloaded = driver.isDownloaded,
             task = task,
             onDownload = { onDownload(driver) },
         )
@@ -162,61 +161,6 @@ private fun ColumnScope.DriverRows(
             CardDivider()
         }
     }
-}
-
-@Composable
-private fun DriverRow(
-    driver: DriverPackage,
-    task: DownloadTask?,
-    onDownload: () -> Unit,
-) {
-    val title = driverTitle(driver)
-    val isDownloaded = driver.isDownloaded || task?.status == DownloadStatus.COMPLETED
-    val isActive = task?.status == DownloadStatus.QUEUED ||
-        task?.status == DownloadStatus.DOWNLOADING ||
-        task?.status == DownloadStatus.VERIFYING
-    val statusText = when {
-        isDownloaded -> "Downloaded"
-        task?.status == DownloadStatus.QUEUED -> "Queued"
-        task?.status == DownloadStatus.DOWNLOADING -> {
-            val percent = (task.progressFraction * 100).toInt()
-            "Downloading · $percent%"
-        }
-        task?.status == DownloadStatus.PAUSED -> "Paused"
-        task?.status == DownloadStatus.VERIFYING -> "Verifying"
-        task?.status == DownloadStatus.FAILED -> "Failed"
-        task?.status == DownloadStatus.CANCELLED -> "Cancelled"
-        else -> "Available"
-    }
-    val progress = if (task?.status == DownloadStatus.DOWNLOADING && task.totalBytes > 0) {
-        task.progressFraction
-    } else if (isActive) {
-        null
-    } else {
-        null
-    }
-
-    ListRow(
-        title = title,
-        subtitle = "${driver.version} · ${formatBytes(driver.fileSizeBytes)} · $statusText",
-        icon = Icons.Outlined.Memory,
-        iconTint = if (isDownloaded) FableSuccess else FableAccent,
-        showChevron = false,
-        trailing = {
-            if (!isDownloaded && !isActive) {
-                GlassIconButton(
-                    icon = Icons.Outlined.Download,
-                    contentDescription = "Download ${driver.name}",
-                    size = 36.dp,
-                    onClick = onDownload,
-                )
-            } else if (isDownloaded) {
-                Pill(text = "Ready", color = FableSuccess, icon = Icons.Outlined.Check)
-            } else if (isActive) {
-                Pill(text = statusText, color = FableAccent)
-            }
-        },
-    )
 }
 
 private const val XCLIPSE_TITLE = "RADV Xclipse"

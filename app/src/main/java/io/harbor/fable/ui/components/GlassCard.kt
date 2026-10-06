@@ -20,26 +20,24 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableGlass
 import io.harbor.fable.ui.theme.FableGlassBorder
 import io.harbor.fable.ui.theme.GlassRadius
 
-/** Specular highlight shared by every glass surface (top-left light refraction). */
-internal val GlassSpecular: Brush = Brush.linearGradient(
-    colors = listOf(
-        Color.White.copy(alpha = 0.07f),
-        Color.Transparent,
-        Color.White.copy(alpha = 0.02f),
-    ),
+/**
+ * The faint top light shared by glass surfaces: a little brighter at the top edge, gone by
+ * the bottom. It is what stops a flat charcoal panel from looking like a flat charcoal panel.
+ */
+internal val GlassSheen: Brush = Brush.verticalGradient(
+    colors = listOf(Color.White.copy(alpha = 0.04f), Color.Transparent),
 )
 
 /**
- * Refraction glass surface — the core design element.
+ * Frosted glass panel: charcoal at 85% opacity, a hairline edge of white at 6%, and the sheen
+ * above, all drawn on a single node so long lists stay cheap. Pass [onClick] to make the whole
+ * card tappable; it then settles slightly while pressed.
  *
- * Translucent fill, specular gradient and a frosted 1dp edge, drawn on a single node so
- * long lists of cards stay cheap. Pass [onClick] to make the whole card tappable; it then
- * scales down slightly while pressed.
+ * Rows share one card (separated by `CardDivider`); do not put a card inside another card.
  */
 @Composable
 fun GlassCard(
@@ -52,7 +50,7 @@ fun GlassCard(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed && onClick != null) 0.98f else 1f,
+        targetValue = if (pressed && onClick != null) 0.985f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "glassCardScale",
     )
@@ -69,8 +67,8 @@ fun GlassCard(
             }
             .clip(shape)
             .background(FableGlass)
-            .background(GlassSpecular)
-            .border(1.dp, FableGlassBorder, shape)
+            .background(GlassSheen)
+            .border(Dp.Hairline, FableGlassBorder, shape)
             .then(clickModifier),
         content = content,
     )

@@ -1,23 +1,21 @@
 package io.harbor.fable.ui.screens
 
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.LaunchResult
-import io.harbor.fable.data.models.ContainerStatus
+import io.harbor.fable.data.models.Container
+import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
-import io.harbor.fable.ui.theme.FableSuccess
-import io.harbor.fable.ui.theme.FableWarn
 import kotlinx.coroutines.launch
 
 @Composable
@@ -30,9 +28,33 @@ fun HomeScreen(
     val app = remember(context) { FableApp.from(context) }
     val repository = app.containerRepository
     val fableUi = LocalFableUi.current
-    val scope = rememberCoroutineScope()
     val containers by repository.containers.collectAsStateWithLifecycle()
     val exes by repository.exes.collectAsStateWithLifecycle()
+
+    HomeContent(
+        exes = exes,
+        containers = containers,
+        onAddApp = onAddApp,
+        onSeeAllContainers = onNavigateToContainers,
+        onContainerClick = onContainerClick,
+        // Launching can take a while on first use, so it runs on the app-level scope.
+        onLaunch = { exe ->
+            fableUi.scope.launch {
+                fableUi.showMessage(repository.launch(exe.containerId, exe.id).message(), long = true)
+            }
+        },
+    )
+}
+
+@Composable
+internal fun HomeContent(
+    exes: List<ExeEntry>,
+    containers: List<Container>,
+    onAddApp: () -> Unit,
+    onSeeAllContainers: () -> Unit,
+    onContainerClick: (String) -> Unit,
+    onLaunch: (ExeEntry) -> Unit,
+) {
     val containerNames = remember(containers) { containers.associate { it.id to it.name } }
 
     FableScreen(
@@ -46,9 +68,9 @@ fun HomeScreen(
         },
     ) {
         if (exes.isNotEmpty()) {
-            item { SectionLabel("Your Apps") }
-            item {
-                GlassCard {
+            item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem()) }
+            item(key = "apps") {
+                GlassCard(Modifier.animateItem()) {
                     exes.forEachIndexed { index, exe ->
                         if (index > 0) CardDivider()
                         ListRow(
@@ -63,30 +85,17 @@ fun HomeScreen(
                                     tint = Color.White,
                                     containerColor = FableAccent,
                                     bordered = false,
-                                    onClick = {
-                                        scope.launch {
-                                            fableUi.showMessage(
-                                                repository.launch(exe.containerId, exe.id).message(),
-                                                long = true,
-                                            )
-                                        }
-                                    },
+                                    size = 34.dp,
+                                    onClick = { onLaunch(exe) },
                                 )
                             },
-                            onClick = {
-                                scope.launch {
-                                    fableUi.showMessage(
-                                        repository.launch(exe.containerId, exe.id).message(),
-                                        long = true,
-                                    )
-                                }
-                            },
+                            onClick = { onLaunch(exe) },
                         )
                     }
                 }
             }
         } else {
-            item {
+            item(key = "empty") {
                 EmptyState(
                     icon = Icons.Outlined.SportsEsports,
                     title = "No apps yet",
@@ -94,14 +103,21 @@ fun HomeScreen(
                     actionLabel = "Add App",
                     actionIcon = Icons.Outlined.Add,
                     onAction = onAddApp,
+                    modifier = Modifier.animateItem(),
                 )
             }
         }
 
         if (containers.isNotEmpty()) {
-            item { SectionLabel("Recent Containers") }
-            item {
-                GlassCard {
+            item(key = "containers-label") {
+                SectionLabel(
+                    text = "Containers",
+                    modifier = Modifier.animateItem(),
+                    trailing = { SectionAction(text = "See all", onClick = onSeeAllContainers) },
+                )
+            }
+            item(key = "containers") {
+                GlassCard(Modifier.animateItem()) {
                     containers.take(5).forEachIndexed { index, container ->
                         if (index > 0) CardDivider()
                         ListRow(
@@ -114,13 +130,6 @@ fun HomeScreen(
                     }
                 }
             }
-            item {
-                GlassButton(
-                    text = "All Containers",
-                    onClick = onNavigateToContainers,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
         }
     }
 }
@@ -130,11 +139,4 @@ internal fun LaunchResult.message(): String = when (this) {
     is LaunchResult.Started -> "Launched (pid $pid)"
     is LaunchResult.Unavailable -> reason
     is LaunchResult.Failed -> reason
-}
-
-internal fun containerStatusColor(status: ContainerStatus): Color = when (status) {
-    ContainerStatus.READY -> FableSuccess
-    ContainerStatus.RUNNING -> FableSuccess
-    ContainerStatus.ERROR -> FableWarn
-    else -> FableAccent
 }

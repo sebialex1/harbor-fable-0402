@@ -1,12 +1,8 @@
 package io.harbor.fable.ui.screens
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,10 +15,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
-import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.ui.components.*
-import io.harbor.fable.ui.theme.FableAccent
-import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
 @Composable
@@ -38,37 +31,11 @@ fun ContainersScreen(
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
 
-    FableScreen(
-        title = "Containers",
-        actions = {
-            GlassIconButton(
-                icon = Icons.Outlined.Add,
-                contentDescription = "New container",
-                onClick = { showCreate = true },
-            )
-        },
-    ) {
-        if (containers.isEmpty()) {
-            item {
-                EmptyState(
-                    icon = Icons.Outlined.Apps,
-                    title = "No containers yet",
-                    message = "Create a container to get started",
-                    actionLabel = "Create Container",
-                    actionIcon = Icons.Outlined.Add,
-                    onAction = { showCreate = true },
-                )
-            }
-        } else {
-            item { SectionLabel("Your Containers") }
-            items(containers) { container ->
-                ContainerCard(
-                    container = container,
-                    onClick = { onContainerClick(container.id) },
-                )
-            }
-        }
-    }
+    ContainersContent(
+        containers = containers,
+        onContainerClick = onContainerClick,
+        onCreateClick = { showCreate = true },
+    )
 
     if (showCreate) {
         CreateContainerSheet(
@@ -95,28 +62,54 @@ fun ContainersScreen(
 }
 
 @Composable
-private fun ContainerCard(
-    container: Container,
-    onClick: () -> Unit,
+internal fun ContainersContent(
+    containers: List<Container>,
+    onContainerClick: (String) -> Unit,
+    onCreateClick: () -> Unit,
 ) {
-    GlassCard(onClick = onClick) {
-        ListRow(
-            title = container.name,
-            subtitle = container.wineVersion,
-            icon = Icons.Outlined.Apps,
-            iconTint = containerStatusColor(container.status),
-            showChevron = true,
-            trailing = {
-                Pill(
-                    text = container.status.name.lowercase(),
-                    color = containerStatusColor(container.status),
+    FableScreen(
+        title = "Containers",
+        actions = {
+            GlassIconButton(
+                icon = Icons.Outlined.Add,
+                contentDescription = "New container",
+                onClick = onCreateClick,
+            )
+        },
+    ) {
+        if (containers.isEmpty()) {
+            item(key = "empty") {
+                EmptyState(
+                    icon = Icons.Outlined.Apps,
+                    title = "No containers yet",
+                    message = "Create a container to get started",
+                    actionLabel = "Create Container",
+                    actionIcon = Icons.Outlined.Add,
+                    onAction = onCreateClick,
+                    modifier = Modifier.animateItem(),
                 )
-            },
-        )
+            }
+        } else {
+            // One continuous surface: every container is a row of the same card.
+            item(key = "list") {
+                GlassCard(Modifier.fillMaxWidth().animateItem()) {
+                    containers.forEachIndexed { index, container ->
+                        if (index > 0) CardDivider()
+                        ListRow(
+                            title = container.name,
+                            subtitle = container.wineVersion,
+                            icon = Icons.Outlined.Apps,
+                            iconTint = containerStatusColor(container.status),
+                            trailing = { StatusPill(container.status) },
+                            onClick = { onContainerClick(container.id) },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateContainerSheet(
     defaultResolution: String,
@@ -140,6 +133,7 @@ private fun CreateContainerSheet(
             label = "Container name",
         )
 
+        // Both settings share one surface instead of two stacked cards.
         GlassCard {
             OptionSelector(
                 label = "Resolution",
@@ -148,9 +142,7 @@ private fun CreateContainerSheet(
                 onSelect = { resolution = it },
                 icon = Icons.Outlined.AspectRatio,
             )
-        }
-
-        GlassCard {
+            CardDivider()
             ToggleRow(
                 title = "Fullscreen",
                 checked = fullscreen,
