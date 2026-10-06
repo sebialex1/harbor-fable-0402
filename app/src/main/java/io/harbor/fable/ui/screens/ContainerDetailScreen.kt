@@ -113,6 +113,8 @@ internal fun ContainerDetailContent(
     onAddExe: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val appear = rememberLiquidAppear()
+
     FableScreen(
         title = container?.name ?: "Container",
         onBack = onBack,
@@ -125,6 +127,7 @@ internal fun ContainerDetailContent(
                     actionLabel = "Go Back",
                     actionIcon = Icons.AutoMirrored.Outlined.ArrowBack,
                     onAction = onBack,
+                    modifier = Modifier.animateItem().liquidAppear(appear, 0),
                 )
             }
             return@FableScreen
@@ -134,7 +137,7 @@ internal fun ContainerDetailContent(
         item(key = "launch") {
             val primaryName = container.exeName?.takeIf { !container.exePath.isNullOrBlank() }
             Row(
-                Modifier.fillMaxWidth().animateItem(),
+                Modifier.fillMaxWidth().animateItem().liquidAppear(appear, 0),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
                 if (primaryName != null) {
@@ -156,9 +159,9 @@ internal fun ContainerDetailContent(
             }
         }
 
-        item(key = "overview-label") { SectionLabel("Overview", Modifier.animateItem()) }
+        item(key = "overview-label") { SectionLabel("Overview", Modifier.animateItem().liquidAppear(appear, 1)) }
         item(key = "overview") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 1)) {
                 InfoRow(
                     label = "Status",
                     value = container.status.name.lowercase(),
@@ -176,9 +179,9 @@ internal fun ContainerDetailContent(
             }
         }
 
-        item(key = "settings-label") { SectionLabel("Display", Modifier.animateItem()) }
+        item(key = "settings-label") { SectionLabel("Display", Modifier.animateItem().liquidAppear(appear, 2)) }
         item(key = "settings") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 2)) {
                 OptionSelector(
                     label = "Resolution",
                     options = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) },
@@ -196,9 +199,9 @@ internal fun ContainerDetailContent(
             }
         }
 
-        item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem()) }
+        item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().liquidAppear(appear, 3)) }
         item(key = "apps") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
                 if (exes.isEmpty()) {
                     ListRow(
                         title = "No apps",
@@ -237,7 +240,7 @@ internal fun ContainerDetailContent(
         }
 
         item(key = "delete") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 4)) {
                 ListRow(
                     title = "Delete container",
                     titleColor = FableError,

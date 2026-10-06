@@ -5,9 +5,7 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -77,8 +75,6 @@ private object Routes {
     val topLevel = setOf(HOME, CONTAINERS, DRIVERS, ASSETS, SETTINGS)
 }
 
-private const val NAV_MS = 320
-
 private fun tabIndex(route: String?): Int = when (route) {
     Routes.HOME -> 0
     Routes.CONTAINERS, Routes.CONTAINER_DETAIL -> 1
@@ -92,34 +88,36 @@ private fun tabIndex(route: String?): Int = when (route) {
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.direction(): Int =
     if (tabIndex(targetState.destination.route) >= tabIndex(initialState.destination.route)) 1 else -1
 
-// Tabs: a soft fade with a short slide in the direction of travel.
+// Tabs: a soft fade with a short slide in the direction of travel. The incoming screen settles
+// (Motion.enter) while the outgoing one accelerates away (Motion.exit).
 private val TabEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
     val sign = direction()
-    fadeIn(tween(300)) + slideInHorizontally(tween(NAV_MS, easing = FastOutSlowInEasing)) { sign * it / 5 }
+    fadeIn(Motion.enter()) + slideInHorizontally(Motion.enter()) { sign * it / 5 }
 }
 private val TabExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
     val sign = direction()
-    fadeOut(tween(200)) + slideOutHorizontally(tween(NAV_MS, easing = FastOutSlowInEasing)) { -sign * it / 8 }
+    fadeOut(Motion.exit()) + slideOutHorizontally(Motion.exit(Motion.Standard)) { -sign * it / 8 }
 }
 private val TabPopEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    fadeIn(tween(300)) + slideInHorizontally(tween(NAV_MS, easing = FastOutSlowInEasing)) { -it / 8 }
+    fadeIn(Motion.enter()) + slideInHorizontally(Motion.enter()) { -it / 8 }
 }
 private val TabPopExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    fadeOut(tween(200)) + slideOutHorizontally(tween(NAV_MS, easing = FastOutSlowInEasing)) { it / 5 }
+    fadeOut(Motion.exit()) + slideOutHorizontally(Motion.exit(Motion.Standard)) { it / 5 }
 }
 
-// Container detail: pushed from the right over the list, which drifts away behind it.
+// Pushed screens (container detail, Vulkan extensions): slide in from the right over the list,
+// which drifts away behind them; popping reverses the motion.
 private val DetailEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    slideInHorizontally(tween(340, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(240))
+    slideInHorizontally(Motion.enter(Motion.Slow)) { it } + fadeIn(Motion.enter())
 }
 private val DetailExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    slideOutHorizontally(tween(340, easing = FastOutSlowInEasing)) { -it / 5 } + fadeOut(tween(240))
+    slideOutHorizontally(Motion.exit(Motion.Slow)) { -it / 5 } + fadeOut(Motion.exit(Motion.Standard))
 }
 private val DetailPopEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    slideInHorizontally(tween(340, easing = FastOutSlowInEasing)) { -it / 5 } + fadeIn(tween(240))
+    slideInHorizontally(Motion.enter(Motion.Slow)) { -it / 5 } + fadeIn(Motion.enter())
 }
 private val DetailPopExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    slideOutHorizontally(tween(340, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(240))
+    slideOutHorizontally(Motion.exit(Motion.Slow)) { it } + fadeOut(Motion.exit(Motion.Standard))
 }
 
 /**
@@ -310,7 +308,7 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
         // Floats above the dock on tabs and near the bottom edge on pushed screens.
         val snackbarBottom by animateDpAsState(
             targetValue = if (isTopLevel) DockMetrics.Clearance else Dp.Hairline,
-            animationSpec = tween(250),
+            animationSpec = Motion.settle(),
             label = "snackbarBottom",
         )
         SnackbarHost(
@@ -338,11 +336,12 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
             )
         }
 
-        // Floating glass dock — only on top-level tabs
+        // Floating glass dock — only on top-level tabs. It rises with the pushed screen's pop
+        // and drops away as a detail screen slides in, on the same clock as those transitions.
         AnimatedVisibility(
             visible = isTopLevel,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            enter = slideInVertically(Motion.enter(Motion.Slow)) { it } + fadeIn(Motion.enter()),
+            exit = slideOutVertically(Motion.exit(Motion.Standard)) { it } + fadeOut(Motion.exit()),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             GlassDock(

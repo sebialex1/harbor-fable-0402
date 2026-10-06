@@ -2,7 +2,6 @@ package io.harbor.fable.ui.screens
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -42,6 +41,7 @@ import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.delay
@@ -92,6 +92,7 @@ internal fun AssetsContent(
     onDownload: (AssetEntry) -> Unit,
 ) {
     val expansion = rememberExpansionState()
+    val appear = rememberLiquidAppear()
     val grouped = remember(assets) { assets.groupBy { it.type } }
     val orderedTypes = remember {
         listOf(
@@ -112,7 +113,7 @@ internal fun AssetsContent(
         if (bannerVisible) {
             bannerInList = true
         } else {
-            delay(450)
+            delay(Motion.Slow.toLong())
             bannerInList = false
         }
     }
@@ -138,9 +139,10 @@ internal fun AssetsContent(
             item(key = "setup-banner") {
                 AnimatedVisibility(
                     visible = bannerVisible,
-                    enter = fadeIn(tween(250)) + expandVertically(tween(300)),
-                    exit = fadeOut(tween(250)) + slideOutVertically(tween(300)) { -it / 2 } +
-                        shrinkVertically(tween(300)),
+                    modifier = Modifier.liquidAppear(appear, 0),
+                    enter = fadeIn(Motion.enter()) + expandVertically(Motion.enter()),
+                    exit = fadeOut(Motion.exit()) + slideOutVertically(Motion.exit(Motion.Standard)) { -it / 2 } +
+                        shrinkVertically(Motion.exit(Motion.Standard)),
                 ) {
                     SetupBanner(state = setup, installing = installing, onDownloadAll = onDownloadRecommended)
                 }
@@ -148,7 +150,9 @@ internal fun AssetsContent(
         }
 
         if (isRefreshing) {
-            item(key = "refreshing") { LoadingCard(message = "Refreshing…", modifier = Modifier.animateItem()) }
+            item(key = "refreshing") {
+                LoadingCard(message = "Refreshing…", modifier = Modifier.animateItem().liquidAppear(appear, 0))
+            }
         }
 
         if (assets.isEmpty() && !isRefreshing) {
@@ -157,11 +161,11 @@ internal fun AssetsContent(
                     icon = Icons.Outlined.Download,
                     title = "No assets",
                     message = "Refresh to load the catalog",
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem().liquidAppear(appear, 1),
                 )
             }
         } else {
-            orderedTypes.forEach { type ->
+            orderedTypes.forEachIndexed { typeIndex, type ->
                 val typeAssets = grouped[type].orEmpty()
                 if (typeAssets.isNotEmpty()) {
                     val typeKey = type.name
@@ -173,7 +177,7 @@ internal fun AssetsContent(
                             title = typeDisplayName(type),
                             expanded = expanded,
                             onToggle = { expansion.toggle(typeKey, default = true) },
-                            modifier = Modifier.animateItem(),
+                            modifier = Modifier.animateItem().liquidAppear(appear, typeIndex + 1),
                             badge = {
                                 Pill(
                                     text = "$downloadedCount/${typeAssets.size}",
@@ -241,7 +245,7 @@ internal fun SetupBanner(
             }
             AnimatedContent(
                 targetState = busy,
-                transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
+                transitionSpec = { fadeIn(Motion.enter(Motion.Quick)) togetherWith fadeOut(Motion.exit(Motion.Fast)) },
                 label = "setupAction",
             ) { working ->
                 if (working) {

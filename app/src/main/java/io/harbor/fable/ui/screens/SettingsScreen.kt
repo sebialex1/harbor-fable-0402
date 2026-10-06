@@ -62,11 +62,12 @@ internal fun SettingsContent(
 ) {
     val resolutionOptions = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) }
     val framePacingOptions = FramePacing.entries.map { SelectOption(it, it.label) }
+    val appear = rememberLiquidAppear()
 
     FableScreen(title = "Settings") {
-        item(key = "defaults-label") { SectionLabel("Container Defaults", Modifier.animateItem()) }
+        item(key = "defaults-label") { SectionLabel("Container Defaults", Modifier.animateItem().liquidAppear(appear, 0)) }
         item(key = "defaults") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 0)) {
                 InfoRow(
                     label = "Wine version",
                     value = settings.defaultWineVersion,
@@ -90,9 +91,9 @@ internal fun SettingsContent(
             }
         }
 
-        item(key = "graphics-label") { SectionLabel("Graphics", Modifier.animateItem()) }
+        item(key = "graphics-label") { SectionLabel("Graphics", Modifier.animateItem().liquidAppear(appear, 1)) }
         item(key = "graphics") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 1)) {
                 InfoRow(
                     label = "Default driver",
                     value = settings.defaultGraphicsDriver,
@@ -116,9 +117,9 @@ internal fun SettingsContent(
             }
         }
 
-        item(key = "catalog-label") { SectionLabel("Catalog", Modifier.animateItem()) }
+        item(key = "catalog-label") { SectionLabel("Catalog", Modifier.animateItem().liquidAppear(appear, 2)) }
         item(key = "catalog") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 2)) {
                 ToggleRow(
                     title = "Refresh on launch",
                     checked = settings.refreshCatalogOnLaunch,
@@ -128,9 +129,9 @@ internal fun SettingsContent(
             }
         }
 
-        item(key = "device-label") { SectionLabel("Device", Modifier.animateItem()) }
+        item(key = "device-label") { SectionLabel("Device", Modifier.animateItem().liquidAppear(appear, 3)) }
         item(key = "device") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
                 InfoRow(label = "GPU", value = deviceInfo.gpu, icon = Icons.Outlined.Memory)
                 CardDivider()
                 InfoRow(label = "Vendor", value = deviceInfo.vendor, icon = Icons.Outlined.Business)
@@ -143,9 +144,9 @@ internal fun SettingsContent(
             }
         }
 
-        item(key = "about-label") { SectionLabel("About", Modifier.animateItem()) }
+        item(key = "about-label") { SectionLabel("About", Modifier.animateItem().liquidAppear(appear, 4)) }
         item(key = "about") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 4)) {
                 InfoRow(label = "Version", value = versionName, icon = Icons.Outlined.Info)
                 CardDivider()
                 InfoRow(label = "License", value = "MIT", icon = Icons.Outlined.Description)

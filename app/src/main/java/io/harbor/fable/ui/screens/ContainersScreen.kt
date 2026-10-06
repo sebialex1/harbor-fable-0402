@@ -67,6 +67,8 @@ internal fun ContainersContent(
     onContainerClick: (String) -> Unit,
     onCreateClick: () -> Unit,
 ) {
+    val appear = rememberLiquidAppear()
+
     FableScreen(
         title = "Containers",
         actions = {
@@ -86,16 +88,18 @@ internal fun ContainersContent(
                     actionLabel = "Create Container",
                     actionIcon = Icons.Outlined.Add,
                     onAction = onCreateClick,
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem().liquidAppear(appear, 0),
                 )
             }
         } else {
-            // One continuous surface: every container is a row of the same card.
+            // One continuous surface: every container is a row of the same card. The card
+            // settles first and the rows arrive one after another inside it.
             item(key = "list") {
-                GlassCard(Modifier.fillMaxWidth().animateItem()) {
+                GlassCard(Modifier.fillMaxWidth().animateItem().liquidAppear(appear, 0)) {
                     containers.forEachIndexed { index, container ->
                         if (index > 0) CardDivider()
                         ListRow(
+                            modifier = Modifier.liquidAppear(appear, index + 1),
                             title = container.name,
                             subtitle = container.wineVersion,
                             icon = Icons.Outlined.Apps,

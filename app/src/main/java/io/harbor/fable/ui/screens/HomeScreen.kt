@@ -56,6 +56,7 @@ internal fun HomeContent(
     onLaunch: (ExeEntry) -> Unit,
 ) {
     val containerNames = remember(containers) { containers.associate { it.id to it.name } }
+    val appear = rememberLiquidAppear()
 
     FableScreen(
         title = "Fable",
@@ -68,12 +69,13 @@ internal fun HomeContent(
         },
     ) {
         if (exes.isNotEmpty()) {
-            item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem()) }
+            item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().liquidAppear(appear, 0)) }
             item(key = "apps") {
-                GlassCard(Modifier.animateItem()) {
+                GlassCard(Modifier.animateItem().liquidAppear(appear, 1)) {
                     exes.forEachIndexed { index, exe ->
                         if (index > 0) CardDivider()
                         ListRow(
+                            modifier = Modifier.liquidAppear(appear, index + 2),
                             title = exe.name,
                             subtitle = containerNames[exe.containerId] ?: "Unassigned",
                             icon = Icons.Outlined.SportsEsports,
@@ -103,7 +105,7 @@ internal fun HomeContent(
                     actionLabel = "Add App",
                     actionIcon = Icons.Outlined.Add,
                     onAction = onAddApp,
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem().liquidAppear(appear, 0),
                 )
             }
         }
@@ -112,15 +114,16 @@ internal fun HomeContent(
             item(key = "containers-label") {
                 SectionLabel(
                     text = "Containers",
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem().liquidAppear(appear, 2),
                     trailing = { SectionAction(text = "See all", onClick = onSeeAllContainers) },
                 )
             }
             item(key = "containers") {
-                GlassCard(Modifier.animateItem()) {
+                GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
                     containers.take(5).forEachIndexed { index, container ->
                         if (index > 0) CardDivider()
                         ListRow(
+                            modifier = Modifier.liquidAppear(appear, index + 4),
                             title = container.name,
                             subtitle = container.wineVersion,
                             icon = Icons.Outlined.Apps,

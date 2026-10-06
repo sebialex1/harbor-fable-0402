@@ -1,5 +1,11 @@
 package io.harbor.fable.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -32,6 +39,7 @@ import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
@@ -142,6 +150,7 @@ internal fun DriversContent(
     onOpenVulkanExtensions: () -> Unit = {},
 ) {
     val expansion = rememberExpansionState()
+    val appear = rememberLiquidAppear()
     val latest = remember(releases) { releases.firstOrNull { it.channel == ReleaseChannel.LATEST } }
     val older = remember(releases) { releases.filter { it.channel != ReleaseChannel.LATEST } }
     val updateAvailable = latest != null && installed != null && installed.tag != latest.tag &&
@@ -159,7 +168,7 @@ internal fun DriversContent(
         },
     ) {
         item(key = "device") {
-            GlassCard(Modifier.animateItem()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 0)) {
                 InfoRow(label = "Device", value = deviceInfo.device, icon = Icons.Outlined.Smartphone)
                 CardDivider()
                 InfoRow(label = "Vendor", value = deviceInfo.vendor, icon = Icons.Outlined.Business)
@@ -170,7 +179,7 @@ internal fun DriversContent(
             }
         }
 
-        item(key = "active-label") { SectionLabel("Active Driver", Modifier.animateItem()) }
+        item(key = "active-label") { SectionLabel("Active Driver", Modifier.animateItem().liquidAppear(appear, 1)) }
         item(key = "active") {
             ActiveDriverCard(
                 installed = installed,
@@ -178,11 +187,11 @@ internal fun DriversContent(
                 updateAvailable = if (updateAvailable) latest else null,
                 onInstallUpdate = { latest?.let(onInstall) },
                 onUninstall = onUninstall,
-                modifier = Modifier.animateItem(),
+                modifier = Modifier.animateItem().liquidAppear(appear, 1),
             )
         }
         item(key = "vulkan") {
-            GlassCard(Modifier.animateItem(), onClick = onOpenVulkanExtensions) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 2), onClick = onOpenVulkanExtensions) {
                 ListRow(
                     title = "Vulkan extensions",
                     subtitle = when {
@@ -202,7 +211,7 @@ internal fun DriversContent(
                     icon = Icons.Outlined.CloudOff,
                     title = "Couldn't load releases",
                     lines = listOf(refreshError),
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem().liquidAppear(appear, 3),
                 )
             }
         } else if (stale) {
@@ -211,19 +220,21 @@ internal fun DriversContent(
                     icon = Icons.Outlined.CloudOff,
                     title = "Offline",
                     lines = listOf("Showing the last release list that was fetched"),
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem().liquidAppear(appear, 3),
                 )
             }
         }
 
         if (isRefreshing && releases.isEmpty()) {
-            item(key = "refreshing") { LoadingCard(message = "Loading releases…", modifier = Modifier.animateItem()) }
+            item(key = "refreshing") {
+                LoadingCard(message = "Loading releases…", modifier = Modifier.animateItem().liquidAppear(appear, 3))
+            }
         }
 
         if (latest != null) {
-            item(key = "latest-label") { SectionLabel("Latest Release", Modifier.animateItem()) }
+            item(key = "latest-label") { SectionLabel("Latest Release", Modifier.animateItem().liquidAppear(appear, 3)) }
             item(key = "latest") {
-                GlassCard(Modifier.animateItem()) {
+                GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
                     DriverReleaseRow(
                         release = latest,
                         task = tasks.taskFor(latest),
@@ -243,7 +254,7 @@ internal fun DriversContent(
                     title = "Previous Versions",
                     expanded = expansion.isExpanded(OLDER_KEY, default = false),
                     onToggle = { expansion.toggle(OLDER_KEY, default = false) },
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem().liquidAppear(appear, 4),
                     badge = {
                         Pill(
                             text = if (downloadedCount > 0) "$downloadedCount/${older.size}" else "${older.size}",
@@ -272,7 +283,7 @@ internal fun DriversContent(
                     icon = Icons.Outlined.Memory,
                     title = "No releases",
                     message = "Refresh to load the RADV Xclipse releases",
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem().liquidAppear(appear, 3),
                 )
             }
         }
@@ -281,7 +292,8 @@ internal fun DriversContent(
 
 /**
  * The single active driver with its actions, or the empty state explaining that one driver is
- * active at a time. While [installing] is set the card shows the extraction in progress.
+ * active at a time. While [installing] is set the card shows the extraction in progress. The
+ * three states cross-fade and the card resizes between them instead of snapping.
  */
 @Composable
 internal fun ActiveDriverCard(
@@ -292,28 +304,51 @@ internal fun ActiveDriverCard(
     onUninstall: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val state = when {
+        installing != null -> ActiveDriverState.Installing
+        installed == null -> ActiveDriverState.Empty
+        else -> ActiveDriverState.Installed
+    }
+    // Outgoing faces keep their last content while they fade out: the driver that was just
+    // removed, or the tag that was just installed, instead of collapsing to blanks mid-transition.
+    val lastInstalled = remember { arrayOfNulls<InstalledDriver>(1) }
+    val lastInstalling = remember { arrayOfNulls<String>(1) }
+    if (installed != null) lastInstalled[0] = installed
+    if (installing != null) lastInstalling[0] = installing
     GlassCard(modifier.fillMaxWidth()) {
-        when {
-            installing != null -> {
-                Row(
+        AnimatedContent(
+            targetState = state,
+            transitionSpec = {
+                (fadeIn(Motion.enter()) + slideInVertically(Motion.enter()) { it / 10 }) togetherWith
+                    fadeOut(Motion.exit())
+            },
+            modifier = Modifier.animateContentSize(Motion.settle()),
+            label = "activeDriver",
+        ) { target ->
+            when (target) {
+                ActiveDriverState.Installing -> Column(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconTile(icon = Icons.Outlined.Memory, tint = FableAccent)
+                        Column(Modifier.weight(1f).padding(start = Spacing.md)) {
+                            Text("Installing ${installing ?: lastInstalling[0].orEmpty()}", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                text = if (installed != null) "Removing ${installed.tag}, then extracting the new package" else "Extracting the driver package",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    ThinProgressBar(progress = null, modifier = Modifier.padding(horizontal = RowPaddingHorizontal).padding(bottom = Spacing.sm))
+                }
+                ActiveDriverState.Empty -> Column(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingHorizontal),
                 ) {
-                    IconTile(icon = Icons.Outlined.Memory, tint = FableAccent)
-                    Column(Modifier.weight(1f).padding(start = Spacing.md)) {
-                        Text("Installing $installing", style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            text = if (installed != null) "Removing ${installed.tag}, then extracting the new package" else "Extracting the driver package",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-                ThinProgressBar(progress = null, modifier = Modifier.padding(horizontal = RowPaddingHorizontal).padding(bottom = Spacing.sm))
-            }
-            installed == null -> {
-                Column(Modifier.padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingHorizontal)) {
                     Text("No driver installed", style = MaterialTheme.typography.titleSmall)
                     Text(
                         text = "Install the latest RADV Xclipse release below. One driver is active at a time; installing another replaces it.",
@@ -321,54 +356,83 @@ internal fun ActiveDriverCard(
                         modifier = Modifier.padding(top = Spacing.xxs),
                     )
                 }
-            }
-            else -> {
-                DriverSummaryRow(
-                    title = installed.name ?: "RADV Xclipse ${installed.tag}",
-                    lines = listOf(
-                        listOfNotNull(
-                            installed.tag,
-                            installed.mesaVersion?.let { "Mesa $it" },
-                            installed.vulkanVersion?.let { "Vulkan $it" },
-                        ).joinToString(" · "),
-                    ),
-                    trailing = { Pill(text = "Active", color = FableSuccess, icon = Icons.Outlined.Check) },
+                ActiveDriverState.Installed -> InstalledDriverFace(
+                    driver = installed ?: lastInstalled[0],
+                    updateAvailable = updateAvailable,
+                    onInstallUpdate = onInstallUpdate,
+                    onUninstall = onUninstall,
                 )
-                CardDivider()
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.sm),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                ) {
-                    if (updateAvailable != null) {
-                        GlassButton(
-                            text = "Update to ${updateAvailable.tag}",
-                            icon = Icons.Outlined.Upgrade,
-                            primary = true,
-                            compact = true,
-                            onClick = onInstallUpdate,
-                            modifier = Modifier.weight(1f),
-                        )
-                    } else {
-                        Text(
-                            text = "Up to date",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    GlassButton(
-                        text = "Uninstall",
-                        destructive = true,
-                        compact = true,
-                        onClick = onUninstall,
-                    )
-                }
             }
         }
     }
 }
+
+/** The installed face of [ActiveDriverCard]: summary, then update/uninstall actions. */
+@Composable
+private fun InstalledDriverFace(
+    driver: InstalledDriver?,
+    updateAvailable: RadvRelease?,
+    onInstallUpdate: () -> Unit,
+    onUninstall: () -> Unit,
+) {
+    if (driver == null) return
+    Column(Modifier.fillMaxWidth()) {
+        DriverSummaryRow(
+            title = driver.name ?: "RADV Xclipse ${driver.tag}",
+            lines = listOf(
+                listOfNotNull(
+                    driver.tag,
+                    driver.mesaVersion?.let { "Mesa $it" },
+                    driver.vulkanVersion?.let { "Vulkan $it" },
+                ).joinToString(" · "),
+            ),
+            trailing = { Pill(text = "Active", color = FableSuccess, icon = Icons.Outlined.Check) },
+        )
+        CardDivider()
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.sm),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // "Up to date" and the update button swap in place when a release lands.
+            AnimatedContent(
+                targetState = updateAvailable,
+                transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) },
+                contentAlignment = Alignment.CenterStart,
+                modifier = Modifier.weight(1f),
+                label = "driverUpdate",
+            ) { update ->
+                if (update != null) {
+                    GlassButton(
+                        text = "Update to ${update.tag}",
+                        icon = Icons.Outlined.Upgrade,
+                        primary = true,
+                        compact = true,
+                        onClick = onInstallUpdate,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    Text(
+                        text = "Up to date",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            GlassButton(
+                text = "Uninstall",
+                destructive = true,
+                compact = true,
+                onClick = onUninstall,
+            )
+        }
+    }
+}
+
+/** Which of the three faces [ActiveDriverCard] shows; drives its cross-fade. */
+private enum class ActiveDriverState { Installing, Empty, Installed }
 
 private const val OLDER_KEY = "older-releases"
 
