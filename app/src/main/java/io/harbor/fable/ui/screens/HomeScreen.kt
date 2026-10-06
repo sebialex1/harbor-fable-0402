@@ -1,177 +1,136 @@
 package io.harbor.fable.ui.screens
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
+import io.harbor.fable.data.LaunchResult
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.FableWarn
-import io.harbor.fable.ui.theme.Spacing
+import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(
     onNavigateToContainers: () -> Unit,
-    onNavigateToDrivers: () -> Unit,
-    onNavigateToAssets: () -> Unit,
-    onNavigateToSettings: () -> Unit,
+    onAddApp: () -> Unit,
+    onContainerClick: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val app = remember(context) { FableApp.from(context) }
-    val containers by app.containerRepository.containers.collectAsStateWithLifecycle()
-    val drivers by app.assetRepository.drivers.collectAsStateWithLifecycle()
-    val assets by app.assetRepository.assets.collectAsStateWithLifecycle()
-
-    val readyContainers = containers.count {
-        it.status == ContainerStatus.READY || it.status == ContainerStatus.RUNNING
-    }
-    val downloadedDrivers = drivers.count { it.isDownloaded }
-    val downloadedAssets = assets.count { it.isDownloaded }
+    val repository = app.containerRepository
+    val fableUi = LocalFableUi.current
+    val scope = rememberCoroutineScope()
+    val containers by repository.containers.collectAsStateWithLifecycle()
+    val exes by repository.exes.collectAsStateWithLifecycle()
+    val containerNames = remember(containers) { containers.associate { it.id to it.name } }
 
     FableScreen(
         title = "Fable",
         subtitle = "Wine container manager",
+        actions = {
+            GlassIconButton(
+                icon = Icons.Outlined.Add,
+                contentDescription = "Add app",
+                onClick = onAddApp,
+            )
+        },
     ) {
-        // Quick stats row
-        item {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-            ) {
-                StatCard("Containers", readyContainers.toString(), FableAccent, Icons.Outlined.Apps, Modifier.weight(1f))
-                StatCard("Drivers", downloadedDrivers.toString(), FableSuccess, Icons.Outlined.Memory, Modifier.weight(1f))
-                StatCard("Assets", downloadedAssets.toString(), FableWarn, Icons.Outlined.Download, Modifier.weight(1f))
-            }
-        }
-
-        // Quick actions
-        item { SectionLabel("Quick Actions") }
-        item {
-            GlassCard {
-                ListRow(
-                    title = "Create Container",
-                    subtitle = "Set up a new Wine environment",
-                    icon = Icons.Outlined.Add,
-                    onClick = onNavigateToContainers,
-                )
-                CardDivider()
-                ListRow(
-                    title = "Browse Drivers",
-                    subtitle = "Adrenotools Vulkan driver packages",
-                    icon = Icons.Outlined.Memory,
-                    onClick = onNavigateToDrivers,
-                )
-                CardDivider()
-                ListRow(
-                    title = "Download Assets",
-                    subtitle = "Wine, DXVK, Proton and more",
-                    icon = Icons.Outlined.Download,
-                    onClick = onNavigateToAssets,
-                )
-            }
-        }
-
-        // Recent containers
-        if (containers.isNotEmpty()) {
-            item { SectionLabel("Recent Containers") }
-            items(containers.take(5)) { container ->
-                GlassCard(onClick = onNavigateToContainers) {
-                    ListRow(
-                        title = container.name,
-                        subtitle = "${container.wineVersion} · ${container.screenResolution}",
-                        icon = Icons.Outlined.Apps,
-                        iconTint = containerStatusColor(container.status),
-                        showChevron = false,
-                        trailing = {
-                            Pill(
-                                text = container.status.name.lowercase(),
-                                color = containerStatusColor(container.status),
-                            )
-                        },
-                        onClick = onNavigateToContainers,
-                    )
+        if (exes.isNotEmpty()) {
+            item { SectionLabel("Your Apps") }
+            item {
+                GlassCard {
+                    exes.forEachIndexed { index, exe ->
+                        if (index > 0) CardDivider()
+                        ListRow(
+                            title = exe.name,
+                            subtitle = containerNames[exe.containerId] ?: "Unassigned",
+                            icon = Icons.Outlined.SportsEsports,
+                            showChevron = false,
+                            trailing = {
+                                GlassIconButton(
+                                    icon = Icons.Outlined.PlayArrow,
+                                    contentDescription = "Launch ${exe.name}",
+                                    tint = Color.White,
+                                    containerColor = FableAccent,
+                                    bordered = false,
+                                    onClick = {
+                                        scope.launch {
+                                            fableUi.showMessage(
+                                                repository.launch(exe.containerId, exe.id).message(),
+                                                long = true,
+                                            )
+                                        }
+                                    },
+                                )
+                            },
+                            onClick = {
+                                scope.launch {
+                                    fableUi.showMessage(
+                                        repository.launch(exe.containerId, exe.id).message(),
+                                        long = true,
+                                    )
+                                }
+                            },
+                        )
+                    }
                 }
             }
         } else {
-            item { SectionLabel("Getting Started") }
             item {
                 EmptyState(
-                    icon = Icons.Outlined.Smartphone,
-                    title = "No containers yet",
-                    message = "Create a Wine container to start running Windows applications on your device.",
-                    actionLabel = "Create Container",
+                    icon = Icons.Outlined.SportsEsports,
+                    title = "No apps yet",
+                    message = "Add a Windows app or game, then assign it to a container to run it.",
+                    actionLabel = "Add App",
                     actionIcon = Icons.Outlined.Add,
-                    onAction = onNavigateToContainers,
+                    onAction = onAddApp,
                 )
             }
         }
 
-        // Settings shortcut
-        item {
-            GlassCard {
-                ListRow(
-                    title = "Settings",
-                    subtitle = "Configure defaults, graphics and catalog",
-                    icon = Icons.Outlined.Settings,
-                    onClick = onNavigateToSettings,
+        if (containers.isNotEmpty()) {
+            item { SectionLabel("Recent Containers") }
+            item {
+                GlassCard {
+                    containers.take(5).forEachIndexed { index, container ->
+                        if (index > 0) CardDivider()
+                        ListRow(
+                            title = container.name,
+                            subtitle = "${container.wineVersion} · ${container.screenResolution}",
+                            icon = Icons.Outlined.Apps,
+                            iconTint = containerStatusColor(container.status),
+                            onClick = { onContainerClick(container.id) },
+                        )
+                    }
+                }
+            }
+            item {
+                GlassButton(
+                    text = "All Containers",
+                    onClick = onNavigateToContainers,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
     }
 }
 
-@Composable
-private fun StatCard(
-    label: String,
-    value: String,
-    tint: Color,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-) {
-    GlassCard(modifier = modifier) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(Spacing.lg),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconTile(icon = icon, tint = tint)
-            Spacer(Modifier.width(Spacing.md))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = tint,
-                )
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        }
-    }
+/** Human-readable text for a launch outcome, shown in the snackbar. */
+internal fun LaunchResult.message(): String = when (this) {
+    is LaunchResult.Started -> "Launched (pid $pid)"
+    is LaunchResult.Unavailable -> reason
+    is LaunchResult.Failed -> reason
 }
 
 internal fun containerStatusColor(status: ContainerStatus): Color = when (status) {

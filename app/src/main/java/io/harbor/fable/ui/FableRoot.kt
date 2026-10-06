@@ -99,9 +99,8 @@ fun FableRoot() {
                 composable(Routes.HOME) {
                     HomeScreen(
                         onNavigateToContainers = { navController.navigate(Routes.CONTAINERS) },
-                        onNavigateToDrivers = { navController.navigate(Routes.DRIVERS) },
-                        onNavigateToAssets = { navController.navigate(Routes.ASSETS) },
-                        onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
+                        onAddApp = { /* wired in Task 5 */ },
+                        onContainerClick = { id -> navController.navigate("container/$id") },
                     )
                 }
                 composable(Routes.CONTAINERS) {
