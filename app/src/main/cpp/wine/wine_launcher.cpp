@@ -176,6 +176,29 @@ void prepend_path(std::map<std::string, std::string>* env, const char* key, cons
     it->second = prefix + ":" + it->second;
 }
 
+// Owns the native launch log descriptor so every early return closes it.
+struct LogFd {
+    int fd = -1;
+    ~LogFd() {
+        if (fd >= 0) close(fd);
+    }
+    int release() {
+        const int out = fd;
+        fd = -1;
+        return out;
+    }
+};
+
+// Parent-side breadcrumb in fable-launch.log. Never use this in the forked child.
+#define FABLE_CRUMB(log_fd, ...)                       \
+    do {                                               \
+        if ((log_fd) >= 0) {                           \
+            dprintf((log_fd), "[fable] native: ");     \
+            dprintf((log_fd), __VA_ARGS__);            \
+            dprintf((log_fd), "\n");                   \
+        }                                              \
+    } while (0)
+
 struct LayerCopy {
     std::map<std::string, std::string>* env;
 };
@@ -216,13 +239,21 @@ bool wine_binary_available(const std::string& wine_path) {
 
 int launch_wine_container(const WineLaunchRequest& request, std::string* error) {
     set_launch_error("");
+    // Opened as soon as the container path is known (below), so a crash anywhere later leaves a
+    // trail of breadcrumbs in fable-launch.log showing the last stage that was reached.
+    LogFd launch_log;
     auto fail = [&](const std::string& msg) {
         if (error) *error = msg;
         set_launch_error(msg);
         FABLE_LOGE("wine launch: %s", msg.c_str());
+        FABLE_CRUMB(launch_log.fd, "failed: %s", msg.c_str());
         return -1;
     };
     if (request.container_path.empty()) return fail("Container path is empty");
+    const std::string log_path = request.container_path + "/" + kLaunchLogName;
+    launch_log.fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0644);
+    if (launch_log.fd < 0) FABLE_LOGW("wine launch: can't open %s: %s", log_path.c_str(), std::strerror(errno));
+    FABLE_CRUMB(launch_log.fd, "launcher: JNI fork/execve, container %s", request.container_path.c_str());
     if (request.exe_path.empty()) return fail("Executable path is empty");
     if (!is_dir(request.container_path)) return fail("Container path is not a directory");
     if (!is_wine_builtin_name(request.exe_path) && !looks_like_windows_path(request.exe_path) &&
@@ -249,6 +280,8 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
     const bool use_box64 = !translator.empty() && request.translator == Translator::kBox64;
     const bool use_fex = !translator.empty() && request.translator == Translator::kFex;
 
+    FABLE_CRUMB(launch_log.fd, "wine=%s translator=%s", wine.c_str(), translator.empty() ? "(none)" : translator.c_str());
+
     mkdir_one(request.container_path + "/tmp");
     mkdir_one(request.container_path + "/cache");
 
@@ -268,15 +301,18 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
     add_env(&env, "TMPDIR", request.container_path + "/tmp");
     add_env(&env, "XDG_CACHE_HOME", request.container_path + "/cache");
     prepend_path(&env, "PATH", request.container_path + "/bin");
+    FABLE_CRUMB(launch_log.fd, "env setup done (%zu variables)", env.size());
 
     LayerCopy layer{&env};
     adrenotools_visit_layer_env(layer_cb, &layer);
+    FABLE_CRUMB(launch_log.fd, "layer env done (%zu variables)", env.size());
 
     if (!request.driver_path.empty()) {
         if (!is_regular(request.driver_path)) return fail("Driver library not found: " + request.driver_path);
         std::string icd;
         std::string icd_error;
         if (!write_icd(request.driver_path, &icd, &icd_error)) return fail(icd_error);
+        FABLE_CRUMB(launch_log.fd, "driver ICD written: %s", icd.c_str());
         const std::string driver_dir = dirname_of(request.driver_path);
         add_env(&env, "ADRENOTOOLS_DRIVER_PATH", request.driver_path);
         add_env(&env, "ADRENOTOOLS_DRIVER_NAME", basename_of(request.driver_path));
@@ -345,6 +381,7 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
     for (auto& item : command) argv.push_back(item.data());
     argv.push_back(nullptr);
     const std::string program = command.front();
+    FABLE_CRUMB(launch_log.fd, "argv built (%zu items), envp built (%zu items)", command.size(), storage.size());
 
 #if defined(__ANDROID__) && defined(__LP64__)
     // Android 10+ refuses execve() on files in an app's data directory for apps targeting
@@ -369,8 +406,7 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
                translator.empty() ? "none" : translator_name,
                request.driver_path.empty() ? "none" : request.driver_path.c_str());
 
-    const std::string log_path = request.container_path + "/" + kLaunchLogName;
-    const int log_fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    const int log_fd = launch_log.fd;
     if (log_fd >= 0) {
         dprintf(log_fd, "[fable] %s\n", printable.c_str());
         for (const auto& item : storage) {
@@ -388,30 +424,38 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
     int status_pipe[2];
     if (pipe2(status_pipe, O_CLOEXEC) != 0) {
         const std::string message = std::string("pipe failed: ") + std::strerror(errno);
-        if (log_fd >= 0) close(log_fd);
         if (null_fd >= 0) close(null_fd);
         return fail(message);
     }
+    FABLE_CRUMB(log_fd, "status pipe created (%d, %d)", status_pipe[0], status_pipe[1]);
 
     long open_max = sysconf(_SC_OPEN_MAX);
     if (open_max <= 0 || open_max > 65536) open_max = 4096;
     const int max_fd = static_cast<int>(open_max);
 
+    // Child breadcrumbs: fixed buffers prepared before fork, written with write(2) only.
+    static const char kChildForked[] = "[fable] native child: forked, stdio redirected\n";
+    static const char kChildFdsClosed[] = "[fable] native child: descriptors closed, calling execve\n";
+    static const char kChildExecFailed[] = "[fable] native child: execve returned\n";
+
+    FABLE_CRUMB(log_fd, "before fork");
     const pid_t pid = fork();
     if (pid < 0) {
         const std::string message = std::string("fork failed: ") + std::strerror(errno);
         close(status_pipe[0]);
         close(status_pipe[1]);
-        if (log_fd >= 0) close(log_fd);
         if (null_fd >= 0) close(null_fd);
         return fail(message);
     }
     if (pid == 0) {
-        // Only async-signal-safe calls are legal here: the parent is multithreaded.
+        // Only async-signal-safe calls are legal here: the parent is multithreaded. No dprintf,
+        // std::string, strerror or allocation; breadcrumbs go out with write(STDERR_FILENO).
         if (null_fd >= 0) dup2(null_fd, STDIN_FILENO);
         if (log_fd >= 0) {
             dup2(log_fd, STDOUT_FILENO);
             dup2(log_fd, STDERR_FILENO);
+            const ssize_t crumb = write(STDERR_FILENO, kChildForked, sizeof(kChildForked) - 1);
+            (void)crumb;
         }
         // Don't leak the app's descriptors (the X server's listening socket, binder, ...) into
         // Wine, as Runtime.exec/ProcessBuilder (what Winlator uses) doesn't either. The status
@@ -419,8 +463,16 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         for (int fd = 3; fd < max_fd; ++fd) {
             if (fd != status_pipe[1]) close(fd);
         }
+        if (log_fd >= 0) {
+            const ssize_t crumb = write(STDERR_FILENO, kChildFdsClosed, sizeof(kChildFdsClosed) - 1);
+            (void)crumb;
+        }
         execve(program.c_str(), argv.data(), envp.data());
         const int exec_errno = errno;
+        if (log_fd >= 0) {
+            const ssize_t crumb = write(STDERR_FILENO, kChildExecFailed, sizeof(kChildExecFailed) - 1);
+            (void)crumb;
+        }
 #if defined(__ANDROID__) && defined(__LP64__)
         if (exec_errno == EACCES && linker_fallback) {
             if (log_fd >= 0) {
@@ -435,16 +487,18 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         _exit(127);
     }
 
+    FABLE_CRUMB(log_fd, "after fork (parent), child pid %d", static_cast<int>(pid));
     close(status_pipe[1]);
-    if (log_fd >= 0) close(log_fd);
     if (null_fd >= 0) close(null_fd);
 
+    FABLE_CRUMB(log_fd, "before read of status pipe");
     int child_errno = 0;
     ssize_t got;
     do {
         got = read(status_pipe[0], &child_errno, sizeof(child_errno));
     } while (got < 0 && errno == EINTR);
     close(status_pipe[0]);
+    FABLE_CRUMB(log_fd, "after read of status pipe (got %zd)", got);
     if (got == static_cast<ssize_t>(sizeof(child_errno))) {
         int ignored_status = 0;
         waitpid(pid, &ignored_status, 0);
@@ -454,11 +508,7 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
             reason += " (not an ARM64 executable, so the linker64 fallback can't start it)";
         }
 #endif
-        const int note_fd = open(log_path.c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
-        if (note_fd >= 0) {
-            dprintf(note_fd, "[fable] exec failed: %s\n", reason.c_str());
-            close(note_fd);
-        }
+        if (log_fd >= 0) dprintf(log_fd, "[fable] exec failed: %s\n", reason.c_str());
         return fail("Couldn't run " + basename_of(program) + ": " + reason);
     }
 
@@ -487,6 +537,8 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         }
     }).detach();
 
+    FABLE_CRUMB(log_fd, "return pid %d", static_cast<int>(pid));
+    close(launch_log.release());
     return static_cast<int>(pid);
 }
 

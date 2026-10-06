@@ -78,6 +78,22 @@ std::vector<std::string> string_array(JNIEnv* env, jobjectArray array, std::stri
 
 extern "C" {
 
+// Load-time breadcrumb only. Deliberately installs NO signal handlers: ART owns SIGSEGV (implicit
+// null checks, stack overflow checks) and replacing it would turn ordinary Java exceptions into
+// native crashes. Native crashes are diagnosed from the launch-log breadcrumbs and tombstones.
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
+    JNIEnv* env = nullptr;
+    if (!vm || vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK || !env) {
+        FABLE_LOGE("JNI_OnLoad: GetEnv(JNI_VERSION_1_6) failed");
+        return JNI_ERR;
+    }
+    FABLE_LOGI("libfable_native loaded (sdk=%s, abi=%s, device=%s)",
+               system_property("ro.build.version.sdk").c_str(),
+               system_property("ro.product.cpu.abi").c_str(),
+               system_property("ro.product.model").c_str());
+    return JNI_VERSION_1_6;
+}
+
 JNIEXPORT jstring JNICALL
 Java_io_harbor_fable_nativebridge_AdrenoToolsBridge_validateDriverZip(
     JNIEnv* env, jobject /*thiz*/, jstring jZipPath) {
