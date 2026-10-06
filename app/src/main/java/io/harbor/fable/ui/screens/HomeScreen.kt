@@ -37,7 +37,6 @@ fun HomeScreen(
 
     FableScreen(
         title = "Fable",
-        subtitle = "Wine container manager",
         actions = {
             GlassIconButton(
                 icon = Icons.Outlined.Add,
@@ -91,7 +90,7 @@ fun HomeScreen(
                 EmptyState(
                     icon = Icons.Outlined.SportsEsports,
                     title = "No apps yet",
-                    message = "Add a Windows app or game, then assign it to a container to run it.",
+                    message = "Add an app to get started",
                     actionLabel = "Add App",
                     actionIcon = Icons.Outlined.Add,
                     onAction = onAddApp,
@@ -107,7 +106,7 @@ fun HomeScreen(
                         if (index > 0) CardDivider()
                         ListRow(
                             title = container.name,
-                            subtitle = "${container.wineVersion} · ${container.screenResolution}",
+                            subtitle = container.wineVersion,
                             icon = Icons.Outlined.Apps,
                             iconTint = containerStatusColor(container.status),
                             onClick = { onContainerClick(container.id) },

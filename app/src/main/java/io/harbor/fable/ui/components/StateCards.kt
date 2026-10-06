@@ -34,8 +34,8 @@ import io.harbor.fable.ui.theme.Spacing
 fun EmptyState(
     icon: ImageVector,
     title: String,
-    message: String,
     modifier: Modifier = Modifier,
+    message: String = "",
     actionLabel: String? = null,
     actionIcon: ImageVector? = null,
     onAction: (() -> Unit)? = null,
@@ -50,8 +50,10 @@ fun EmptyState(
             IconTile(icon = icon, tint = FableTextDim, size = 56.dp)
             Spacer(Modifier.height(Spacing.lg))
             Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(Spacing.xs))
-            Text(message, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+            if (message.isNotBlank()) {
+                Spacer(Modifier.height(Spacing.xs))
+                Text(message, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+            }
             if (actionLabel != null && onAction != null) {
                 Spacer(Modifier.height(Spacing.xl))
                 GlassButton(text = actionLabel, onClick = onAction, primary = true, icon = actionIcon)

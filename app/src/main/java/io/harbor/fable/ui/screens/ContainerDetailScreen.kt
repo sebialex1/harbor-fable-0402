@@ -49,7 +49,6 @@ fun ContainerDetailScreen(
 
     FableScreen(
         title = container?.name ?: "Container",
-        subtitle = container?.wineVersion,
         onBack = onBack,
     ) {
         if (container == null) {
@@ -57,7 +56,6 @@ fun ContainerDetailScreen(
                 EmptyState(
                     icon = Icons.Outlined.ErrorOutline,
                     title = "Container not found",
-                    message = "This container may have been deleted.",
                     actionLabel = "Go Back",
                     actionIcon = Icons.AutoMirrored.Outlined.ArrowBack,
                     onAction = onBack,
@@ -153,8 +151,7 @@ fun ContainerDetailScreen(
             GlassCard {
                 if (containerExes.isEmpty()) {
                     ListRow(
-                        title = "No apps assigned",
-                        subtitle = "Add an app or game to run it in this container",
+                        title = "No apps",
                         icon = Icons.Outlined.FileOpen,
                         showChevron = false,
                     )
@@ -162,7 +159,7 @@ fun ContainerDetailScreen(
                     containerExes.forEach { exe ->
                         ListRow(
                             title = exe.name,
-                            subtitle = if (container.exePath == exe.path) "Primary app" else "Tap to make primary",
+                            subtitle = if (container.exePath == exe.path) "Primary" else null,
                             icon = Icons.Outlined.SportsEsports,
                             showChevron = false,
                             trailing = {
@@ -193,7 +190,6 @@ fun ContainerDetailScreen(
                 }
                 ListRow(
                     title = "Add executable",
-                    subtitle = "Pick an app or game file",
                     icon = Icons.Outlined.Add,
                     showChevron = true,
                     onClick = { showAddExe = true },
@@ -219,7 +215,6 @@ fun ContainerDetailScreen(
                 CardDivider()
                 ToggleRow(
                     title = "Fullscreen",
-                    subtitle = "Run in fullscreen mode",
                     checked = container.isFullscreen,
                     onCheckedChange = { fs ->
                         scope.launch {
@@ -237,7 +232,6 @@ fun ContainerDetailScreen(
             GlassCard {
                 ListRow(
                     title = "Delete container",
-                    subtitle = "Permanently remove this container and its files",
                     icon = Icons.Outlined.Delete,
                     iconTint = FableError,
                     showChevron = true,

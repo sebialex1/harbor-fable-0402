@@ -35,7 +35,6 @@ fun SettingsScreen() {
 
     FableScreen(
         title = "Settings",
-        subtitle = "App-wide configuration",
     ) {
         // Default container settings
         item { SectionLabel("Container Defaults") }
@@ -59,7 +58,6 @@ fun SettingsScreen() {
                 CardDivider()
                 ToggleRow(
                     title = "Fullscreen by default",
-                    subtitle = "New containers start in fullscreen",
                     checked = settings.defaultFullscreen,
                     onCheckedChange = { fs ->
                         settingsRepo.update { it.copy(defaultFullscreen = fs) }
@@ -81,7 +79,6 @@ fun SettingsScreen() {
                 CardDivider()
                 ToggleRow(
                     title = "VSync",
-                    subtitle = "Synchronize frames to display refresh",
                     checked = settings.vsync,
                     onCheckedChange = { v ->
                         settingsRepo.update { it.copy(vsync = v) }
@@ -107,7 +104,6 @@ fun SettingsScreen() {
             GlassCard {
                 ToggleRow(
                     title = "Refresh on launch",
-                    subtitle = "Fetch latest catalog when the app starts",
                     checked = settings.refreshCatalogOnLaunch,
                     onCheckedChange = { r ->
                         settingsRepo.update { it.copy(refreshCatalogOnLaunch = r) }
@@ -159,7 +155,7 @@ fun SettingsScreen() {
             GlassCard {
                 InfoRow(
                     label = "Version",
-                    value = "0.1.0",
+                    value = "0.2.0",
                     icon = Icons.Outlined.Info,
                 )
                 CardDivider()
@@ -177,7 +173,6 @@ fun SettingsScreen() {
             GlassCard {
                 ListRow(
                     title = "Reset to defaults",
-                    subtitle = "Restore all settings to their default values",
                     icon = Icons.Outlined.Restore,
                     iconTint = FableError,
                     showChevron = true,

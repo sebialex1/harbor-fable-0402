@@ -85,7 +85,6 @@ fun AssetsScreen() {
 
     FableScreen(
         title = "Assets",
-        subtitle = "Wine, DXVK, Proton and more",
         actions = {
             GlassIconButton(
                 icon = Icons.Outlined.CloudDownload,
@@ -114,15 +113,15 @@ fun AssetsScreen() {
         }
 
         if (isRefreshing) {
-            item(key = "refreshing") { LoadingCard(message = "Refreshing asset catalog…") }
+            item(key = "refreshing") { LoadingCard(message = "Refreshing…") }
         }
 
         if (assets.isEmpty() && !isRefreshing) {
             item(key = "empty") {
                 EmptyState(
                     icon = Icons.Outlined.Download,
-                    title = "No assets found",
-                    message = "Assets will appear here once the catalog is refreshed.",
+                    title = "No assets",
+                    message = "Refresh to load the catalog",
                 )
             }
         } else {

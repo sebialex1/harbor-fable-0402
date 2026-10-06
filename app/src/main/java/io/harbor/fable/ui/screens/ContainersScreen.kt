@@ -34,14 +34,12 @@ fun ContainersScreen(
     val repository = app.containerRepository
     val settings = app.settingsRepository
     val containers by repository.containers.collectAsStateWithLifecycle()
-    val exes by repository.exes.collectAsStateWithLifecycle()
     val appSettings by settings.settings.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
 
     FableScreen(
         title = "Containers",
-        subtitle = "Manage your Wine environments",
         actions = {
             GlassIconButton(
                 icon = Icons.Outlined.Add,
@@ -55,7 +53,7 @@ fun ContainersScreen(
                 EmptyState(
                     icon = Icons.Outlined.Apps,
                     title = "No containers yet",
-                    message = "Create a container to start managing Wine environments and adding executables.",
+                    message = "Create a container to get started",
                     actionLabel = "Create Container",
                     actionIcon = Icons.Outlined.Add,
                     onAction = { showCreate = true },
@@ -64,10 +62,8 @@ fun ContainersScreen(
         } else {
             item { SectionLabel("Your Containers") }
             items(containers) { container ->
-                val containerExes = exes.filter { it.containerId == container.id }
                 ContainerCard(
                     container = container,
-                    exeCount = containerExes.size,
                     onClick = { onContainerClick(container.id) },
                 )
             }
@@ -101,22 +97,12 @@ fun ContainersScreen(
 @Composable
 private fun ContainerCard(
     container: Container,
-    exeCount: Int,
     onClick: () -> Unit,
 ) {
     GlassCard(onClick = onClick) {
         ListRow(
             title = container.name,
-            subtitle = buildString {
-                append(container.wineVersion)
-                append(" · ")
-                append(container.screenResolution)
-                if (exeCount > 0) {
-                    append(" · ")
-                    append(exeCount)
-                    append(if (exeCount == 1) " exe" else " exes")
-                }
-            },
+            subtitle = container.wineVersion,
             icon = Icons.Outlined.Apps,
             iconTint = containerStatusColor(container.status),
             showChevron = true,
@@ -146,14 +132,12 @@ private fun CreateContainerSheet(
 
     FableSheet(
         title = "New Container",
-        subtitle = "Create a Wine environment",
         onDismiss = onDismiss,
     ) { close ->
         GlassTextField(
             value = name,
             onValueChange = { name = it },
             label = "Container name",
-            placeholder = "My Wine Environment",
         )
 
         GlassCard {
@@ -169,7 +153,6 @@ private fun CreateContainerSheet(
         GlassCard {
             ToggleRow(
                 title = "Fullscreen",
-                subtitle = "Start in fullscreen mode",
                 checked = fullscreen,
                 onCheckedChange = { fullscreen = it },
                 icon = Icons.Outlined.Fullscreen,

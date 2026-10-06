@@ -60,7 +60,6 @@ fun AddAppSheet(
 
     FableSheet(
         title = "Add App",
-        subtitle = "Pick an app or game and assign it to a container",
         onDismiss = onDismiss,
     ) { close ->
         GlassButton(
@@ -80,13 +79,12 @@ fun AddAppSheet(
             value = name,
             onValueChange = { name = it },
             label = "App name",
-            placeholder = "e.g. Hollow Knight",
         )
         if (containers.isEmpty()) {
             NoticeCard(
                 icon = Icons.Outlined.Info,
-                title = "No containers yet",
-                lines = listOf("Create a container first, then add apps to it."),
+                title = "Create a container first.",
+                lines = emptyList(),
             )
         } else {
             GlassCard {

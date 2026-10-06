@@ -96,15 +96,15 @@ fun DriversScreen() {
         }
 
         if (isRefreshing) {
-            item { LoadingCard(message = "Refreshing driver catalog…") }
+            item { LoadingCard(message = "Refreshing…") }
         }
 
         if (drivers.isEmpty() && !isRefreshing) {
             item {
                 EmptyState(
                     icon = Icons.Outlined.Memory,
-                    title = "No drivers available",
-                    message = "Driver packages will appear here once the catalog is refreshed.",
+                    title = "No drivers",
+                    message = "Refresh to load the catalog",
                 )
             }
         } else {
