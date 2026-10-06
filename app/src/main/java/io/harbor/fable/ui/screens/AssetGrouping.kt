@@ -22,11 +22,29 @@ internal data class AssetVersionGroup(
 
 internal data class AssetVariant(
     val asset: AssetEntry,
-    /** "Standard", "Staging", "Staging TkG", "WoW64", … */
+    /** "Standard", "Staging", "Staging TkG WoW64", … */
     val label: String,
     /** Lower is preferred: plain < staging < tkg < wow64 < anything unrecognised. */
     val rank: Int,
+    /** The build without its WoW64 mode: "Standard", "Staging", "Staging TkG". */
+    val flavor: String,
+    /** True for the WoW64 builds (32-bit programs without a separate 32-bit Wine). */
+    val wow64: Boolean,
 )
+
+/** Distinct flavors of a version's builds, preferred first. */
+internal val AssetVersionGroup.flavors: List<String>
+    get() = variants.map { it.flavor }.distinct()
+
+/** True when the version ships both WoW64 and non-WoW64 builds, so the mode is a real choice. */
+internal val AssetVersionGroup.hasWow64Choice: Boolean
+    get() = variants.any { it.wow64 } && variants.any { !it.wow64 }
+
+/** The build matching [flavor] and [wow64], or the closest one when that combination is missing. */
+internal fun AssetVersionGroup.pick(flavor: String, wow64: Boolean): AssetVariant =
+    variants.firstOrNull { it.flavor == flavor && it.wow64 == wow64 }
+        ?: variants.firstOrNull { it.flavor == flavor }
+        ?: variants.first()
 
 /** How many versions each component lists; older ones are not worth the scroll. */
 internal const val MAX_VERSIONS_PER_TYPE = 5
@@ -91,7 +109,9 @@ private fun variantOf(asset: AssetEntry, version: String): AssetVariant {
         }
     }
     val label = if (extra.isEmpty()) "Standard" else extra.joinToString(" ") { prettyToken(it) }
-    return AssetVariant(asset = asset, label = label, rank = rank)
+    val flavorTokens = extra.filter { it != "wow64" }
+    val flavor = if (flavorTokens.isEmpty()) "Standard" else flavorTokens.joinToString(" ") { prettyToken(it) }
+    return AssetVariant(asset = asset, label = label, rank = rank, flavor = flavor, wow64 = "wow64" in extra)
 }
 
 private fun prettyToken(token: String): String = when (token) {

@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
@@ -48,6 +49,8 @@ fun DownloadRow(
     task: DownloadTask?,
     onDownload: () -> Unit,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    titleBadge: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val status = task?.status
     val done = isDownloaded || status == DownloadStatus.COMPLETED
@@ -82,6 +85,8 @@ fun DownloadRow(
         ListRow(
             title = displayAssetName(title),
             subtitle = subtitle,
+            onClick = onClick,
+            titleBadge = titleBadge,
             showChevron = false,
             trailing = {
                 AnimatedContent(

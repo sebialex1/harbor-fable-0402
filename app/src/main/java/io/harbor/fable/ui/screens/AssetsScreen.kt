@@ -33,6 +33,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
@@ -201,9 +206,10 @@ internal fun AssetsContent(
 }
 
 /**
- * One version of a component. The row's download control acts on the selected build; when the
- * version has several builds (Wine: staging, tkg, wow64) they sit under it as chips, the plain
- * amd64 build selected unless another one is already downloaded.
+ * One version of a component. The row's download control acts on the selected build. When the
+ * version has several builds (Wine: staging, tkg, wow64) tapping the row reveals them: one chip
+ * per flavor (Standard, Staging, Staging TkG) and a WoW64 chip that toggles the mode. The plain
+ * amd64 build is selected unless another one is already downloaded.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -217,16 +223,36 @@ private fun AssetVersionRow(
     val selected = group.variants.firstOrNull { it.asset.id == selectedId } ?: group.defaultVariant
     val asset = selected.asset
     val task = tasks.filter { it.assetId == asset.id }.maxByOrNull { it.updatedAt }
+    val choosable = group.variants.size > 1
+    var open by rememberSaveable(group.key) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         DownloadRow(
             title = "${typeShortName(group.type)} ${group.version}",
-            version = if (group.variants.size > 1) selected.label else "",
+            version = if (choosable) selected.label else "",
             sizeBytes = asset.fileSizeBytes,
             isDownloaded = asset.isDownloaded,
             task = task,
             onDownload = { onDownload(asset) },
+            onClick = if (choosable) ({ open = !open }) else null,
+            titleBadge = if (choosable) {
+                {
+                    val rotation by animateFloatAsState(if (open) 180f else 0f, Motion.inPlace(), label = "buildsChevron")
+                    Icon(
+                        imageVector = Icons.Outlined.ExpandMore,
+                        contentDescription = if (open) "Hide builds" else "Show builds",
+                        tint = FableTextDim,
+                        modifier = Modifier.size(16.dp).rotate(rotation),
+                    )
+                }
+            } else {
+                null
+            },
         )
-        if (group.variants.size > 1) {
+        AnimatedVisibility(
+            visible = choosable && open,
+            enter = fadeIn(Motion.enter()) + expandVertically(Motion.enter()),
+            exit = fadeOut(Motion.exit()) + shrinkVertically(Motion.exit()),
+        ) {
             FlowRow(
                 Modifier
                     .fillMaxWidth()
@@ -234,11 +260,18 @@ private fun AssetVersionRow(
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
-                group.variants.forEach { variant ->
+                group.flavors.forEach { flavor ->
                     GlassChip(
-                        text = variant.label,
-                        selected = variant.asset.id == asset.id,
-                        onClick = { onSelect(variant.asset) },
+                        text = flavor,
+                        selected = selected.flavor == flavor,
+                        onClick = { onSelect(group.pick(flavor, selected.wow64).asset) },
+                    )
+                }
+                if (group.hasWow64Choice) {
+                    GlassChip(
+                        text = "WoW64",
+                        selected = selected.wow64,
+                        onClick = { onSelect(group.pick(selected.flavor, !selected.wow64).asset) },
                     )
                 }
             }
