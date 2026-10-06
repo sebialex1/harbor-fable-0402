@@ -1,10 +1,21 @@
 package io.harbor.fable.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
@@ -12,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -19,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.DownloadStatus
 import io.harbor.fable.data.DownloadTask
+import io.harbor.fable.data.SetupState
 import io.harbor.fable.data.formatBytes
 import io.harbor.fable.data.models.AssetEntry
 import io.harbor.fable.data.models.AssetType
@@ -26,6 +39,8 @@ import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.RowPaddingHorizontal
+import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
 @Composable
@@ -37,12 +52,21 @@ fun AssetsScreen() {
     val assets by repository.assets.collectAsStateWithLifecycle()
     val isRefreshing by repository.isRefreshing.collectAsStateWithLifecycle()
     val downloadSnapshot by downloadManager.snapshot.collectAsStateWithLifecycle()
+    val setupManager = app.setupManager
+    val setup by setupManager.state.collectAsStateWithLifecycle()
+    val installing by setupManager.installing.collectAsStateWithLifecycle()
+    val fableUi = LocalFableUi.current
     val scope = rememberCoroutineScope()
 
     // Re-runs on every button press; the initial value (0) refreshes from cache on entry.
     var refreshTrigger by remember { mutableIntStateOf(0) }
     LaunchedEffect(refreshTrigger) { repository.refresh(forceRefresh = refreshTrigger > 0) }
     val expansion = rememberExpansionState()
+
+    // Runs on the app-level scope so leaving the screen does not cancel the catalog refresh.
+    val downloadRecommended: () -> Unit = {
+        fableUi.scope.launch { fableUi.showMessage(setupManager.installRecommended().message, long = true) }
+    }
 
     val grouped = remember(assets) {
         assets.groupBy { it.type }
@@ -64,6 +88,12 @@ fun AssetsScreen() {
         subtitle = "Wine, DXVK, Proton and more",
         actions = {
             GlassIconButton(
+                icon = Icons.Outlined.CloudDownload,
+                contentDescription = "Download recommended",
+                enabled = setup.needsSetup && !setup.isDownloading && !installing,
+                onClick = downloadRecommended,
+            )
+            GlassIconButton(
                 icon = Icons.Outlined.Refresh,
                 contentDescription = "Refresh assets",
                 enabled = !isRefreshing,
@@ -71,12 +101,24 @@ fun AssetsScreen() {
             )
         },
     ) {
+        // Shown until every recommended package is downloaded, then it fades away.
+        if (setup.needsSetup) {
+            item(key = "setup-banner") {
+                SetupBanner(
+                    state = setup,
+                    installing = installing,
+                    onDownloadAll = downloadRecommended,
+                    modifier = Modifier.animateItem(),
+                )
+            }
+        }
+
         if (isRefreshing) {
-            item { LoadingCard(message = "Refreshing asset catalog…") }
+            item(key = "refreshing") { LoadingCard(message = "Refreshing asset catalog…") }
         }
 
         if (assets.isEmpty() && !isRefreshing) {
-            item {
+            item(key = "empty") {
                 EmptyState(
                     icon = Icons.Outlined.Download,
                     title = "No assets found",
@@ -90,8 +132,8 @@ fun AssetsScreen() {
                     val typeKey = type.name
                     val downloadedCount = typeAssets.count { it.isDownloaded }
 
-                    item { SectionLabel(typeDisplayName(type)) }
-                    item {
+                    item(key = "label-$typeKey") { SectionLabel(typeDisplayName(type)) }
+                    item(key = "card-$typeKey") {
                         CollapsibleCard(
                             expanded = expansion.isExpanded(typeKey, default = true),
                             onToggle = { expansion.toggle(typeKey, default = true) },
@@ -127,6 +169,67 @@ fun AssetsScreen() {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** First-run card: what is missing, one button to download it, and live progress. */
+@Composable
+private fun SetupBanner(
+    state: SetupState,
+    installing: Boolean,
+    onDownloadAll: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val busy = installing || state.isDownloading
+    val title = when {
+        busy -> "Downloading"
+        state.nothingInstalled -> "Get Started"
+        else -> "Finish Setup"
+    }
+    val detail = when {
+        state.isDownloading -> "${(state.progress * 100).toInt()}%"
+        installing -> "Preparing…"
+        else -> state.pending.joinToString(", ") { it.kind.label } +
+            if (state.pendingBytes > 0) " (${formatBytes(state.pendingBytes)})" else ""
+    }
+    GlassCard(modifier = modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(RowPaddingHorizontal),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconTile(icon = Icons.Outlined.RocketLaunch, tint = FableAccent)
+                Spacer(Modifier.width(Spacing.md))
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall)
+                    Text(detail, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                }
+            }
+            AnimatedContent(
+                targetState = busy,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "setupAction",
+            ) { working ->
+                if (working) {
+                    ThinProgressBar(progress = if (state.isDownloading) state.progress else null)
+                } else {
+                    GlassButton(
+                        text = "Download All",
+                        icon = Icons.Outlined.Download,
+                        primary = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = onDownloadAll,
+                    )
+                }
+            }
+            if (state.unavailable.isNotEmpty() && !busy) {
+                Text(
+                    text = "No build available for ${state.unavailable.joinToString(", ") { it.kind.label }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = FableTextDim,
+                )
             }
         }
     }

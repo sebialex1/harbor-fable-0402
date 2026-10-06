@@ -310,9 +310,10 @@ class AssetRepository internal constructor(
      * directories directly, so it works offline and before the catalog has been refreshed.
      */
     fun downloadedFiles(type: AssetType): List<File> {
+        val root = downloadRoot(type)
         val directories = _catalog.value
             .filter { it.type == type }
-            .map { File(assetsRoot, sanitizeFileName(it.slug)) }
+            .map { File(root, sanitizeFileName(it.slug)) }
             .distinct()
         return directories
             .flatMap { dir ->
@@ -359,11 +360,15 @@ class AssetRepository internal constructor(
         }
     }
 
+    /** Driver packages live with the drivers, whichever screen started the download. */
+    private fun downloadRoot(type: AssetType): File =
+        if (type == AssetType.VULKAN_DRIVER) File(appContext.filesDir, "drivers") else assetsRoot
+
     private fun assetDestFile(entry: AssetEntry): File =
-        File(assetsRoot, "${sanitizeFileName(entry.sourceRepo ?: "misc")}/${sanitizeFileName(entry.name)}")
+        File(downloadRoot(entry.type), "${sanitizeFileName(entry.sourceRepo ?: "misc")}/${sanitizeFileName(entry.name)}")
 
     private fun driverDestFile(driver: DriverPackage): File =
-        File(appContext.filesDir, "drivers/${sanitizeFileName(driver.sourceRepo ?: "misc")}/${sanitizeFileName(driver.name)}")
+        File(downloadRoot(AssetType.VULKAN_DRIVER), "${sanitizeFileName(driver.sourceRepo ?: "misc")}/${sanitizeFileName(driver.name)}")
 
     private fun publish() {
         _assets.value = entriesById.values
@@ -461,7 +466,8 @@ class AssetRepository internal constructor(
                 repo = "dxvk",
                 displayName = "DXVK",
                 type = AssetType.DXVK,
-                assetGlobs = listOf("*.tar.gz", "*.tar.zst"),
+                // Release tarballs for Windows (dxvk-3.1.1.tar.gz); not the dxvk-native-* Linux builds.
+                assetGlobs = listOf("regex:^dxvk-[0-9][0-9.]*\\.tar\\.(gz|zst)$"),
                 notes = "DirectX to Vulkan translation",
             ),
             CatalogSource(

@@ -7,6 +7,7 @@ import io.harbor.fable.data.ContainerRepository
 import io.harbor.fable.data.DownloadManager
 import io.harbor.fable.data.GitHubReleaseFetcher
 import io.harbor.fable.data.SettingsRepository
+import io.harbor.fable.data.SetupManager
 
 /**
  * Application entry point. Wires the data layer singletons and exposes them
@@ -30,6 +31,10 @@ class FableApp : Application() {
 
     val downloadManager: DownloadManager
         get() = DownloadManager.get(this)
+
+    /** First-run setup: downloads the recommended Wine, Box64, driver and DXVK packages. */
+    val setupManager: SetupManager
+        get() = SetupManager.get(this)
 
     /** App-wide settings, including the defaults used for new containers. */
     val settingsRepository: SettingsRepository

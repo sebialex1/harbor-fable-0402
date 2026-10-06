@@ -1,0 +1,257 @@
+package io.harbor.fable.data
+
+import android.content.Context
+import android.util.Log
+import io.harbor.fable.data.models.AssetEntry
+import io.harbor.fable.data.models.AssetType
+import io.harbor.fable.data.models.DriverPackage
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+
+/** The four packages a fresh install needs before anything can run. */
+enum class RecommendedKind(val label: String) {
+    WINE("Wine"),
+    BOX64("Box64"),
+    DRIVER("RADV Xclipse"),
+    DXVK("DXVK"),
+}
+
+enum class RecommendedStatus {
+    /** At least one package of this kind is on disk. */
+    INSTALLED,
+
+    /** The recommended package is being downloaded right now. */
+    DOWNLOADING,
+
+    /** The catalog has a package to download. */
+    AVAILABLE,
+
+    /** The catalog has nothing for this kind (not refreshed yet, offline, or no matching release). */
+    UNAVAILABLE,
+}
+
+data class RecommendedItem(
+    val kind: RecommendedKind,
+    val status: RecommendedStatus,
+    val sizeBytes: Long = 0,
+    /** 0..1 while [status] is [RecommendedStatus.DOWNLOADING]. */
+    val progress: Float = 0f,
+)
+
+/** Where the recommended downloads stand. Empty until the first catalog/disk check. */
+data class SetupState(val items: List<RecommendedItem> = emptyList()) {
+    /** True while something recommended can still be downloaded or is on its way. */
+    val needsSetup: Boolean
+        get() = items.any { it.status == RecommendedStatus.AVAILABLE || it.status == RecommendedStatus.DOWNLOADING }
+
+    val isDownloading: Boolean get() = items.any { it.status == RecommendedStatus.DOWNLOADING }
+
+    /** True on a fresh install: nothing recommended has been downloaded yet. */
+    val nothingInstalled: Boolean
+        get() = items.isNotEmpty() && items.none { it.status == RecommendedStatus.INSTALLED }
+
+    /** Items that still need to be downloaded or are downloading. */
+    val pending: List<RecommendedItem>
+        get() = items.filter { it.status == RecommendedStatus.AVAILABLE || it.status == RecommendedStatus.DOWNLOADING }
+
+    val unavailable: List<RecommendedItem> get() = items.filter { it.status == RecommendedStatus.UNAVAILABLE }
+
+    val pendingBytes: Long get() = pending.sumOf { it.sizeBytes }
+
+    /** Share of the downloadable items that is done, 0..1. */
+    val progress: Float
+        get() {
+            val tracked = items.filter { it.status != RecommendedStatus.UNAVAILABLE }
+            if (tracked.isEmpty()) return 0f
+            return tracked.sumOf { item ->
+                when (item.status) {
+                    RecommendedStatus.INSTALLED -> 1.0
+                    RecommendedStatus.DOWNLOADING -> item.progress.toDouble()
+                    else -> 0.0
+                }
+            }.toFloat() / tracked.size
+        }
+}
+
+/** Outcome of [SetupManager.installRecommended]. */
+data class SetupResult(
+    val started: List<RecommendedKind>,
+    val alreadyInstalled: List<RecommendedKind>,
+    val unavailable: List<RecommendedKind>,
+    val failed: List<RecommendedKind>,
+    val catalogReachable: Boolean,
+    /** True when another [SetupManager.installRecommended] call was still running. */
+    val busy: Boolean = false,
+) {
+    /** One line for a snackbar. */
+    val message: String
+        get() = when {
+            busy -> "Setup is already running"
+            started.isNotEmpty() -> buildString {
+                append("Downloading ").append(started.joinToString(", ") { it.label })
+                if (unavailable.isNotEmpty()) {
+                    append(". No build available for ").append(unavailable.joinToString(", ") { it.label })
+                }
+            }
+            !catalogReachable && unavailable.isNotEmpty() -> "Couldn't reach the catalog. Check your connection"
+            failed.isNotEmpty() -> "Couldn't start the download for ${failed.joinToString(", ") { it.label }}"
+            unavailable.isNotEmpty() -> "No build available for ${unavailable.joinToString(", ") { it.label }}"
+            else -> "Everything is already downloaded"
+        }
+}
+
+/**
+ * First-run setup. Knows which catalog entries are the recommended ones, reports whether they
+ * are on disk, and queues the missing ones on the download manager (progress shows in the
+ * Assets list and the download notification).
+ */
+class SetupManager internal constructor(
+    private val assets: AssetRepository,
+    private val downloads: DownloadManager,
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val _installing = MutableStateFlow(false)
+
+    /** True while [installRecommended] is refreshing the catalog and queueing downloads. */
+    val installing: StateFlow<Boolean> = _installing.asStateFlow()
+
+    /** Live view of the recommended downloads, recomputed whenever the catalog or a download changes. */
+    val state: StateFlow<SetupState> = combine(assets.assets, assets.drivers, downloads.snapshot) { entries, drivers, snapshot ->
+        compute(entries, drivers, snapshot)
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), SetupState())
+
+    /**
+     * Refreshes the catalog, then downloads the latest Wine (amd64), Box64, RADV Xclipse and DXVK
+     * packages that are not on disk yet.
+     */
+    suspend fun installRecommended(): SetupResult {
+        if (!_installing.compareAndSet(false, true)) {
+            return SetupResult(emptyList(), emptyList(), emptyList(), emptyList(), catalogReachable = true, busy = true)
+        }
+        try {
+            assets.refresh()
+            val picks = pickRecommended(assets.assets.value, assets.drivers.value)
+            val started = mutableListOf<RecommendedKind>()
+            val installed = mutableListOf<RecommendedKind>()
+            val unavailable = mutableListOf<RecommendedKind>()
+            val failed = mutableListOf<RecommendedKind>()
+            for (kind in RecommendedKind.entries) {
+                if (isInstalled(kind)) {
+                    installed += kind
+                    continue
+                }
+                val pick = picks[kind]
+                if (pick == null) {
+                    unavailable += kind
+                    continue
+                }
+                try {
+                    val task = if (pick.isDriver) assets.downloadDriver(pick.id) else assets.download(pick.id)
+                    if (task != null) started += kind else installed += kind
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.w(TAG, "Could not queue ${kind.label}", error)
+                    failed += kind
+                }
+            }
+            val reachable = assets.assets.value.isNotEmpty() || assets.refreshErrors.value.isEmpty()
+            return SetupResult(started, installed, unavailable, failed, reachable)
+        } finally {
+            _installing.value = false
+        }
+    }
+
+    private fun compute(entries: List<AssetEntry>, drivers: List<DriverPackage>, snapshot: DownloadSnapshot): SetupState {
+        val picks = pickRecommended(entries, drivers)
+        val items = RecommendedKind.entries.map { kind ->
+            val pick = picks[kind]
+            val task = pick?.let { p ->
+                snapshot.tasks.filter { it.assetId == p.id }.maxByOrNull { it.updatedAt }
+            }
+            when {
+                isInstalled(kind) -> RecommendedItem(kind, RecommendedStatus.INSTALLED)
+                pick != null && task != null && task.keepsServiceAlive -> RecommendedItem(
+                    kind = kind,
+                    status = RecommendedStatus.DOWNLOADING,
+                    sizeBytes = pick.sizeBytes,
+                    progress = if (task.status == DownloadStatus.VERIFYING) 1f else task.progressFraction,
+                )
+                pick != null -> RecommendedItem(kind, RecommendedStatus.AVAILABLE, pick.sizeBytes)
+                else -> RecommendedItem(kind, RecommendedStatus.UNAVAILABLE)
+            }
+        }
+        return SetupState(items)
+    }
+
+    private fun isInstalled(kind: RecommendedKind): Boolean = when (kind) {
+        RecommendedKind.WINE -> assets.downloadedFiles(AssetType.WINE).isNotEmpty()
+        RecommendedKind.BOX64 -> assets.downloadedFiles(AssetType.BOX64).isNotEmpty()
+        RecommendedKind.DXVK -> assets.downloadedFiles(AssetType.DXVK).isNotEmpty()
+        RecommendedKind.DRIVER -> assets.downloadedFiles(AssetType.VULKAN_DRIVER)
+            .any { it.path.contains(XCLIPSE_REPO, ignoreCase = true) }
+    }
+
+    private class Pick(val id: String, val sizeBytes: Long, val isDriver: Boolean)
+
+    private fun pickRecommended(entries: List<AssetEntry>, drivers: List<DriverPackage>): Map<RecommendedKind, Pick> {
+        val picks = LinkedHashMap<RecommendedKind, Pick>()
+        entries.filter { it.type == AssetType.WINE }
+            .minByOrNull { wineRank(it.name) }
+            ?.let { picks[RecommendedKind.WINE] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
+        entries.filter { it.type == AssetType.BOX64 }
+            .minByOrNull { box64Rank(it.name) }
+            ?.let { picks[RecommendedKind.BOX64] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
+        entries.firstOrNull { it.type == AssetType.DXVK && !it.name.contains("native", ignoreCase = true) }
+            ?.let { picks[RecommendedKind.DXVK] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
+        drivers.firstOrNull { it.sourceRepo.orEmpty().contains(XCLIPSE_REPO, ignoreCase = true) }
+            ?.let { picks[RecommendedKind.DRIVER] = Pick(it.id, it.fileSizeBytes, isDriver = true) }
+        return picks
+    }
+
+    companion object {
+        private const val TAG = "SetupManager"
+        private const val XCLIPSE_REPO = "radv-xclipse"
+
+        private val STABLE_WOW64 = Regex("""^wine-[0-9][0-9.]*-amd64-wow64\.tar\.(xz|gz)$""", RegexOption.IGNORE_CASE)
+        private val STABLE_AMD64 = Regex("""^wine-[0-9][0-9.]*-amd64\.tar\.(xz|gz)$""", RegexOption.IGNORE_CASE)
+
+        /**
+         * Lower is better. The stable WoW64 build comes first: it is x86_64 like every other
+         * build here, and it also runs 32-bit programs without a separate Box86.
+         */
+        internal fun wineRank(name: String): Int = when {
+            STABLE_WOW64.matches(name) -> 0
+            STABLE_AMD64.matches(name) -> 1
+            !name.contains("staging", ignoreCase = true) -> 2
+            else -> 3
+        }
+
+        internal fun box64Rank(name: String): Int = when {
+            name.contains("android", ignoreCase = true) -> 0
+            name.contains("aarch64", ignoreCase = true) || name.contains("arm64", ignoreCase = true) -> 1
+            else -> 2
+        }
+
+        @Volatile
+        private var instance: SetupManager? = null
+
+        @Synchronized
+        fun get(context: Context): SetupManager {
+            instance?.let { return it }
+            val app = context.applicationContext
+            val created = SetupManager(AssetRepository.get(app), DownloadManager.get(app))
+            instance = created
+            return created
+        }
+    }
+}

@@ -62,7 +62,7 @@ Wired up as the application entry point.
 |---|---|---|---|
 | Kron4ek | Wine-Builds | WINE | `*amd64*.tar.xz`, `*amd64*.tar.gz` |
 | ptitSeb | box64 | BOX64 | `*aarch64*.tar.gz`, `*android*.tar.gz` |
-| doitsujin | dxvk | DXVK | `*.tar.gz`, `*.tar.zst` |
+| doitsujin | dxvk | DXVK | `regex:^dxvk-[0-9][0-9.]*\.tar\.(gz\|zst)$` (not the `dxvk-native-*` Linux builds) |
 | JimVulkan | radv-xclipse | VULKAN_DRIVER | `*.apk`, `*.zip` |
 | GGlessT | modern-treex | OTHER | `*.zip`, `*.tar.gz` |
 
@@ -101,3 +101,17 @@ Windows programs are x86_64, so on an ARM64 device Wine runs through Box64:
 `ptitSeb/box64` does not publish a ready-made ARM64 binary in its GitHub releases (only
 x86 library bundles), so the Box64 entry stays empty until a release that matches its globs
 appears or the globs are pointed at another source.
+
+## First-run setup (`SetupManager`)
+
+`SetupManager.installRecommended()` refreshes the catalog and queues the latest Wine (amd64),
+Box64, RADV Xclipse and DXVK packages on `DownloadManager`. Progress shows in the Assets list
+and the download notification.
+
+- Wine pick: stable `wine-X-amd64-wow64` first (runs 32-bit programs without Box86), then
+  stable `wine-X-amd64`, then the rest. All amd64 variants stay selectable in the Assets list.
+- `SetupManager.state` reports each kind as INSTALLED / DOWNLOADING / AVAILABLE / UNAVAILABLE.
+  "Installed" means a file is on disk (`AssetRepository.downloadedFiles`), so it works offline.
+- The Assets screen shows a "Get Started" / "Finish Setup" banner with "Download All" while
+  anything recommended is still missing, and a "Download recommended" top-bar action.
+- Driver packages always download to `filesDir/drivers/<repo>/`, from either screen.
