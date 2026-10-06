@@ -60,7 +60,8 @@ Wired up as the application entry point.
 ### Default catalog
 | Owner | Repo | Type | Globs |
 |---|---|---|---|
-| Kron4ek | Wine-Builds | WINE | `*.tar.xz`, `*.tar.gz` |
+| Kron4ek | Wine-Builds | WINE | `*amd64*.tar.xz`, `*amd64*.tar.gz` |
+| ptitSeb | box64 | BOX64 | `*aarch64*.tar.gz`, `*android*.tar.gz` |
 | doitsujin | dxvk | DXVK | `*.tar.gz`, `*.tar.zst` |
 | JimVulkan | radv-xclipse | VULKAN_DRIVER | `*.apk`, `*.zip` |
 | K11MCH1 | AdrenoToolsDrivers | VULKAN_DRIVER | `*.zip` |
@@ -80,3 +81,24 @@ client error (404) for repos with no releases; this is recorded in
 No Android SDK in this environment. The code is statically verified against
 the existing data layer API surface (method signatures, field names, import
 paths) but was not Gradle-compiled.
+
+## Launch flow (Box64 + Wine)
+
+Windows programs are x86_64, so on an ARM64 device Wine runs through Box64:
+`box64 wine <program>`. `ContainerRepository.launch()` / `launchDesktop()`:
+
+1. Look for a downloaded Box64 package (`assets/downloads/box64/`) and a downloaded Wine
+   build (`assets/downloads/Wine-Builds/`). Missing pieces give a
+   `LaunchResult.Failed` such as "Install Box64 and Wine from the Assets tab first".
+2. Unpack Box64 once into `filesDir/runtime/box64/` (an archive containing a `box64`
+   executable, or the bare executable).
+3. Unpack the Wine build into the container directory (`ContainerRepository.installWine`).
+   The first launch does this; `.fable-wine.json` marks a finished extraction. Headers, man
+   pages and static libraries are skipped.
+4. Call `NativeLoader.launchWineContainer`, which forks and execs
+   `box64 <container>/bin/wine <program> [args]`. The desktop launch runs
+   `explorer /desktop=Fable,<resolution>`. Output goes to `<container>/fable-launch.log`.
+
+`ptitSeb/box64` does not publish a ready-made ARM64 binary in its GitHub releases (only
+x86 library bundles), so the Box64 entry stays empty until a release that matches its globs
+appears or the globs are pointed at another source.

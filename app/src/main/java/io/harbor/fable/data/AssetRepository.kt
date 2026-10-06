@@ -305,6 +305,24 @@ class AssetRepository internal constructor(
         }
     }
 
+    /**
+     * Files on disk for the catalog sources of [type], newest first. Reads the download
+     * directories directly, so it works offline and before the catalog has been refreshed.
+     */
+    fun downloadedFiles(type: AssetType): List<File> {
+        val directories = _catalog.value
+            .filter { it.type == type }
+            .map { File(assetsRoot, sanitizeFileName(it.slug)) }
+            .distinct()
+        return directories
+            .flatMap { dir ->
+                dir.listFiles()
+                    ?.filter { it.isFile && it.length() > 0 && !it.name.endsWith(".partial") }
+                    .orEmpty()
+            }
+            .sortedWith(compareByDescending<File> { it.lastModified() }.thenByDescending { it.name })
+    }
+
     /** Local path for a downloaded asset, or null if not downloaded. */
     fun localPathFor(assetId: String): String? {
         val entry = entriesById[assetId] ?: return null
@@ -426,8 +444,17 @@ class AssetRepository internal constructor(
                 repo = "Wine-Builds",
                 displayName = "Wine Builds",
                 type = AssetType.WINE,
-                assetGlobs = listOf("*.tar.xz", "*.tar.gz"),
-                notes = "Proton/Wine builds for Android (AArch64)",
+                // x86_64 builds only: they run through Box64. The 32-bit x86 builds cannot.
+                assetGlobs = listOf("*amd64*.tar.xz", "*amd64*.tar.gz"),
+                notes = "Wine x86_64 builds, run through Box64",
+            ),
+            CatalogSource(
+                owner = "ptitSeb",
+                repo = "box64",
+                displayName = "Box64 (x86_64 Emulator)",
+                type = AssetType.BOX64,
+                assetGlobs = listOf("*aarch64*.tar.gz", "*android*.tar.gz"),
+                notes = "ARM64 x86_64 translator — required to run Wine",
             ),
             CatalogSource(
                 owner = "doitsujin",

@@ -59,13 +59,13 @@ std::vector<std::string> string_array(JNIEnv* env, jobjectArray array, std::stri
     for (jsize i = 0; i < n; ++i) {
         auto item = static_cast<jstring>(env->GetObjectArrayElement(array, i));
         if (!item) {
-            if (error) *error = "Environment array contains a null entry";
+            if (error) *error = "String array contains a null entry";
             return {};
         }
         JString text(env, item);
         env->DeleteLocalRef(item);
         if (!text.ok()) {
-            if (error) *error = "Failed to read environment entry";
+            if (error) *error = "Failed to read string array entry";
             return {};
         }
         out.emplace_back(text.get());
@@ -178,36 +178,56 @@ Java_io_harbor_fable_nativebridge_AdrenoToolsBridge_getGpuInfo(
 
 JNIEXPORT jint JNICALL
 Java_io_harbor_fable_nativebridge_NativeLoader_launchWineContainer(
-    JNIEnv* env, jobject /*thiz*/, jstring jContainerPath, jstring jExePath,
-    jobjectArray jEnvVars, jstring jDriverPath) {
-    if (!jContainerPath || !jExePath) return -1;
+    JNIEnv* env, jobject /*thiz*/, jstring jContainerPath, jstring jExePath, jobjectArray jArgs,
+    jobjectArray jEnvVars, jstring jDriverPath, jstring jBox64Path) {
+    fable::set_launch_error("");
+    auto fail = [](const std::string& message) {
+        fable::set_launch_error(message);
+        FABLE_LOGE("%s", message.c_str());
+        return -1;
+    };
+    if (!jContainerPath || !jExePath) return fail("Container or executable path is missing");
     JString container(env, jContainerPath);
     JString exe(env, jExePath);
-    if (!container.ok() || !exe.ok()) return -1;
-    std::string env_error;
-    std::vector<std::string> env_vars = string_array(env, jEnvVars, &env_error);
-    if (!env_error.empty()) {
-        FABLE_LOGE("%s", env_error.c_str());
-        return -1;
-    }
+    if (!container.ok() || !exe.ok()) return fail("Failed to read the container or executable path");
+    std::string array_error;
+    std::vector<std::string> args = string_array(env, jArgs, &array_error);
+    if (!array_error.empty()) return fail(array_error);
+    std::vector<std::string> env_vars = string_array(env, jEnvVars, &array_error);
+    if (!array_error.empty()) return fail(array_error);
     std::string driver;
     if (jDriverPath) {
         JString driver_path(env, jDriverPath);
-        if (!driver_path.ok()) return -1;
+        if (!driver_path.ok()) return fail("Failed to read the driver path");
         driver = driver_path.get();
+    }
+    std::string box64;
+    if (jBox64Path) {
+        JString box64_path(env, jBox64Path);
+        if (!box64_path.ok()) return fail("Failed to read the Box64 path");
+        box64 = box64_path.get();
     }
     try {
         fable::WineLaunchRequest request;
         request.container_path = container.get();
         request.exe_path = exe.get();
+        request.args = std::move(args);
         request.env = std::move(env_vars);
         request.driver_path = std::move(driver);
+        request.box64_path = std::move(box64);
         std::string error;
         return fable::launch_wine_container(request, &error);
     } catch (const std::exception& ex) {
-        FABLE_LOGE("launchWineContainer exception: %s", ex.what());
-        return -1;
+        return fail(std::string("launchWineContainer exception: ") + ex.what());
     }
+}
+
+JNIEXPORT jstring JNICALL
+Java_io_harbor_fable_nativebridge_NativeLoader_lastLaunchError(
+    JNIEnv* env, jobject /*thiz*/) {
+    const std::string message = fable::last_launch_error();
+    if (message.empty()) return nullptr;
+    return env->NewStringUTF(message.c_str());
 }
 
 JNIEXPORT jboolean JNICALL

@@ -7,11 +7,16 @@
 
 #include <cctype>
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
 #include <map>
+#include <mutex>
+#include <string>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -19,6 +24,12 @@ extern char** environ;
 
 namespace fable {
 namespace {
+
+// Wine and Box64 output goes here, inside the container directory.
+constexpr const char* kLaunchLogName = "fable-launch.log";
+
+std::mutex g_error_mutex;
+std::string g_last_error;
 
 bool is_regular(const std::string& path) {
     struct stat st{};
@@ -29,6 +40,32 @@ bool is_dir(const std::string& path) {
     struct stat st{};
     return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
+
+bool is_executable_file(const std::string& path) {
+    return is_regular(path) && access(path.c_str(), X_OK) == 0;
+}
+
+// A bare program name ("explorer", "winecfg") that Wine resolves on its own.
+bool is_wine_builtin_name(const std::string& path) {
+    return path.find('/') == std::string::npos && path.find('\\') == std::string::npos;
+}
+
+#if defined(__aarch64__)
+// ELF e_machine value of an x86_64 binary.
+constexpr uint16_t kMachineX86_64 = 62;
+
+// ELF e_machine of path, or 0 when it is not a readable ELF file.
+uint16_t elf_machine(const std::string& path) {
+    const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    unsigned char header[20];
+    const ssize_t n = read(fd, header, sizeof(header));
+    close(fd);
+    if (n != static_cast<ssize_t>(sizeof(header))) return 0;
+    if (header[0] != 0x7f || header[1] != 'E' || header[2] != 'L' || header[3] != 'F') return 0;
+    return static_cast<uint16_t>(header[18] | (header[19] << 8));
+}
+#endif
 
 bool looks_like_windows_path(const std::string& path) {
     if (path.size() >= 2 && std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':') {
@@ -59,7 +96,19 @@ std::string find_wine(const std::string& container) {
     const char* rels[] = {"/bin/wine", "/bin/wine64", "/wine", "/wine64", "/usr/bin/wine", nullptr};
     for (int i = 0; rels[i]; ++i) {
         const std::string candidate = container + rels[i];
-        if (is_regular(candidate) && access(candidate.c_str(), X_OK) == 0) return candidate;
+        if (is_executable_file(candidate)) return candidate;
+    }
+    return {};
+}
+
+// The box64 executable: `requested` when given (empty result if it is not executable),
+// otherwise a copy installed inside the container. Empty when there is none.
+std::string find_box64(const std::string& container, const std::string& requested) {
+    if (!requested.empty()) return is_executable_file(requested) ? requested : std::string();
+    const char* rels[] = {"/bin/box64", "/box64", "/usr/bin/box64", nullptr};
+    for (int i = 0; rels[i]; ++i) {
+        const std::string candidate = container + rels[i];
+        if (is_executable_file(candidate)) return candidate;
     }
     return {};
 }
@@ -135,26 +184,51 @@ void layer_cb(const char* key, const char* value, void* ctx) {
 
 }  // namespace
 
+std::string last_launch_error() {
+    std::lock_guard<std::mutex> lock(g_error_mutex);
+    return g_last_error;
+}
+
+void set_launch_error(const std::string& message) {
+    std::lock_guard<std::mutex> lock(g_error_mutex);
+    g_last_error = message;
+}
+
 bool wine_binary_available(const std::string& wine_path) {
     if (wine_path.empty()) return false;
     return is_regular(wine_path) && access(wine_path.c_str(), X_OK) == 0;
 }
 
 int launch_wine_container(const WineLaunchRequest& request, std::string* error) {
+    set_launch_error("");
     auto fail = [&](const std::string& msg) {
         if (error) *error = msg;
+        set_launch_error(msg);
         FABLE_LOGE("wine launch: %s", msg.c_str());
         return -1;
     };
     if (request.container_path.empty()) return fail("Container path is empty");
     if (request.exe_path.empty()) return fail("Executable path is empty");
     if (!is_dir(request.container_path)) return fail("Container path is not a directory");
-    if (!looks_like_windows_path(request.exe_path) && !is_regular(request.exe_path)) {
+    if (!is_wine_builtin_name(request.exe_path) && !looks_like_windows_path(request.exe_path) &&
+        !is_regular(request.exe_path)) {
         return fail("Executable not found: " + request.exe_path);
     }
 
     const std::string wine = find_wine(request.container_path);
-    if (wine.empty()) return fail("Wine binary not found under " + request.container_path);
+    if (wine.empty()) return fail("Wine isn't installed in this container");
+
+    // Box64 translates the x86_64 Wine binary on ARM64. An explicit path must be usable;
+    // without one, a copy inside the container is used when present.
+    const std::string box64 = find_box64(request.container_path, request.box64_path);
+    if (!request.box64_path.empty() && box64.empty()) {
+        return fail("Box64 is not executable: " + request.box64_path);
+    }
+#if defined(__aarch64__)
+    if (box64.empty() && elf_machine(wine) == kMachineX86_64) {
+        return fail("Wine is an x86_64 build and needs Box64 on this device");
+    }
+#endif
 
     mkdir_one(request.container_path + "/tmp");
     mkdir_one(request.container_path + "/cache");
@@ -208,6 +282,15 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         env[key] = item.substr(eq + 1);
     }
 
+    if (!box64.empty()) {
+        // Where Box64 looks for the emulated program's libraries and helper executables
+        // (wineserver). Anything the caller set above wins.
+        env.emplace("BOX64_PATH", dirname_of(wine));
+        env.emplace("BOX64_LD_LIBRARY_PATH",
+                    request.container_path + "/lib/wine/x86_64-unix:" + request.container_path + "/lib:" +
+                        request.container_path + "/lib64");
+    }
+
     std::vector<std::string> storage;
     storage.reserve(env.size());
     std::vector<char*> envp;
@@ -218,20 +301,113 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
     for (auto& item : storage) envp.push_back(item.data());
     envp.push_back(nullptr);
 
-    std::string argv0 = wine;
-    std::string argv1 = request.exe_path;
-    char* argv[] = {argv0.data(), argv1.data(), nullptr};
+    // argv: [box64] wine exe [args...]
+    std::vector<std::string> command;
+    if (!box64.empty()) command.push_back(box64);
+    command.push_back(wine);
+    command.push_back(request.exe_path);
+    for (const auto& arg : request.args) command.push_back(arg);
+    std::vector<char*> argv;
+    argv.reserve(command.size() + 1);
+    for (auto& item : command) argv.push_back(item.data());
+    argv.push_back(nullptr);
+    const std::string program = command.front();
 
-    FABLE_LOGI("exec wine %s %s (driver=%s)", wine.c_str(), request.exe_path.c_str(),
+#if defined(__ANDROID__) && defined(__LP64__)
+    // Android 10+ refuses execve() on files in an app's data directory for apps targeting
+    // API 29 and up. The system linker can still map such an executable, so it is the fallback.
+    const std::string linker = "/system/bin/linker64";
+    std::vector<char*> linker_argv;
+    linker_argv.push_back(const_cast<char*>(linker.c_str()));
+    for (char* item : argv) linker_argv.push_back(item);
+#endif
+
+    std::string printable;
+    for (const auto& item : command) printable += (printable.empty() ? "" : " ") + item;
+    FABLE_LOGI("exec %s (driver=%s)", printable.c_str(),
                request.driver_path.empty() ? "none" : request.driver_path.c_str());
 
+    const std::string log_path = request.container_path + "/" + kLaunchLogName;
+    const int log_fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (log_fd >= 0) dprintf(log_fd, "[fable] %s\n", printable.c_str());
+    const int null_fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+
+    // The child reports a failed exec through this pipe; it closes on a successful exec.
+    int status_pipe[2];
+    if (pipe2(status_pipe, O_CLOEXEC) != 0) {
+        const std::string message = std::string("pipe failed: ") + std::strerror(errno);
+        if (log_fd >= 0) close(log_fd);
+        if (null_fd >= 0) close(null_fd);
+        return fail(message);
+    }
+
     const pid_t pid = fork();
-    if (pid < 0) return fail(std::string("fork failed: ") + std::strerror(errno));
+    if (pid < 0) {
+        const std::string message = std::string("fork failed: ") + std::strerror(errno);
+        close(status_pipe[0]);
+        close(status_pipe[1]);
+        if (log_fd >= 0) close(log_fd);
+        if (null_fd >= 0) close(null_fd);
+        return fail(message);
+    }
     if (pid == 0) {
         // Only async-signal-safe calls are legal here: the parent is multithreaded.
-        execve(wine.c_str(), argv, envp.data());
+        if (null_fd >= 0) dup2(null_fd, STDIN_FILENO);
+        if (log_fd >= 0) {
+            dup2(log_fd, STDOUT_FILENO);
+            dup2(log_fd, STDERR_FILENO);
+        }
+        execve(program.c_str(), argv.data(), envp.data());
+        const int exec_errno = errno;
+#if defined(__ANDROID__) && defined(__LP64__)
+        if (exec_errno == EACCES) execve(linker.c_str(), linker_argv.data(), envp.data());
+#endif
+        const ssize_t ignored = write(status_pipe[1], &exec_errno, sizeof(exec_errno));
+        (void)ignored;
         _exit(127);
     }
+
+    close(status_pipe[1]);
+    if (log_fd >= 0) close(log_fd);
+    if (null_fd >= 0) close(null_fd);
+
+    int child_errno = 0;
+    ssize_t got;
+    do {
+        got = read(status_pipe[0], &child_errno, sizeof(child_errno));
+    } while (got < 0 && errno == EINTR);
+    close(status_pipe[0]);
+    if (got == static_cast<ssize_t>(sizeof(child_errno))) {
+        int ignored_status = 0;
+        waitpid(pid, &ignored_status, 0);
+        return fail("Couldn't run " + basename_of(program) + ": " + std::strerror(child_errno));
+    }
+
+    // Reap the child when it exits and note how it ended in the launch log.
+    std::thread([pid, log_path]() {
+        int status = 0;
+        pid_t reaped;
+        do {
+            reaped = waitpid(pid, &status, 0);
+        } while (reaped < 0 && errno == EINTR);
+        std::string line;
+        if (reaped == pid && WIFEXITED(status)) {
+            line = "[fable] exit code " + std::to_string(WEXITSTATUS(status));
+        } else if (reaped == pid && WIFSIGNALED(status)) {
+            line = "[fable] killed by signal " + std::to_string(WTERMSIG(status));
+        } else {
+            line = "[fable] exit status unknown";
+        }
+        FABLE_LOGI("wine process %d: %s", static_cast<int>(pid), line.c_str());
+        const int fd = open(log_path.c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
+        if (fd >= 0) {
+            line += "\n";
+            const ssize_t written = write(fd, line.data(), line.size());
+            (void)written;
+            close(fd);
+        }
+    }).detach();
+
     return static_cast<int>(pid);
 }
 

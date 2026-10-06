@@ -6,10 +6,16 @@ import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
+import io.harbor.fable.nativebridge.NativeLoader
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -17,6 +23,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * In-memory container store with a Room-shaped persistence seam.
@@ -33,10 +40,23 @@ import java.util.UUID
 class ContainerRepository internal constructor(
     private val dao: ContainerDao,
     private val containersRoot: File,
+    private val runtime: WineRuntime? = null,
 ) {
     private val mutex = Mutex()
     private val containersById = LinkedHashMap<String, Container>()
     private val exesById = LinkedHashMap<String, ExeEntry>()
+
+    /** Outlives individual screens: watches launched Wine processes until they exit. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Live Wine process ids per container id. */
+    private val runningPids = ConcurrentHashMap<String, MutableSet<Int>>()
+
+    /** Serializes Wine extraction per container. */
+    private val setupLocks = ConcurrentHashMap<String, Mutex>()
+
+    /** Containers with a launch in flight. */
+    private val starting: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     private val _containers = MutableStateFlow<List<Container>>(emptyList())
     private val _exes = MutableStateFlow<List<ExeEntry>>(emptyList())
@@ -54,7 +74,20 @@ class ContainerRepository internal constructor(
         }
         loaded.containers.forEach { containersById[it.id] = it }
         loaded.exes.forEach { exesById[it.id] = it }
-        publish()
+        // No Wine process survives the app, so a persisted RUNNING / CONFIGURING state is stale.
+        var reset = false
+        containersById.values.toList().forEach { container ->
+            val settled = when (container.status) {
+                ContainerStatus.RUNNING -> ContainerStatus.READY
+                ContainerStatus.CONFIGURING -> ContainerStatus.CREATED
+                else -> null
+            }
+            if (settled != null) {
+                containersById[container.id] = container.copy(status = settled)
+                reset = true
+            }
+        }
+        if (reset) persistLocked() else publish()
     }
 
     fun list(): List<Container> = _containers.value
@@ -208,33 +241,207 @@ class ContainerRepository internal constructor(
 
     /**
      * Launches [exeId] — or the container's primary executable when null — inside the
-     * container's Wine prefix.
+     * container's Wine prefix, through Box64.
      *
-     * Stub: the Wine runtime is not bundled with the app yet, so this only validates the
-     * request and reports [LaunchResult.Unavailable]. Once a runtime ships, this is where
-     * `NativeLoader.launchWineContainer` gets called, the container moves to
-     * [ContainerStatus.RUNNING], and the exe's play stats are updated.
+     * Needs a downloaded Box64 package and Wine build (Assets tab). The first launch of a
+     * container unpacks Wine into it, which takes a while; the container shows as configuring
+     * meanwhile. Every failure carries a message that says what to do about it.
      */
-    suspend fun launch(containerId: String, exeId: String? = null): LaunchResult = mutex.withLock {
-        val container = containersById[containerId]
-            ?: return@withLock LaunchResult.Failed("Container not found")
-        val candidates = exesById.values.filter { it.containerId == containerId }
-        val exe = when {
-            exeId != null -> candidates.firstOrNull { it.id == exeId }
-            else -> candidates.firstOrNull { it.path == container.exePath } ?: candidates.firstOrNull()
-        } ?: return@withLock LaunchResult.Failed("Add an executable to launch ${container.name}")
-        LaunchResult.Unavailable("Wine runtime isn't bundled yet, so ${exe.name} can't start in this build")
+    suspend fun launch(containerId: String, exeId: String? = null): LaunchResult {
+        val (container, exe) = mutex.withLock {
+            val container = containersById[containerId]
+                ?: return LaunchResult.Failed("Container not found")
+            val candidates = exesById.values.filter { it.containerId == containerId }
+            val exe = when {
+                exeId != null -> candidates.firstOrNull { it.id == exeId }
+                else -> candidates.firstOrNull { it.path == container.exePath } ?: candidates.firstOrNull()
+            } ?: return LaunchResult.Failed("Add an executable to launch ${container.name}")
+            container to exe
+        }
+        return start(container, exe)
     }
 
     /**
-     * Starts the full Wine desktop (explorer) in the container, without any executable.
-     *
-     * Stub like [launch]: reports [LaunchResult.Unavailable] until a Wine runtime ships.
+     * Starts the full Wine desktop (`wine explorer /desktop=Fable,<resolution>`) in the
+     * container, without any executable.
      */
-    suspend fun launchDesktop(containerId: String): LaunchResult = mutex.withLock {
-        val container = containersById[containerId]
-            ?: return@withLock LaunchResult.Failed("Container not found")
-        LaunchResult.Unavailable("Wine runtime isn't bundled yet, so the ${container.name} desktop can't start in this build")
+    suspend fun launchDesktop(containerId: String): LaunchResult {
+        val container = mutex.withLock { containersById[containerId] }
+            ?: return LaunchResult.Failed("Container not found")
+        return start(container, exe = null)
+    }
+
+    /**
+     * Unpacks the newest downloaded Wine build into the container's prefix directory unless that
+     * build is already there. Returns the build name (e.g. `wine-11.19-amd64`), or a failure
+     * message when no Wine package has been downloaded or extraction fails.
+     */
+    suspend fun installWine(containerId: String): Result<String> {
+        val runtime = runtime
+            ?: return Result.failure(IllegalStateException("Wine runtime isn't available in this build"))
+        if (mutex.withLock { containersById[containerId] } == null) {
+            return Result.failure(IllegalStateException("Container not found"))
+        }
+        // One extraction at a time per container; later callers find the finished tree.
+        return setupLocks.getOrPut(containerId) { Mutex() }.withLock {
+            val container = mutex.withLock { containersById[containerId] }
+                ?: return@withLock Result.failure(IllegalStateException("Container not found"))
+            val dir = directory(container.id).also { it.mkdirs() }
+            val installed = runtime.installedWine(dir)
+            if (installed != null && (installed.build == container.wineVersion || runtime.wineArchives().isEmpty())) {
+                return@withLock Result.success(installed.build)
+            }
+            val archive = runtime.pickWineArchive(container.wineVersion)
+                ?: return@withLock Result.failure(IllegalStateException("Install Wine from the Assets tab first"))
+            if (installed != null && installed.build == WineRuntime.buildName(archive)) {
+                return@withLock Result.success(installed.build)
+            }
+            setStatus(container.id, ContainerStatus.CONFIGURING)
+            try {
+                val build = runtime.installWine(archive, dir).build
+                mutex.withLock {
+                    containersById[container.id]?.let { current ->
+                        containersById[current.id] = current.copy(wineVersion = build, status = ContainerStatus.READY)
+                        persistLocked()
+                    }
+                }
+                Result.success(build)
+            } catch (error: CancellationException) {
+                setStatus(container.id, ContainerStatus.CREATED)
+                throw error
+            } catch (error: Exception) {
+                Log.w(TAG, "Wine extraction failed for ${container.name}", error)
+                setStatus(container.id, ContainerStatus.ERROR)
+                Result.failure(error)
+            }
+        }
+    }
+
+    private suspend fun start(container: Container, exe: ExeEntry?): LaunchResult {
+        // A second tap while the first launch is still preparing would start Wine twice.
+        if (!starting.add(container.id)) return LaunchResult.Failed("${container.name} is already starting")
+        try {
+            return startLocked(container, exe)
+        } finally {
+            starting.remove(container.id)
+        }
+    }
+
+    private suspend fun startLocked(container: Container, exe: ExeEntry?): LaunchResult {
+        val runtime = runtime
+            ?: return LaunchResult.Unavailable("Wine runtime isn't available in this build")
+        if (!NativeLoader.isLoaded) {
+            return LaunchResult.Unavailable("The native runtime couldn't load on this device")
+        }
+        val dir = directory(container.id).also { it.mkdirs() }
+
+        // 1. Box64 and a Wine build have to be downloaded.
+        val hasWine = runtime.installedWine(dir) != null || runtime.wineArchives().isNotEmpty()
+        val box64 = when (val status = runtime.ensureBox64()) {
+            is Box64Status.Ready -> status.executable
+            Box64Status.NotDownloaded -> {
+                return LaunchResult.Failed(
+                    if (hasWine) "Install Box64 from the Assets tab first"
+                    else "Install Box64 and Wine from the Assets tab first"
+                )
+            }
+            is Box64Status.NoExecutable -> {
+                return LaunchResult.Failed("${status.packageName} has no box64 executable. Download a different Box64 build")
+            }
+        }
+        if (!hasWine) return LaunchResult.Failed("Install Wine from the Assets tab first")
+
+        // 2. Unpack Wine into the container's prefix (first launch only).
+        installWine(container.id).getOrElse { error ->
+            return LaunchResult.Failed(error.message?.let { "Couldn't set up Wine: $it" } ?: "Couldn't set up Wine")
+        }
+
+        // 3. Resolve what to run.
+        val current = mutex.withLock { containersById[container.id] } ?: container
+        val program: String
+        val arguments: List<String>
+        if (exe == null) {
+            program = "explorer"
+            arguments = listOf("/desktop=Fable,${current.screenResolution}")
+        } else {
+            program = runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
+                ?: return LaunchResult.Failed("Couldn't open ${exe.name}. Add it again from the container")
+            arguments = emptyList()
+        }
+        val label = exe?.name ?: "${current.name} desktop"
+
+        // 4. Start the process.
+        val environment = buildList {
+            add("WINEDEBUG=-all")
+            add("BOX64_NOBANNER=1")
+            current.envVars.forEach { (key, value) -> add("$key=$value") }
+        }
+        val driver = runtime.installedDriverLibrary(current.driverId)
+        val pid = try {
+            withContext(Dispatchers.IO) {
+                NativeLoader.launchWineContainer(
+                    containerPath = dir.absolutePath,
+                    exePath = program,
+                    args = arguments.toTypedArray(),
+                    envVars = environment.toTypedArray(),
+                    driverPath = driver,
+                    box64Path = box64.absolutePath,
+                )
+            }
+        } catch (error: UnsatisfiedLinkError) {
+            return LaunchResult.Unavailable("The native runtime couldn't load on this device")
+        }
+        if (pid <= 0) {
+            val reason = NativeLoader.lastLaunchError()
+            return LaunchResult.Failed(reason?.let { "Couldn't start $label: $it" } ?: "Couldn't start $label")
+        }
+
+        // 5. A process that dies straight away has a reason worth showing (missing libraries, …).
+        delay(EARLY_EXIT_WINDOW_MS)
+        if (!WineRuntime.isAlive(pid) && !WineRuntime.exitedCleanly(dir)) {
+            setStatus(container.id, ContainerStatus.READY)
+            val reason = WineRuntime.lastLogLine(dir)
+            return LaunchResult.Failed(
+                if (reason != null) "$label stopped right away: $reason" else "$label stopped right away"
+            )
+        }
+        markStarted(container.id, exe?.id, pid)
+        return LaunchResult.Started(pid)
+    }
+
+    private suspend fun setStatus(id: String, status: ContainerStatus) {
+        mutex.withLock {
+            val existing = containersById[id] ?: return
+            if (existing.status != status) {
+                containersById[id] = existing.copy(status = status)
+                persistLocked()
+            }
+        }
+    }
+
+    /** Records a started process: container RUNNING, exe play stats, and a watcher that flips back on exit. */
+    private suspend fun markStarted(containerId: String, exeId: String?, pid: Int) {
+        mutex.withLock {
+            containersById[containerId]?.let { containersById[containerId] = it.copy(status = ContainerStatus.RUNNING) }
+            exeId?.let { id ->
+                exesById[id]?.let { exesById[id] = it.copy(lastPlayed = System.currentTimeMillis(), playCount = it.playCount + 1) }
+            }
+            persistLocked()
+        }
+        runningPids.getOrPut(containerId) { ConcurrentHashMap.newKeySet() }.add(pid)
+        scope.launch {
+            while (WineRuntime.isAlive(pid)) delay(PROCESS_POLL_MS)
+            val remaining = runningPids[containerId]?.also { it.remove(pid) }
+            if (remaining.isNullOrEmpty()) {
+                mutex.withLock {
+                    val existing = containersById[containerId]
+                    if (existing != null && existing.status == ContainerStatus.RUNNING) {
+                        containersById[containerId] = existing.copy(status = ContainerStatus.READY)
+                        persistLocked()
+                    }
+                }
+            }
+        }
     }
 
     private fun persistLocked() {
@@ -257,6 +464,10 @@ class ContainerRepository internal constructor(
 
     companion object {
         private const val TAG = "ContainerRepository"
+
+        /** How long a freshly started process is watched for an immediate crash. */
+        private const val EARLY_EXIT_WINDOW_MS = 1_200L
+        private const val PROCESS_POLL_MS = 1_500L
 
         /**
          * Room schema the file store stands in for. Not executed.
@@ -299,7 +510,8 @@ class ContainerRepository internal constructor(
             instance?.let { return it }
             val app = context.applicationContext
             val root = File(app.filesDir, "containers")
-            val created = ContainerRepository(FileContainerStore(File(root, "index.json")), root)
+            val runtime = WineRuntime(app, AssetRepository.get(app), File(app.filesDir, "runtime"))
+            val created = ContainerRepository(FileContainerStore(File(root, "index.json")), root, runtime)
             instance = created
             return created
         }
@@ -311,10 +523,10 @@ sealed interface LaunchResult {
     /** Wine started; [pid] is the launcher process id. */
     data class Started(val pid: Int) : LaunchResult
 
-    /** Launching is not possible in this build (e.g. no Wine runtime bundled). */
+    /** Launching is not possible on this device or build (e.g. the native runtime didn't load). */
     data class Unavailable(val reason: String) : LaunchResult
 
-    /** The request was invalid (unknown container, no executable, …). */
+    /** The launch couldn't happen: a missing Box64/Wine download, a bad request, or a crash on start. */
     data class Failed(val reason: String) : LaunchResult
 }
 
