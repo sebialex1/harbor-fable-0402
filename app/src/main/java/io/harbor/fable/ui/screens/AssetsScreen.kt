@@ -10,6 +10,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,6 +25,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -93,6 +97,8 @@ internal fun AssetsContent(
     val expansion = rememberExpansionState()
     val appear = rememberLiquidAppear()
     val grouped = remember(assets) { assets.groupBy { it.type } }
+    // Build the user picked per version ("WINE/11.19" -> asset id); unpicked versions use the default.
+    val selectedVariants = rememberSaveable(saver = SelectionSaver) { mutableStateMapOf() }
     val orderedTypes = remember {
         listOf(
             AssetType.WINE,
@@ -164,6 +170,7 @@ internal fun AssetsContent(
                 val typeAssets = grouped[type].orEmpty()
                 if (typeAssets.isNotEmpty()) {
                     val typeKey = type.name
+                    val versions = groupAssetVersions(type, typeAssets)
 
                     item(key = "section-$typeKey") {
                         val expanded = expansion.isExpanded(typeKey, default = true)
@@ -173,24 +180,66 @@ internal fun AssetsContent(
                             onToggle = { expansion.toggle(typeKey, default = true) },
                             modifier = Modifier.animateItem().liquidAppear(appear, typeIndex + 1),
                         ) {
-                            typeAssets.forEachIndexed { index, asset ->
-                                val task = tasks
-                                    .filter { it.assetId == asset.id }
-                                    .maxByOrNull { it.updatedAt }
-                                DownloadRow(
-                                    title = asset.name,
-                                    version = asset.version,
-                                    sizeBytes = asset.fileSizeBytes,
-                                    isDownloaded = asset.isDownloaded,
-                                    task = task,
-                                    onDownload = { onDownload(asset) },
+                            versions.forEachIndexed { index, group ->
+                                AssetVersionRow(
+                                    group = group,
+                                    tasks = tasks,
+                                    selectedId = selectedVariants[group.key],
+                                    onSelect = { selectedVariants[group.key] = it.id },
+                                    onDownload = onDownload,
                                 )
-                                if (index != typeAssets.lastIndex) {
+                                if (index != versions.lastIndex) {
                                     CardDivider()
                                 }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One version of a component. The row's download control acts on the selected build; when the
+ * version has several builds (Wine: staging, tkg, wow64) they sit under it as chips, the plain
+ * amd64 build selected unless another one is already downloaded.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AssetVersionRow(
+    group: AssetVersionGroup,
+    tasks: List<DownloadTask>,
+    selectedId: String?,
+    onSelect: (AssetEntry) -> Unit,
+    onDownload: (AssetEntry) -> Unit,
+) {
+    val selected = group.variants.firstOrNull { it.asset.id == selectedId } ?: group.defaultVariant
+    val asset = selected.asset
+    val task = tasks.filter { it.assetId == asset.id }.maxByOrNull { it.updatedAt }
+    Column(Modifier.fillMaxWidth()) {
+        DownloadRow(
+            title = "${typeShortName(group.type)} ${group.version}",
+            version = if (group.variants.size > 1) selected.label else "",
+            sizeBytes = asset.fileSizeBytes,
+            isDownloaded = asset.isDownloaded,
+            task = task,
+            onDownload = { onDownload(asset) },
+        )
+        if (group.variants.size > 1) {
+            FlowRow(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = RowPaddingHorizontal, end = RowPaddingHorizontal, bottom = Spacing.md),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                group.variants.forEach { variant ->
+                    GlassChip(
+                        text = variant.label,
+                        selected = variant.asset.id == asset.id,
+                        onClick = { onSelect(variant.asset) },
+                    )
                 }
             }
         }
@@ -232,6 +281,25 @@ internal fun SetupBanner(
         }
     }
 }
+
+/** Prefix for a version row ("Wine 11.19", "DXVK 2.7"). */
+private fun typeShortName(type: AssetType): String = when (type) {
+    AssetType.WINE -> "Wine"
+    AssetType.VULKAN_DRIVER -> "Driver"
+    AssetType.RUNTIME -> "Runtime"
+    AssetType.OTHER -> "Version"
+    else -> typeDisplayName(type)
+}
+
+/** Saves the per-version build selection as "key=id" strings. */
+private val SelectionSaver = androidx.compose.runtime.saveable.listSaver<androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>, String>(
+    save = { map -> map.map { (key, id) -> "$key=$id" } },
+    restore = { saved ->
+        mutableStateMapOf<String, String>().apply {
+            saved.forEach { entry -> put(entry.substringBefore('='), entry.substringAfter('=')) }
+        }
+    },
+)
 
 private fun typeDisplayName(type: AssetType): String = when (type) {
     AssetType.WINE -> "Wine"
