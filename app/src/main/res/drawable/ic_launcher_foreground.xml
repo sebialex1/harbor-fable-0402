@@ -1,15 +1,71 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Fable mark: a wine glass whose base curves like an anchor's arms (harbor), with a play
+    button in the bowl (launch). Everything sits inside the 66dp adaptive-icon safe zone,
+    centred on (54, 54).
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Bowl and stem. -->
+    <path android:pathData="M37.5,27 L70.5,27 C72,31 73,36 73,41 C73,51 66,59 54,59 C42,59 35,51 35,41 C35,36 36,31 37.5,27 Z M52,57 L56,57 L56,79 L52,79 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="54"
+                android:startY="27"
+                android:endX="54"
+                android:endY="83">
+                <item android:offset="0" android:color="#FFB9A4FF" />
+                <item android:offset="0.55" android:color="#FF7C5CFF" />
+                <item android:offset="1" android:color="#FF5B3DE0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Anchor-like base. -->
     <path
-        android:fillColor="#7C5CFF"
-        android:pathData="M54,28 L72,44 L72,76 L60,76 L60,56 L48,56 L48,76 L36,76 L36,44 Z" />
+        android:pathData="M41,68.5 C43,76.5 48.5,80.5 54,80.5 C59.5,80.5 65,76.5 67,68.5"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="54"
+                android:startY="27"
+                android:endX="54"
+                android:endY="83">
+                <item android:offset="0" android:color="#FFB9A4FF" />
+                <item android:offset="0.55" android:color="#FF7C5CFF" />
+                <item android:offset="1" android:color="#FF5B3DE0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Rim light and glass highlight. -->
     <path
-        android:fillColor="#7C5CFF"
-        android:fillAlpha="0.3"
-        android:pathData="M54,20 m-28,0 a28,28 0 1,0 56,0 a28,28 0 1,0 -56,0"
-        android:strokeWidth="0" />
+        android:pathData="M39,27.7 L69,27.7"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeAlpha="0.5"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M40.3,33 C39.3,40 40,45.5 43.6,51"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeAlpha="0.38"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+
+    <!-- Play button. -->
+    <path
+        android:pathData="M50.4,35.6 L50.4,48.4 L60.4,42 Z"
+        android:fillColor="#FFFFFFFF"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.4"
+        android:strokeLineJoin="round" />
 </vector>
