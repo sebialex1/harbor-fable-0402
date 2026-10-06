@@ -14,9 +14,9 @@
 #include <android_linker_ns.h>
 
 #include "kgsl_uapi.h"
-#include "../../../common/fable_log.h"
-#include "../../../json/mini_json.h"
-#include "../../../meta/driver_meta.h"
+#include "../../common/fable_log.h"
+#include "../../json/mini_json.h"
+#include "../../meta/driver_meta.h"
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -27,6 +27,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -522,9 +524,15 @@ bool adrenotools_set_layer_config(const char* layer_config_json) {
         updates.emplace_back(key, value.s);
     }
     std::lock_guard<std::mutex> lock(g_layer_mu);
-    for (const auto& [key, value] : updates) {
+    for (const auto& update : updates) {
+        // Named references instead of a structured binding: capturing a
+        // structured binding in a lambda is a C++20 extension.
+        const std::string& key = update.first;
+        const std::string& value = update.second;
         auto it = std::find_if(g_layer_env.begin(), g_layer_env.end(),
-                               [&](const auto& kv) { return kv.first == key; });
+                               [&key](const std::pair<std::string, std::string>& kv) {
+                                   return kv.first == key;
+                               });
         if (value.empty()) {
             if (it != g_layer_env.end()) g_layer_env.erase(it);
             unsetenv(key.c_str());

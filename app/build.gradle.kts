@@ -7,6 +7,8 @@ plugins {
 android {
     namespace = "io.harbor.fable"
     compileSdk = 34
+    // Must match the NDK installed by the CI workflow.
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "io.harbor.fable"
