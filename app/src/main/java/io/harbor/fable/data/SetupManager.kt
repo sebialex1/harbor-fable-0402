@@ -4,7 +4,9 @@ import android.content.Context
 import android.util.Log
 import io.harbor.fable.data.models.AssetEntry
 import io.harbor.fable.data.models.AssetType
-import io.harbor.fable.data.models.DriverPackage
+import io.harbor.fable.data.models.InstalledDriver
+import io.harbor.fable.data.models.RadvRelease
+import io.harbor.fable.data.models.ReleaseChannel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -112,9 +114,13 @@ data class SetupResult(
  * First-run setup. Knows which catalog entries are the recommended ones, reports whether they
  * are on disk, and queues the missing ones on the download manager (progress shows in the
  * Assets list and the download notification).
+ *
+ * Wine, Box64 and DXVK come from the asset catalog; the graphics driver is the latest RADV
+ * Xclipse release from [DriverRepository], which has its own feed and install lifecycle.
  */
 class SetupManager internal constructor(
     private val assets: AssetRepository,
+    private val drivers: DriverRepository,
     private val downloads: DownloadManager,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -125,8 +131,13 @@ class SetupManager internal constructor(
     val installing: StateFlow<Boolean> = _installing.asStateFlow()
 
     /** Live view of the recommended downloads, recomputed whenever the catalog or a download changes. */
-    val state: StateFlow<SetupState> = combine(assets.assets, assets.drivers, downloads.snapshot) { entries, drivers, snapshot ->
-        compute(entries, drivers, snapshot)
+    val state: StateFlow<SetupState> = combine(
+        assets.assets,
+        drivers.releases,
+        drivers.installed,
+        downloads.snapshot,
+    ) { entries, releases, installed, snapshot ->
+        compute(entries, releases, installed, snapshot)
     }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), SetupState())
 
     /**
@@ -139,13 +150,14 @@ class SetupManager internal constructor(
         }
         try {
             assets.refresh()
-            val picks = pickRecommended(assets.assets.value, assets.drivers.value)
+            drivers.refresh()
+            val picks = pickRecommended(assets.assets.value, drivers.releases.value)
             val started = mutableListOf<RecommendedKind>()
             val installed = mutableListOf<RecommendedKind>()
             val unavailable = mutableListOf<RecommendedKind>()
             val failed = mutableListOf<RecommendedKind>()
             for (kind in RecommendedKind.entries) {
-                if (isInstalled(kind)) {
+                if (isInstalled(kind, drivers.installed.value)) {
                     installed += kind
                     continue
                 }
@@ -155,7 +167,7 @@ class SetupManager internal constructor(
                     continue
                 }
                 try {
-                    val task = if (pick.isDriver) assets.downloadDriver(pick.id) else assets.download(pick.id)
+                    val task = if (pick.isDriver) drivers.download(pick.id) else assets.download(pick.id)
                     if (task != null) started += kind else installed += kind
                 } catch (error: CancellationException) {
                     throw error
@@ -164,22 +176,28 @@ class SetupManager internal constructor(
                     failed += kind
                 }
             }
-            val reachable = assets.assets.value.isNotEmpty() || assets.refreshErrors.value.isEmpty()
+            val reachable = (assets.assets.value.isNotEmpty() || assets.refreshErrors.value.isEmpty()) &&
+                (drivers.releases.value.isNotEmpty() || drivers.refreshError.value == null)
             return SetupResult(started, installed, unavailable, failed, reachable)
         } finally {
             _installing.value = false
         }
     }
 
-    private fun compute(entries: List<AssetEntry>, drivers: List<DriverPackage>, snapshot: DownloadSnapshot): SetupState {
-        val picks = pickRecommended(entries, drivers)
+    private fun compute(
+        entries: List<AssetEntry>,
+        releases: List<RadvRelease>,
+        installedDriver: InstalledDriver?,
+        snapshot: DownloadSnapshot,
+    ): SetupState {
+        val picks = pickRecommended(entries, releases)
         val items = RecommendedKind.entries.map { kind ->
             val pick = picks[kind]
             val task = pick?.let { p ->
-                snapshot.tasks.filter { it.assetId == p.id }.maxByOrNull { it.updatedAt }
+                snapshot.tasks.filter { it.assetId == p.taskId }.maxByOrNull { it.updatedAt }
             }
             when {
-                isInstalled(kind) -> RecommendedItem(kind, RecommendedStatus.INSTALLED)
+                isInstalled(kind, installedDriver) -> RecommendedItem(kind, RecommendedStatus.INSTALLED)
                 pick != null && task != null && task.keepsServiceAlive -> RecommendedItem(
                     kind = kind,
                     status = RecommendedStatus.DOWNLOADING,
@@ -193,17 +211,24 @@ class SetupManager internal constructor(
         return SetupState(items)
     }
 
-    private fun isInstalled(kind: RecommendedKind): Boolean = when (kind) {
+    /**
+     * "Installed" means a usable file is on disk. For the driver that is either an active
+     * (extracted) driver or a downloaded release package waiting to be installed.
+     */
+    private fun isInstalled(kind: RecommendedKind, installedDriver: InstalledDriver?): Boolean = when (kind) {
         RecommendedKind.WINE -> assets.downloadedFiles(AssetType.WINE).isNotEmpty()
         RecommendedKind.BOX64 -> assets.downloadedFiles(AssetType.BOX64).isNotEmpty()
         RecommendedKind.DXVK -> assets.downloadedFiles(AssetType.DXVK).isNotEmpty()
-        RecommendedKind.DRIVER -> assets.downloadedFiles(AssetType.VULKAN_DRIVER)
-            .any { it.path.contains(XCLIPSE_REPO, ignoreCase = true) }
+        RecommendedKind.DRIVER -> installedDriver != null || drivers.hasDownloadedPackage()
     }
 
-    private class Pick(val id: String, val sizeBytes: Long, val isDriver: Boolean)
+    /**
+     * [id] is an asset id, or a release tag when [isDriver]; [taskId] is the id download tasks
+     * carry in [DownloadTask.assetId] (differs from [id] for driver releases).
+     */
+    private class Pick(val id: String, val sizeBytes: Long, val isDriver: Boolean, val taskId: String = id)
 
-    private fun pickRecommended(entries: List<AssetEntry>, drivers: List<DriverPackage>): Map<RecommendedKind, Pick> {
+    private fun pickRecommended(entries: List<AssetEntry>, releases: List<RadvRelease>): Map<RecommendedKind, Pick> {
         val picks = LinkedHashMap<RecommendedKind, Pick>()
         entries.filter { it.type == AssetType.WINE }
             .minByOrNull { wineRank(it.name) }
@@ -213,14 +238,13 @@ class SetupManager internal constructor(
             ?.let { picks[RecommendedKind.BOX64] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
         entries.firstOrNull { it.type == AssetType.DXVK && !it.name.contains("native", ignoreCase = true) }
             ?.let { picks[RecommendedKind.DXVK] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
-        drivers.firstOrNull { it.sourceRepo.orEmpty().contains(XCLIPSE_REPO, ignoreCase = true) }
-            ?.let { picks[RecommendedKind.DRIVER] = Pick(it.id, it.fileSizeBytes, isDriver = true) }
+        releases.firstOrNull { it.channel == ReleaseChannel.LATEST }
+            ?.let { picks[RecommendedKind.DRIVER] = Pick(it.tag, it.asset.sizeBytes, isDriver = true, taskId = it.id) }
         return picks
     }
 
     companion object {
         private const val TAG = "SetupManager"
-        private const val XCLIPSE_REPO = "radv-xclipse"
 
         private val STABLE_WOW64 = Regex("""^wine-[0-9][0-9.]*-amd64-wow64\.tar\.(xz|gz)$""", RegexOption.IGNORE_CASE)
         private val STABLE_AMD64 = Regex("""^wine-[0-9][0-9.]*-amd64\.tar\.(xz|gz)$""", RegexOption.IGNORE_CASE)
@@ -249,7 +273,7 @@ class SetupManager internal constructor(
         fun get(context: Context): SetupManager {
             instance?.let { return it }
             val app = context.applicationContext
-            val created = SetupManager(AssetRepository.get(app), DownloadManager.get(app))
+            val created = SetupManager(AssetRepository.get(app), DriverRepository.get(app), DownloadManager.get(app))
             instance = created
             return created
         }

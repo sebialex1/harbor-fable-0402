@@ -64,6 +64,7 @@ data class GitHubRelease(
     val publishedAt: String?,
     val htmlUrl: String?,
     val assets: List<GitHubAsset>,
+    val prerelease: Boolean = false,
 ) {
     val sourceRepo: String get() = "$owner/$repo"
 
@@ -75,6 +76,7 @@ data class GitHubRelease(
         put("body", body.take(MAX_CACHED_BODY))
         putNullable("publishedAt", publishedAt)
         putNullable("htmlUrl", htmlUrl)
+        put("prerelease", prerelease)
         put("assets", JSONArray().apply { assets.forEach { put(it.toJson()) } })
     }
 
@@ -97,10 +99,19 @@ data class GitHubRelease(
                 publishedAt = obj.stringOrNull("publishedAt"),
                 htmlUrl = obj.stringOrNull("htmlUrl"),
                 assets = assets,
+                prerelease = obj.optBoolean("prerelease", false),
             )
         }
     }
 }
+
+/** Every release of a repository (newest first), as returned by `GET /releases`. */
+data class CachedReleaseList(
+    val releases: List<GitHubRelease>,
+    val fetchedAt: Long,
+    val fromCache: Boolean,
+    val stale: Boolean,
+)
 
 data class CachedRelease(
     val release: GitHubRelease,
@@ -139,7 +150,9 @@ class GitHubReleaseFetcher(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val memory = ConcurrentHashMap<String, CacheEntry>()
+    private val listMemory = ConcurrentHashMap<String, ListCacheEntry>()
     private val inFlight = ConcurrentHashMap<String, Deferred<GitHubRelease>>()
+    private val listInFlight = ConcurrentHashMap<String, Deferred<List<GitHubRelease>>>()
     private val checksumMemo = ConcurrentHashMap<String, Map<String, String>>()
     private val diskLock = Any()
 
@@ -196,13 +209,63 @@ class GitHubReleaseFetcher(
         }
     }
 
+    /**
+     * Every published release of a repository, newest first (drafts are never returned by the
+     * API for anonymous callers). Cached like [fetchLatest]; [perPage] caps the page size.
+     */
+    suspend fun fetchReleases(
+        owner: String,
+        repo: String,
+        forceRefresh: Boolean = false,
+        perPage: Int = DEFAULT_LIST_SIZE,
+    ): CachedReleaseList = withContext(Dispatchers.IO) {
+        val key = cacheKey(owner, repo)
+        if (!forceRefresh) {
+            listMemory[key]?.takeIf { it.isFresh() }?.let { entry ->
+                return@withContext CachedReleaseList(entry.releases, entry.fetchedAt, fromCache = true, stale = false)
+            }
+        }
+        val deferred = listInFlight.getOrPut(key) {
+            scope.async { fetchListAndStore(owner, repo, perPage) }
+        }
+        try {
+            val releases = deferred.await()
+            val fetchedAt = listMemory[key]?.fetchedAt ?: System.currentTimeMillis()
+            CachedReleaseList(releases, fetchedAt, fromCache = false, stale = false)
+        } finally {
+            if (deferred.isCompleted) listInFlight.remove(key, deferred)
+        }
+    }
+
+    /** Like [fetchReleases], but falls back to a stale cached list when the network is down. */
+    suspend fun fetchReleasesOrCached(
+        owner: String,
+        repo: String,
+        forceRefresh: Boolean = false,
+        perPage: Int = DEFAULT_LIST_SIZE,
+    ): CachedReleaseList {
+        return try {
+            fetchReleases(owner, repo, forceRefresh, perPage)
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            val cached = listMemory[cacheKey(owner, repo)]
+            if (cached != null) {
+                CachedReleaseList(cached.releases, cached.fetchedAt, fromCache = true, stale = true)
+            } else {
+                throw error
+            }
+        }
+    }
+
     fun invalidate(owner: String, repo: String) {
         memory.remove(cacheKey(owner, repo))
+        listMemory.remove(cacheKey(owner, repo))
         persistDisk()
     }
 
     fun clearCache() {
         memory.clear()
+        listMemory.clear()
         checksumMemo.clear()
         synchronized(diskLock) {
             if (cacheFile.exists() && !cacheFile.delete()) {
@@ -286,6 +349,33 @@ class GitHubReleaseFetcher(
         return withChecksums
     }
 
+    private fun fetchListAndStore(owner: String, repo: String, perPage: Int): List<GitHubRelease> {
+        val slugOwner = requireSlug(owner, "owner")
+        val slugRepo = requireSlug(repo, "repo")
+        val body = httpGet(releasesUrl(slugOwner, slugRepo, perPage), githubApi = true)
+        val array = runCatching { JSONArray(body) }.getOrElse {
+            val message = runCatching { JSONObject(body).optString("message") }.getOrNull()
+                ?.ifBlank { null } ?: "GitHub response was not a release list"
+            throw GitHubFetchException(0, message)
+        }
+        val releases = ArrayList<GitHubRelease>(array.length())
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            // Drafts have no tag yet and are never downloadable; skip them instead of failing.
+            if (item.optBoolean("draft", false) || !item.has("tag_name")) continue
+            runCatching { parseRelease(item, slugOwner, slugRepo) }
+                .onSuccess { releases += it }
+                .onFailure { Log.w(TAG, "Skipping unreadable release in $slugOwner/$slugRepo", it) }
+        }
+        val entry = ListCacheEntry(releases, System.currentTimeMillis())
+        listMemory[cacheKey(slugOwner, slugRepo)] = entry
+        persistDisk()
+        return releases
+    }
+
+    private fun ListCacheEntry.isFresh(now: Long = System.currentTimeMillis()): Boolean =
+        now - fetchedAt in 0..ttlMs
+
     private fun freshEntry(key: String): CacheEntry? {
         val entry = memory[key] ?: return null
         return entry.takeIf { it.isFresh() }
@@ -313,6 +403,20 @@ class GitHubReleaseFetcher(
                 val fetchedAt = item.optLong("fetchedAt", 0L)
                 if (fetchedAt > 0L) memory[key] = CacheEntry(release, fetchedAt)
             }
+            val lists = root.optJSONObject("lists") ?: return
+            val listKeys = lists.keys()
+            while (listKeys.hasNext()) {
+                val key = listKeys.next()
+                val item = lists.optJSONObject(key) ?: continue
+                val array = item.optJSONArray("releases") ?: continue
+                val releases = ArrayList<GitHubRelease>(array.length())
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    runCatching { releases += GitHubRelease.fromJson(obj) }
+                }
+                val fetchedAt = item.optLong("fetchedAt", 0L)
+                if (fetchedAt > 0L) listMemory[key] = ListCacheEntry(releases, fetchedAt)
+            }
         }.onFailure { error ->
             Log.w(TAG, "Ignoring unreadable GitHub cache", error)
             runCatching { cacheFile.delete() }
@@ -331,14 +435,25 @@ class GitHubReleaseFetcher(
                             .put("release", entry.release.toJson()),
                     )
                 }
-                val root = JSONObject().put("version", 1).put("entries", entries)
+                val lists = JSONObject()
+                listMemory.forEach { (key, entry) ->
+                    lists.put(
+                        key,
+                        JSONObject()
+                            .put("fetchedAt", entry.fetchedAt)
+                            .put("releases", JSONArray().apply { entry.releases.forEach { put(it.toJson()) } }),
+                    )
+                }
+                val root = JSONObject().put("version", 2).put("entries", entries).put("lists", lists)
                 writeAtomic(cacheFile, root.toString())
             }.onFailure { logPersistFailure("github cache", it) }
         }
     }
 
-    private fun parseRelease(json: String, owner: String, repo: String): GitHubRelease {
-        val obj = JSONObject(json)
+    private fun parseRelease(json: String, owner: String, repo: String): GitHubRelease =
+        parseRelease(JSONObject(json), owner, repo)
+
+    private fun parseRelease(obj: JSONObject, owner: String, repo: String): GitHubRelease {
         if (!obj.has("tag_name")) {
             val message = obj.optString("message").ifBlank { "GitHub response had no tag_name" }
             throw GitHubFetchException(0, message)
@@ -383,6 +498,7 @@ class GitHubReleaseFetcher(
             publishedAt = obj.stringOrNull("published_at"),
             htmlUrl = obj.stringOrNull("html_url"),
             assets = linked,
+            prerelease = obj.optBoolean("prerelease", false),
         )
     }
 
@@ -473,8 +589,11 @@ class GitHubReleaseFetcher(
 
     private data class CacheEntry(val release: GitHubRelease, val fetchedAt: Long)
 
+    private data class ListCacheEntry(val releases: List<GitHubRelease>, val fetchedAt: Long)
+
     companion object {
         const val DEFAULT_TTL_MS = 30L * 60L * 1000L
+        const val DEFAULT_LIST_SIZE = 30
         private const val MAX_CACHE_ENTRIES = 32
         private const val MAX_REDIRECTS = 5
         private const val TAG = "GitHubReleaseFetcher"
@@ -499,6 +618,10 @@ class GitHubReleaseFetcher(
 
         fun latestUrl(owner: String, repo: String): String =
             "https://api.github.com/repos/${requireSlug(owner, "owner")}/${requireSlug(repo, "repo")}/releases/latest"
+
+        fun releasesUrl(owner: String, repo: String, perPage: Int = DEFAULT_LIST_SIZE): String =
+            "https://api.github.com/repos/${requireSlug(owner, "owner")}/${requireSlug(repo, "repo")}" +
+                "/releases?per_page=${perPage.coerceIn(1, 100)}"
 
         fun requireSlug(value: String, label: String): String {
             require(SLUG.matches(value)) { "Invalid GitHub $label: $value" }

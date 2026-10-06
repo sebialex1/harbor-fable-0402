@@ -376,7 +376,7 @@ class ContainerRepository internal constructor(
             add("BOX64_NOBANNER=1")
             current.envVars.forEach { (key, value) -> add("$key=$value") }
         }
-        val driver = runtime.installedDriverLibrary(current.driverId)
+        val driver = runtime.activeDriverLibrary()
         val pid = try {
             withContext(Dispatchers.IO) {
                 NativeLoader.launchWineContainer(
@@ -510,7 +510,7 @@ class ContainerRepository internal constructor(
             instance?.let { return it }
             val app = context.applicationContext
             val root = File(app.filesDir, "containers")
-            val runtime = WineRuntime(app, AssetRepository.get(app), File(app.filesDir, "runtime"))
+            val runtime = WineRuntime(app, AssetRepository.get(app), DriverRepository.get(app), File(app.filesDir, "runtime"))
             val created = ContainerRepository(FileContainerStore(File(root, "index.json")), root, runtime)
             instance = created
             return created

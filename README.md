@@ -6,7 +6,7 @@ A minimal Android Wine container manager with a dark, premium glass UI.
 
 - **Containers** — create Wine containers, add Windows apps, launch an app or the Wine desktop
 - **Wine through Box64** — Kron4ek's x86_64 Wine builds run on ARM64 via Box64
-- **Custom Vulkan driver** — RADV Xclipse (Mesa) for Samsung Xclipse GPUs
+- **Custom Vulkan driver** — RADV Xclipse (Mesa) for Samsung Xclipse GPUs, every release from JimVulkan/radv-xclipse, one active driver at a time
 - **One-tap setup** — download the recommended Wine, Box64, driver and DXVK from the Assets tab
 - **Asset downloads** — Wine builds, DXVK and drivers from GitHub releases, with resume and checksum checks
 - **Glass design** — charcoal glass cards with hairline edges, Inter typography, animated transitions, floating dock

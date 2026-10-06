@@ -79,7 +79,8 @@ fun Chevron(modifier: Modifier = Modifier) {
 
 /**
  * Generic list row: optional icon tile, title + subtitle, optional trailing content and a
- * chevron when the row navigates somewhere.
+ * chevron when the row navigates somewhere. [titleBadge] renders inline after the title (a
+ * "Latest" pill, say).
  */
 @Composable
 fun ListRow(
@@ -91,6 +92,7 @@ fun ListRow(
     titleColor: Color = FableText,
     onClick: (() -> Unit)? = null,
     showChevron: Boolean = onClick != null,
+    titleBadge: (@Composable RowScope.() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val clickModifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
@@ -107,13 +109,28 @@ fun ListRow(
             Spacer(Modifier.width(Spacing.md))
         }
         Column(Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = titleColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (titleBadge != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = titleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Spacer(Modifier.width(Spacing.sm))
+                    titleBadge()
+                }
+            } else {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = titleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             if (!subtitle.isNullOrBlank()) {
                 Text(
                     text = subtitle,

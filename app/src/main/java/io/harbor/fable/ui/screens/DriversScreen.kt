@@ -1,8 +1,12 @@
 package io.harbor.fable.ui.screens
 
-import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -15,21 +19,32 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.DownloadTask
-import io.harbor.fable.data.models.DriverPackage
+import io.harbor.fable.data.models.InstalledDriver
+import io.harbor.fable.data.models.RadvRelease
+import io.harbor.fable.data.models.ReleaseChannel
 import io.harbor.fable.nativebridge.DeviceGpuInfo
 import io.harbor.fable.nativebridge.DeviceProbe
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.RowPaddingHorizontal
+import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
+/**
+ * The RADV Xclipse driver: what is active, the latest release, and the older builds. One
+ * driver is active at a time; releases are downloaded here and installed as the active one.
+ */
 @Composable
 fun DriversScreen() {
     val context = LocalContext.current
     val app = remember(context) { FableApp.from(context) }
-    val repository = app.assetRepository
-    val drivers by repository.drivers.collectAsStateWithLifecycle()
+    val repository = app.driverRepository
+    val releases by repository.releases.collectAsStateWithLifecycle()
+    val installed by repository.installed.collectAsStateWithLifecycle()
     val isRefreshing by repository.isRefreshing.collectAsStateWithLifecycle()
+    val refreshError by repository.refreshError.collectAsStateWithLifecycle()
+    val stale by repository.stale.collectAsStateWithLifecycle()
     val downloadSnapshot by app.downloadManager.snapshot.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
@@ -40,40 +55,40 @@ fun DriversScreen() {
     val deviceInfo = remember { DeviceProbe.read() }
 
     DriversContent(
-        drivers = drivers,
+        releases = releases,
+        installed = installed,
         isRefreshing = isRefreshing,
+        refreshError = refreshError,
+        stale = stale,
         tasks = downloadSnapshot.tasks,
         deviceInfo = deviceInfo,
         onRefresh = { refreshTrigger++ },
-        onDownload = { driver -> scope.launch { repository.downloadDriver(driver.id) } },
+        onDownload = { release -> scope.launch { repository.download(release.tag) } },
     )
 }
 
 @Composable
 internal fun DriversContent(
-    drivers: List<DriverPackage>,
+    releases: List<RadvRelease>,
+    installed: InstalledDriver?,
     isRefreshing: Boolean,
+    refreshError: String?,
+    stale: Boolean,
     tasks: List<DownloadTask>,
     deviceInfo: DeviceGpuInfo,
     onRefresh: () -> Unit,
-    onDownload: (DriverPackage) -> Unit,
+    onDownload: (RadvRelease) -> Unit,
 ) {
     val expansion = rememberExpansionState()
-
-    // One source (RADV Xclipse) is listed flat; extra sources get a collapsible group each,
-    // with RADV Xclipse first.
-    val groups = remember(drivers) {
-        drivers.groupBy { driverTitle(it) }
-            .toList()
-            .sortedWith(compareBy({ if (it.first == XCLIPSE_TITLE) 0 else 1 }, { it.first }))
-    }
+    val latest = remember(releases) { releases.firstOrNull { it.channel == ReleaseChannel.LATEST } }
+    val older = remember(releases) { releases.filter { it.channel != ReleaseChannel.LATEST } }
 
     FableScreen(
         title = "Drivers",
         actions = {
             GlassIconButton(
                 icon = Icons.Outlined.Refresh,
-                contentDescription = "Refresh drivers",
+                contentDescription = "Refresh releases",
                 enabled = !isRefreshing,
                 onClick = onRefresh,
             )
@@ -91,81 +106,125 @@ internal fun DriversContent(
             }
         }
 
-        if (isRefreshing) {
-            item(key = "refreshing") { LoadingCard(message = "Refreshing…", modifier = Modifier.animateItem()) }
+        item(key = "active-label") { SectionLabel("Active Driver", Modifier.animateItem()) }
+        item(key = "active") {
+            ActiveDriverCard(installed = installed, modifier = Modifier.animateItem())
         }
 
-        if (drivers.isEmpty() && !isRefreshing) {
-            item(key = "empty") {
-                EmptyState(
-                    icon = Icons.Outlined.Memory,
-                    title = "No drivers",
-                    message = "Refresh to load the catalog",
+        if (refreshError != null && releases.isEmpty()) {
+            item(key = "error") {
+                NoticeCard(
+                    icon = Icons.Outlined.CloudOff,
+                    title = "Couldn't load releases",
+                    lines = listOf(refreshError),
                     modifier = Modifier.animateItem(),
                 )
             }
-        } else if (drivers.isNotEmpty()) {
-            item(key = "packages-label") { SectionLabel("Packages", Modifier.animateItem()) }
-            if (groups.size == 1) {
-                item(key = "packages") {
-                    GlassCard(Modifier.animateItem()) {
-                        DriverRows(groups.first().second, tasks, onDownload)
+        } else if (stale) {
+            item(key = "stale") {
+                NoticeCard(
+                    icon = Icons.Outlined.CloudOff,
+                    title = "Offline",
+                    lines = listOf("Showing the last release list that was fetched"),
+                    modifier = Modifier.animateItem(),
+                )
+            }
+        }
+
+        if (isRefreshing && releases.isEmpty()) {
+            item(key = "refreshing") { LoadingCard(message = "Loading releases…", modifier = Modifier.animateItem()) }
+        }
+
+        if (latest != null) {
+            item(key = "latest-label") { SectionLabel("Latest Release", Modifier.animateItem()) }
+            item(key = "latest") {
+                GlassCard(Modifier.animateItem()) {
+                    DriverReleaseRow(
+                        release = latest,
+                        task = tasks.taskFor(latest),
+                        installed = installed?.tag == latest.tag,
+                        onDownload = { onDownload(latest) },
+                    )
+                }
+            }
+        }
+
+        if (older.isNotEmpty()) {
+            item(key = "older") {
+                val downloadedCount = older.count { it.isDownloaded }
+                CollapsibleSection(
+                    title = "Previous Versions",
+                    expanded = expansion.isExpanded(OLDER_KEY, default = false),
+                    onToggle = { expansion.toggle(OLDER_KEY, default = false) },
+                    modifier = Modifier.animateItem(),
+                    badge = {
+                        Pill(
+                            text = if (downloadedCount > 0) "$downloadedCount/${older.size}" else "${older.size}",
+                            color = if (downloadedCount > 0) FableSuccess else FableTextDim,
+                        )
+                    },
+                ) {
+                    older.forEachIndexed { index, release ->
+                        if (index > 0) CardDivider()
+                        DriverReleaseRow(
+                            release = release,
+                            task = tasks.taskFor(release),
+                            installed = installed?.tag == release.tag,
+                            onDownload = { onDownload(release) },
+                        )
                     }
                 }
-            } else {
-                groups.forEach { (groupName, groupDrivers) ->
-                    item(key = "group-$groupName") {
-                        val downloadedCount = groupDrivers.count { it.isDownloaded }
-                        CollapsibleSection(
-                            title = groupName,
-                            expanded = expansion.isExpanded(groupName, default = true),
-                            onToggle = { expansion.toggle(groupName, default = true) },
-                            modifier = Modifier.animateItem(),
-                            badge = {
-                                Pill(
-                                    text = "$downloadedCount/${groupDrivers.size}",
-                                    color = if (downloadedCount > 0) FableSuccess else FableTextDim,
-                                )
-                            },
-                        ) {
-                            DriverRows(groupDrivers, tasks, onDownload)
-                        }
-                    }
-                }
+            }
+        }
+
+        if (releases.isEmpty() && !isRefreshing && refreshError == null) {
+            item(key = "empty") {
+                EmptyState(
+                    icon = Icons.Outlined.Memory,
+                    title = "No releases",
+                    message = "Refresh to load the RADV Xclipse releases",
+                    modifier = Modifier.animateItem(),
+                )
             }
         }
     }
 }
 
-/** Driver rows separated by dividers, each showing the latest download task for its package. */
+/** The single active driver, or the empty state explaining that one driver is active at a time. */
 @Composable
-private fun ColumnScope.DriverRows(
-    drivers: List<DriverPackage>,
-    tasks: List<DownloadTask>,
-    onDownload: (DriverPackage) -> Unit,
+internal fun ActiveDriverCard(
+    installed: InstalledDriver?,
+    modifier: Modifier = Modifier,
+    actions: (@Composable () -> Unit)? = null,
 ) {
-    drivers.forEachIndexed { index, driver ->
-        val task = tasks
-            .filter { it.assetId == driver.id }
-            .maxByOrNull { it.updatedAt }
-        DownloadRow(
-            title = driverTitle(driver),
-            version = driver.version,
-            sizeBytes = driver.fileSizeBytes,
-            icon = Icons.Outlined.Memory,
-            isDownloaded = driver.isDownloaded,
-            task = task,
-            onDownload = { onDownload(driver) },
-        )
-        if (index != drivers.lastIndex) {
-            CardDivider()
+    GlassCard(modifier.fillMaxWidth()) {
+        if (installed == null) {
+            Column(Modifier.padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingHorizontal)) {
+                Text("No driver installed", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "Download the latest RADV Xclipse release below and install it. One driver is active at a time; installing another replaces it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = Spacing.xxs),
+                )
+            }
+        } else {
+            DriverSummaryRow(
+                title = installed.name ?: "RADV Xclipse ${installed.tag}",
+                lines = listOf(
+                    listOfNotNull(
+                        installed.tag,
+                        installed.mesaVersion?.let { "Mesa $it" },
+                        installed.vulkanVersion?.let { "Vulkan $it" },
+                    ).joinToString(" · "),
+                ),
+                trailing = { Pill(text = "Active", color = FableSuccess, icon = Icons.Outlined.Check) },
+            )
         }
+        actions?.invoke()
     }
 }
 
-private const val XCLIPSE_TITLE = "RADV Xclipse"
+private const val OLDER_KEY = "older-releases"
 
-private fun driverTitle(driver: DriverPackage): String = when {
-    driver.sourceRepo.orEmpty().contains("radv-xclipse", ignoreCase = true) -> XCLIPSE_TITLE
-    else -> driver.sourceRepo ?: driver.name
-}
+private fun List<DownloadTask>.taskFor(release: RadvRelease): DownloadTask? =
+    filter { it.assetId == release.id }.maxByOrNull { it.updatedAt }

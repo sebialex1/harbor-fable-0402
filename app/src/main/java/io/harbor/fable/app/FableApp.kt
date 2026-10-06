@@ -5,6 +5,7 @@ import android.content.Context
 import io.harbor.fable.data.AssetRepository
 import io.harbor.fable.data.ContainerRepository
 import io.harbor.fable.data.DownloadManager
+import io.harbor.fable.data.DriverRepository
 import io.harbor.fable.data.GitHubReleaseFetcher
 import io.harbor.fable.data.SettingsRepository
 import io.harbor.fable.data.SetupManager
@@ -31,6 +32,10 @@ class FableApp : Application() {
 
     val downloadManager: DownloadManager
         get() = DownloadManager.get(this)
+
+    /** RADV Xclipse releases, downloaded packages and the single active driver. */
+    val driverRepository: DriverRepository
+        get() = DriverRepository.get(this)
 
     /** First-run setup: downloads the recommended Wine, Box64, driver and DXVK packages. */
     val setupManager: SetupManager

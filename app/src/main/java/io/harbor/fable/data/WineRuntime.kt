@@ -5,7 +5,6 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import io.harbor.fable.data.models.AssetType
-import io.harbor.fable.nativebridge.AdrenoToolsBridge
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -31,7 +30,8 @@ internal data class InstalledWine(val build: String, val binary: File)
 
 /**
  * Finds, unpacks and wires together the downloaded runtime pieces: Box64 (shared, extracted
- * once under `filesDir/runtime/box64`) and a Wine build (extracted into each container).
+ * once under `filesDir/runtime/box64`), a Wine build (extracted into each container) and the
+ * active Vulkan driver from [DriverRepository].
  *
  * Everything is discovered from files on disk, so it works offline and before the catalog has
  * been refreshed.
@@ -39,6 +39,7 @@ internal data class InstalledWine(val build: String, val binary: File)
 internal class WineRuntime(
     private val appContext: Context,
     private val assets: AssetRepository,
+    private val drivers: DriverRepository,
     private val runtimeRoot: File,
 ) {
     private val box64Lock = Mutex()
@@ -180,15 +181,11 @@ internal class WineRuntime(
             dest.absolutePath
         }
 
-    /** Installed driver library for [driverId] when that package has been downloaded; null otherwise. */
-    fun installedDriverLibrary(driverId: String?): String? {
-        if (driverId.isNullOrBlank()) return null
-        val zip = assets.getDriver(driverId)?.takeIf { it.isDownloaded }?.localPath ?: return null
-        val dest = File(runtimeRoot, "drivers/${sanitizeFileName(File(zip).nameWithoutExtension)}")
-        return runCatching { AdrenoToolsBridge.installDriver(zip, dest.absolutePath) }
-            .onFailure { Log.w(TAG, "Driver install failed for $driverId", it) }
-            .getOrNull()
-    }
+    /**
+     * Library path of the active RADV Xclipse driver, or null when none is installed. There is a
+     * single active driver for the whole app, so every container launches with the same one.
+     */
+    fun activeDriverLibrary(): String? = drivers.activeLibraryPath()
 
     private fun queryDisplayName(uri: Uri): String? = runCatching {
         appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)

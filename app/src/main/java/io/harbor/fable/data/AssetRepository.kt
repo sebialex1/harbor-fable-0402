@@ -3,10 +3,9 @@ package io.harbor.fable.data
 import android.content.Context
 import android.net.Uri
 import android.util.Log
-import io.harbor.fable.data.models.AssetType
-import io.harbor.fable.data.models.AssetSource
-import io.harbor.fable.data.models.DriverPackage
 import io.harbor.fable.data.models.AssetEntry
+import io.harbor.fable.data.models.AssetSource
+import io.harbor.fable.data.models.AssetType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,9 +41,15 @@ data class CatalogSource(
  * status tracking.
  *
  * The catalog is seeded from [defaultCatalog] — the GitHub release sources the
- * app knows about. [refresh] fetches the latest release for each source via
- * [GitHubReleaseFetcher] and builds [AssetEntry] records from the filtered
- * assets. [download] enqueues a transfer through [DownloadManager].
+ * app knows about: Wine builds, Box64 and DXVK. [refresh] fetches the latest
+ * release for each source via [GitHubReleaseFetcher] and builds [AssetEntry]
+ * records from the filtered assets. [download] enqueues a transfer through
+ * [DownloadManager].
+ *
+ * The RADV Xclipse Vulkan driver is deliberately not part of this catalog. It
+ * has its own release feed and install lifecycle in [DriverRepository]; a
+ * persisted catalog from an earlier build that still lists a driver source is
+ * migrated on load.
  *
  * Locally imported files ([importLocal]) are stored as [AssetSource.LOCAL_IMPORT]
  * entries with no remote URL.
@@ -53,7 +58,7 @@ data class CatalogSource(
  * [assets] so the UI always sees whether a file is on disk.
  */
 class AssetRepository internal constructor(
-    private val appContext: Context,
+    @Suppress("unused") private val appContext: Context,
     private val fetcher: GitHubReleaseFetcher,
     private val downloadManager: DownloadManager,
     private val catalogFile: File,
@@ -67,20 +72,15 @@ class AssetRepository internal constructor(
     }
 
     private val entriesById = LinkedHashMap<String, AssetEntry>()
-    private val driversById = LinkedHashMap<String, DriverPackage>()
     private val errors = LinkedHashMap<String, String>()
 
     private val _assets = MutableStateFlow<List<AssetEntry>>(emptyList())
-    private val _drivers = MutableStateFlow<List<DriverPackage>>(emptyList())
     private val _catalog = MutableStateFlow(catalogSources.values.toList())
     private val _refreshErrors = MutableStateFlow<Map<String, String>>(emptyMap())
     private val _isRefreshing = MutableStateFlow(false)
 
     /** All known assets, newest first. */
     val assets: StateFlow<List<AssetEntry>> = _assets.asStateFlow()
-
-    /** All known driver packages. */
-    val drivers: StateFlow<List<DriverPackage>> = _drivers.asStateFlow()
 
     /** Catalog sources. */
     val catalog: StateFlow<List<CatalogSource>> = _catalog.asStateFlow()
@@ -135,7 +135,6 @@ class AssetRepository internal constructor(
         try {
             val newErrors = LinkedHashMap<String, String>()
             val newEntries = LinkedHashMap<String, AssetEntry>()
-            val newDrivers = LinkedHashMap<String, DriverPackage>()
 
             for (source in catalogSources.values) {
                 try {
@@ -157,22 +156,6 @@ class AssetRepository internal constructor(
                         ).let { reconcileDownloadStatus(it) }
                         newEntries[entry.id] = entry
                     }
-
-                    if (source.type == AssetType.VULKAN_DRIVER) {
-                        for (asset in filtered) {
-                            val driver = DriverPackage(
-                                id = "${source.slug}/${asset.name}",
-                                name = asset.name,
-                                version = release.tagName,
-                                downloadUrl = asset.downloadUrl,
-                                source = AssetSource.GITHUB_RELEASE,
-                                sourceRepo = source.slug,
-                                fileSizeBytes = asset.sizeBytes,
-                                sha256 = asset.sha256,
-                            ).let { reconcileDriverStatus(it) }
-                            newDrivers[driver.id] = driver
-                        }
-                    }
                 } catch (error: Exception) {
                     // A cancelled refresh (e.g. the screen that started it left composition)
                     // must abort as a whole instead of publishing a partial catalog with a
@@ -190,8 +173,6 @@ class AssetRepository internal constructor(
 
             entriesById.clear()
             entriesById.putAll(newEntries)
-            driversById.clear()
-            driversById.putAll(newDrivers)
             errors.clear()
             errors.putAll(newErrors)
 
@@ -206,11 +187,7 @@ class AssetRepository internal constructor(
 
     fun listAssets(): List<AssetEntry> = _assets.value
 
-    fun listDrivers(): List<DriverPackage> = _drivers.value
-
     fun getAsset(id: String): AssetEntry? = entriesById[id]
-
-    fun getDriver(id: String): DriverPackage? = driversById[id]
 
     /** Filters assets by type. */
     fun filterByType(type: AssetType): List<AssetEntry> =
@@ -285,32 +262,11 @@ class AssetRepository internal constructor(
     }
 
     /**
-     * Enqueues a driver download. Drivers go to a separate directory and are
-     * validated by the native adrenotools layer on install.
-     */
-    suspend fun downloadDriver(driverId: String): DownloadTask? {
-        val driver = driversById[driverId] ?: return null
-        if (driver.isDownloaded) return null
-        val dest = driverDestFile(driver)
-        return downloadManager.enqueue(
-            url = driver.downloadUrl,
-            dest = dest,
-            displayName = driver.name,
-            expectedSha256 = driver.sha256,
-            assetId = driver.id,
-            recordKind = RecordKind.DRIVER,
-        ).also {
-            driversById[driver.id] = driver.copy(isDownloaded = false, localPath = dest.absolutePath)
-            publish()
-        }
-    }
-
-    /**
      * Files on disk for the catalog sources of [type], newest first. Reads the download
      * directories directly, so it works offline and before the catalog has been refreshed.
      */
     fun downloadedFiles(type: AssetType): List<File> {
-        val root = downloadRoot(type)
+        val root = assetsRoot
         val directories = _catalog.value
             .filter { it.type == type }
             .map { File(root, sanitizeFileName(it.slug)) }
@@ -347,34 +303,11 @@ class AssetRepository internal constructor(
         }
     }
 
-    private fun reconcileDriverStatus(driver: DriverPackage): DriverPackage {
-        val dest = driverDestFile(driver)
-        if (dest.isFile && dest.length() > 0) {
-            return driver.copy(isDownloaded = true, localPath = dest.absolutePath)
-        }
-        val task = downloadManager.taskForAsset(driver.id)
-        return if (task?.status == DownloadStatus.COMPLETED && dest.isFile) {
-            driver.copy(isDownloaded = true, localPath = dest.absolutePath)
-        } else {
-            driver.copy(isDownloaded = false, localPath = null)
-        }
-    }
-
-    /** Driver packages live with the drivers, whichever screen started the download. */
-    private fun downloadRoot(type: AssetType): File =
-        if (type == AssetType.VULKAN_DRIVER) File(appContext.filesDir, "drivers") else assetsRoot
-
     private fun assetDestFile(entry: AssetEntry): File =
-        File(downloadRoot(entry.type), "${sanitizeFileName(entry.sourceRepo ?: "misc")}/${sanitizeFileName(entry.name)}")
-
-    private fun driverDestFile(driver: DriverPackage): File =
-        File(downloadRoot(AssetType.VULKAN_DRIVER), "${sanitizeFileName(driver.sourceRepo ?: "misc")}/${sanitizeFileName(driver.name)}")
+        File(assetsRoot, "${sanitizeFileName(entry.sourceRepo ?: "misc")}/${sanitizeFileName(entry.name)}")
 
     private fun publish() {
         _assets.value = entriesById.values
-            .sortedByDescending { it.sourceRepo }
-            .toList()
-        _drivers.value = driversById.values
             .sortedByDescending { it.sourceRepo }
             .toList()
     }
@@ -394,8 +327,9 @@ class AssetRepository internal constructor(
             }
             // The file is only written by add/remove, so once it exists it is the full
             // source list. Replacing the seeded defaults keeps removals across restarts.
+            // Driver sources moved to DriverRepository; drop any that an older build persisted.
             catalogSources.clear()
-            persisted.forEach { catalogSources[it.slug] = it }
+            persisted.filter { it.type != AssetType.VULKAN_DRIVER }.forEach { catalogSources[it.slug] = it }
             _catalog.value = catalogSources.values.toList()
         }.onFailure { error ->
             Log.e(TAG, "Catalog unreadable, using defaults", error)
@@ -442,6 +376,8 @@ class AssetRepository internal constructor(
          * `GGlessT/modern-treex` is included as requested; the GitHub API may
          * return a client error for repos with no releases, which is recorded
          * in [refreshErrors] rather than crashing the refresh.
+         *
+         * The RADV Xclipse driver is not listed here: see [DriverRepository].
          */
         val defaultCatalog: List<CatalogSource> = listOf(
             CatalogSource(
@@ -469,14 +405,6 @@ class AssetRepository internal constructor(
                 // Release tarballs for Windows (dxvk-3.1.1.tar.gz); not the dxvk-native-* Linux builds.
                 assetGlobs = listOf("regex:^dxvk-[0-9][0-9.]*\\.tar\\.(gz|zst)$"),
                 notes = "DirectX to Vulkan translation",
-            ),
-            CatalogSource(
-                owner = "JimVulkan",
-                repo = "radv-xclipse",
-                displayName = "RADV Xclipse (Mesa Vulkan)",
-                type = AssetType.VULKAN_DRIVER,
-                assetGlobs = listOf("*.apk", "*.zip"),
-                notes = "Mesa RADV driver for Samsung Xclipse (RDNA2)",
             ),
             CatalogSource(
                 owner = "GGlessT",
