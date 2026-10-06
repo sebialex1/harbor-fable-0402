@@ -200,7 +200,7 @@ Java_io_harbor_fable_nativebridge_AdrenoToolsBridge_probeVulkanExtensions(
 JNIEXPORT jint JNICALL
 Java_io_harbor_fable_nativebridge_NativeLoader_launchWineContainer(
     JNIEnv* env, jobject /*thiz*/, jstring jContainerPath, jstring jExePath, jobjectArray jArgs,
-    jobjectArray jEnvVars, jstring jDriverPath, jstring jBox64Path) {
+    jobjectArray jEnvVars, jstring jDriverPath, jstring jTranslator, jstring jTranslatorPath) {
     fable::set_launch_error("");
     auto fail = [](const std::string& message) {
         fable::set_launch_error(message);
@@ -222,11 +222,17 @@ Java_io_harbor_fable_nativebridge_NativeLoader_launchWineContainer(
         if (!driver_path.ok()) return fail("Failed to read the driver path");
         driver = driver_path.get();
     }
-    std::string box64;
-    if (jBox64Path) {
-        JString box64_path(env, jBox64Path);
-        if (!box64_path.ok()) return fail("Failed to read the Box64 path");
-        box64 = box64_path.get();
+    std::string translator_name;
+    if (jTranslator) {
+        JString translator(env, jTranslator);
+        if (!translator.ok()) return fail("Failed to read the translator name");
+        translator_name = translator.get();
+    }
+    std::string translator_path;
+    if (jTranslatorPath) {
+        JString path(env, jTranslatorPath);
+        if (!path.ok()) return fail("Failed to read the translator path");
+        translator_path = path.get();
     }
     try {
         fable::WineLaunchRequest request;
@@ -235,7 +241,8 @@ Java_io_harbor_fable_nativebridge_NativeLoader_launchWineContainer(
         request.args = std::move(args);
         request.env = std::move(env_vars);
         request.driver_path = std::move(driver);
-        request.box64_path = std::move(box64);
+        request.translator = fable::parse_translator(translator_name);
+        request.translator_path = std::move(translator_path);
         std::string error;
         return fable::launch_wine_container(request, &error);
     } catch (const std::exception& ex) {

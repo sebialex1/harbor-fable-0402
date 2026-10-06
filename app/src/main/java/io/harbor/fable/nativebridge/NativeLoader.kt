@@ -3,10 +3,14 @@ package io.harbor.fable.nativebridge
 /**
  * Process management for Wine containers, implemented in `wine_launcher.cpp`.
  *
- * Windows programs are x86_64, so the launcher starts them as `box64 wine <program>`; see
- * [launchWineContainer].
+ * Windows programs are x86_64, so the launcher starts them through an x86_64 translator —
+ * `box64 wine <program>` or `FEXInterpreter wine <program>`; see [launchWineContainer].
  */
 object NativeLoader {
+    /** [launchWineContainer] translator names; match `Container.translator`. */
+    const val TRANSLATOR_BOX64 = "box64"
+    const val TRANSLATOR_FEX = "fex"
+
     /** False when `libfable_native` could not be loaded; the external functions then throw. */
     val isLoaded: Boolean = try {
         System.loadLibrary("fable_native")
@@ -19,8 +23,11 @@ object NativeLoader {
      * Starts Wine for [exePath] inside the container directory [containerPath] and returns the
      * child process id, or -1 on failure (see [lastLaunchError]).
      *
-     * The Wine build is expected under [containerPath] (`bin/wine`). When [box64Path] is set the
-     * process is started as `box64 wine …`, which is how x86_64 Wine runs on an ARM64 device.
+     * The Wine build is expected under [containerPath] (`bin/wine`). x86_64 Wine runs on an ARM64
+     * device through a translator: [translator] is [TRANSLATOR_BOX64] or [TRANSLATOR_FEX] (null
+     * means Box64) and [translatorPath] the matching `box64` / `FEXInterpreter` executable; the
+     * process is then started as `<translatorPath> wine …`. When [translatorPath] is null the
+     * launcher looks for a copy inside the container.
      * [exePath] may also be a Wine built-in such as `explorer`; [args] follow it on the command
      * line. [envVars] are `KEY=VALUE` pairs, [driverPath] an optional installed Vulkan driver.
      * Wine's output goes to `fable-launch.log` in the container directory.
@@ -31,7 +38,8 @@ object NativeLoader {
         args: Array<String>,
         envVars: Array<String>,
         driverPath: String?,
-        box64Path: String?,
+        translator: String?,
+        translatorPath: String?,
     ): Int
 
     /** Why the last [launchWineContainer] call failed, or null when it did not fail. */

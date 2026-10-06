@@ -27,7 +27,12 @@ internal sealed interface Box64Status {
 
 /** Result of looking for a usable `FEXInterpreter` executable. */
 internal sealed interface FexStatus {
-    data class Ready(val executable: File) : FexStatus
+    /**
+     * [executable] is `FEXInterpreter`. [rootFs] is the x86_64 guest root file system shipped in
+     * the same package (FEX resolves the guest's glibc and other libraries from it), or null when
+     * the package has none and FEX must find one through its own config or `FEX_ROOTFS`.
+     */
+    data class Ready(val executable: File, val rootFs: File? = null) : FexStatus
 
     /** No FEX package has been downloaded yet. */
     data object NotDownloaded : FexStatus
@@ -40,8 +45,8 @@ internal sealed interface FexStatus {
 internal data class InstalledWine(val build: String, val binary: File)
 
 /**
- * Finds, unpacks and wires together the downloaded runtime pieces: Box64 (shared, extracted
- * once under `filesDir/runtime/box64`), a Wine build (extracted into each container) and the
+ * Finds, unpacks and wires together the downloaded runtime pieces: the x86_64 translator (Box64
+ * or FEX, shared, extracted once under `filesDir/runtime/box64` / `filesDir/runtime/fex`), a Wine build (extracted into each container) and the
  * active Vulkan driver from [DriverRepository].
  *
  * Everything is discovered from files on disk, so it works offline and before the catalog has
@@ -195,12 +200,31 @@ internal class WineRuntime(
                 if (executable != null) {
                     executable.setReadable(true, false)
                     executable.setExecutable(true, false)
-                    return@withContext FexStatus.Ready(executable)
+                    // FEXInterpreter launches FEXServer from its own directory on demand.
+                    executable.parentFile?.listFiles()?.forEach { sibling ->
+                        if (sibling.isFile && sibling.name.startsWith("FEX")) {
+                            sibling.setReadable(true, false)
+                            sibling.setExecutable(true, false)
+                        }
+                    }
+                    return@withContext FexStatus.Ready(executable, findFexRootFs(dir))
                 }
             }
             FexStatus.NoExecutable(packages.first().name)
         }
     }
+
+    /**
+     * An x86_64 root file system inside an unpacked FEX package: a directory holding the x86_64
+     * dynamic loader (`lib64/ld-linux-x86-64.so.2`) or a multiarch `usr/lib/x86_64-linux-gnu`.
+     */
+    private fun findFexRootFs(packageDir: File): File? = packageDir.walkTopDown()
+        .maxDepth(FEX_ROOTFS_SEARCH_DEPTH)
+        .filter { it.isDirectory }
+        .firstOrNull { candidate ->
+            File(candidate, "lib64/ld-linux-x86-64.so.2").exists() ||
+                File(candidate, "usr/lib/x86_64-linux-gnu").isDirectory
+        }
 
     // --- Executables and drivers ---------------------------------------------------------
 
@@ -262,8 +286,9 @@ internal class WineRuntime(
         private const val WINE_MARKER = ".fable-wine.json"
         private const val COMPLETE_MARKER = ".fable-complete"
         private val WINE_BINARIES = listOf("bin/wine", "bin/wine64")
+        private const val FEX_ROOTFS_SEARCH_DEPTH = 3
 
-        /** Name of the file the native launcher writes Wine/Box64 output to. */
+        /** Name of the file the native launcher writes Wine/Box64/FEX output to. */
         const val LAUNCH_LOG = "fable-launch.log"
 
         /** `wine-11.19-amd64.tar.xz` -> `wine-11.19-amd64`. */

@@ -25,7 +25,7 @@ extern char** environ;
 namespace fable {
 namespace {
 
-// Wine and Box64 output goes here, inside the container directory.
+// Wine and translator (Box64/FEX) output goes here, inside the container directory.
 constexpr const char* kLaunchLogName = "fable-launch.log";
 
 std::mutex g_error_mutex;
@@ -101,11 +101,13 @@ std::string find_wine(const std::string& container) {
     return {};
 }
 
-// The box64 executable: `requested` when given (empty result if it is not executable),
+// The translator executable: `requested` when given (empty result if it is not executable),
 // otherwise a copy installed inside the container. Empty when there is none.
-std::string find_box64(const std::string& container, const std::string& requested) {
+std::string find_translator(const std::string& container, Translator translator, const std::string& requested) {
     if (!requested.empty()) return is_executable_file(requested) ? requested : std::string();
-    const char* rels[] = {"/bin/box64", "/box64", "/usr/bin/box64", nullptr};
+    const char* box64_rels[] = {"/bin/box64", "/box64", "/usr/bin/box64", nullptr};
+    const char* fex_rels[] = {"/bin/FEXInterpreter", "/FEXInterpreter", "/usr/bin/FEXInterpreter", nullptr};
+    const char** rels = translator == Translator::kFex ? fex_rels : box64_rels;
     for (int i = 0; rels[i]; ++i) {
         const std::string candidate = container + rels[i];
         if (is_executable_file(candidate)) return candidate;
@@ -184,6 +186,18 @@ void layer_cb(const char* key, const char* value, void* ctx) {
 
 }  // namespace
 
+Translator parse_translator(const std::string& name) {
+    std::string lower;
+    lower.reserve(name.size());
+    for (unsigned char c : name) lower.push_back(static_cast<char>(std::tolower(c)));
+    if (lower == "fex" || lower == "fex-emu" || lower == "fexinterpreter") return Translator::kFex;
+    return Translator::kBox64;
+}
+
+const char* translator_display_name(Translator translator) {
+    return translator == Translator::kFex ? "FEX" : "Box64";
+}
+
 std::string last_launch_error() {
     std::lock_guard<std::mutex> lock(g_error_mutex);
     return g_last_error;
@@ -218,17 +232,21 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
     const std::string wine = find_wine(request.container_path);
     if (wine.empty()) return fail("Wine isn't installed in this container");
 
-    // Box64 translates the x86_64 Wine binary on ARM64. An explicit path must be usable;
-    // without one, a copy inside the container is used when present.
-    const std::string box64 = find_box64(request.container_path, request.box64_path);
-    if (!request.box64_path.empty() && box64.empty()) {
-        return fail("Box64 is not executable: " + request.box64_path);
+    // Box64 or FEX translates the x86_64 Wine binary on ARM64. An explicit path must be
+    // usable; without one, a copy inside the container is used when present.
+    const char* translator_name = translator_display_name(request.translator);
+    const std::string translator =
+        find_translator(request.container_path, request.translator, request.translator_path);
+    if (!request.translator_path.empty() && translator.empty()) {
+        return fail(std::string(translator_name) + " is not executable: " + request.translator_path);
     }
 #if defined(__aarch64__)
-    if (box64.empty() && elf_machine(wine) == kMachineX86_64) {
-        return fail("Wine is an x86_64 build and needs Box64 on this device");
+    if (translator.empty() && elf_machine(wine) == kMachineX86_64) {
+        return fail(std::string("Wine is an x86_64 build and needs ") + translator_name + " on this device");
     }
 #endif
+    const bool use_box64 = !translator.empty() && request.translator == Translator::kBox64;
+    const bool use_fex = !translator.empty() && request.translator == Translator::kFex;
 
     mkdir_one(request.container_path + "/tmp");
     mkdir_one(request.container_path + "/cache");
@@ -282,13 +300,19 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         env[key] = item.substr(eq + 1);
     }
 
-    if (!box64.empty()) {
+    if (use_box64) {
         // Where Box64 looks for the emulated program's libraries and helper executables
         // (wineserver). Anything the caller set above wins.
         env.emplace("BOX64_PATH", dirname_of(wine));
         env.emplace("BOX64_LD_LIBRARY_PATH",
                     request.container_path + "/lib/wine/x86_64-unix:" + request.container_path + "/lib:" +
                         request.container_path + "/lib64");
+    }
+    if (use_fex) {
+        // FEXInterpreter starts FEXServer (shipped next to it) on demand and looks it up on
+        // PATH. Its config lives under $HOME/.fex-emu, i.e. inside the container. The guest
+        // RootFS (FEX_ROOTFS) is passed by the caller in request.env.
+        prepend_path(&env, "PATH", dirname_of(translator));
     }
 
     std::vector<std::string> storage;
@@ -301,9 +325,9 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
     for (auto& item : storage) envp.push_back(item.data());
     envp.push_back(nullptr);
 
-    // argv: [box64] wine exe [args...]
+    // argv: [box64 | FEXInterpreter] wine exe [args...]
     std::vector<std::string> command;
-    if (!box64.empty()) command.push_back(box64);
+    if (!translator.empty()) command.push_back(translator);
     command.push_back(wine);
     command.push_back(request.exe_path);
     for (const auto& arg : request.args) command.push_back(arg);
@@ -324,7 +348,8 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
 
     std::string printable;
     for (const auto& item : command) printable += (printable.empty() ? "" : " ") + item;
-    FABLE_LOGI("exec %s (driver=%s)", printable.c_str(),
+    FABLE_LOGI("exec %s (translator=%s, driver=%s)", printable.c_str(),
+               translator.empty() ? "none" : translator_name,
                request.driver_path.empty() ? "none" : request.driver_path.c_str());
 
     const std::string log_path = request.container_path + "/" + kLaunchLogName;

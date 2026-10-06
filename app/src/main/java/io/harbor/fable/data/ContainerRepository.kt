@@ -243,9 +243,10 @@ class ContainerRepository internal constructor(
 
     /**
      * Launches [exeId] — or the container's primary executable when null — inside the
-     * container's Wine prefix, through Box64.
+     * container's Wine prefix, through the container's translator (Box64, or FEX when
+     * [Container.translator] is "fex").
      *
-     * Needs a downloaded Box64 package and Wine build (Assets tab). The first launch of a
+     * Needs a downloaded package for that translator and a Wine build (Assets tab). The first launch of a
      * container unpacks Wine into it, which takes a while; the container shows as configuring
      * meanwhile. Every failure carries a message that says what to do about it.
      */
@@ -337,20 +338,12 @@ class ContainerRepository internal constructor(
         }
         val dir = directory(container.id).also { it.mkdirs() }
 
-        // 1. Box64 and a Wine build have to be downloaded.
+        // 1. The container's translator (Box64 or FEX) and a Wine build have to be downloaded.
         val hasWine = runtime.installedWine(dir) != null || runtime.wineArchives().isNotEmpty()
-        val box64 = when (val status = runtime.ensureBox64()) {
-            is Box64Status.Ready -> status.executable
-            Box64Status.NotDownloaded -> {
-                return LaunchResult.Failed(
-                    if (hasWine) "Install Box64 from the Assets tab first"
-                    else "Install Box64 and Wine from the Assets tab first"
-                )
-            }
-            is Box64Status.NoExecutable -> {
-                return LaunchResult.Failed("${status.packageName} has no box64 executable. Download a different Box64 build")
-            }
-        }
+        // Read the translator from the latest record: it may have been switched since the tap.
+        val configured = mutex.withLock { containersById[container.id] } ?: container
+        val translator = resolveTranslator(runtime, configured, hasWine)
+            .getOrElse { error -> return LaunchResult.Failed(error.message ?: "Couldn't set up the x86_64 translator") }
         if (!hasWine) return LaunchResult.Failed("Install Wine from the Assets tab first")
 
         // 2. Unpack Wine into the container's prefix (first launch only).
@@ -375,7 +368,8 @@ class ContainerRepository internal constructor(
         // 4. Start the process.
         val environment = buildList {
             add("WINEDEBUG=-all")
-            add("BOX64_NOBANNER=1")
+            addAll(translator.environment)
+            // The container's own variables come last so they can override anything above.
             current.envVars.forEach { (key, value) -> add("$key=$value") }
         }
         val driver = runtime.activeDriverLibrary()
@@ -387,7 +381,8 @@ class ContainerRepository internal constructor(
                     args = arguments.toTypedArray(),
                     envVars = environment.toTypedArray(),
                     driverPath = driver,
-                    box64Path = box64.absolutePath,
+                    translator = translator.name,
+                    translatorPath = translator.executable.absolutePath,
                 )
             }
         } catch (error: UnsatisfiedLinkError) {
@@ -403,12 +398,77 @@ class ContainerRepository internal constructor(
         if (!WineRuntime.isAlive(pid) && !WineRuntime.exitedCleanly(dir)) {
             setStatus(container.id, ContainerStatus.READY)
             val reason = WineRuntime.lastLogLine(dir)
+            val hint = translator.earlyExitHint
+                ?.takeIf { current.envVars.keys.none { key -> key == FEX_ROOTFS_ENV } }
+                ?.let { " ($it)" }
+                .orEmpty()
             return LaunchResult.Failed(
-                if (reason != null) "$label stopped right away: $reason" else "$label stopped right away"
+                (if (reason != null) "$label stopped right away: $reason" else "$label stopped right away") + hint
             )
         }
         markStarted(container.id, exe?.id, pid)
         return LaunchResult.Started(pid)
+    }
+
+    /**
+     * The x86_64 translator [container] launches through, per [Container.translator]: FEX
+     * (`FEXInterpreter`) for "fex", Box64 otherwise. Fails with a user-facing message when the
+     * chosen translator hasn't been downloaded or its package has no usable executable; there is
+     * deliberately no silent fallback to the other translator.
+     */
+    private suspend fun resolveTranslator(
+        runtime: WineRuntime,
+        container: Container,
+        hasWine: Boolean,
+    ): Result<ResolvedTranslator> {
+        val wineToo = if (hasWine) "" else " and Wine"
+        return if (usesFex(container)) {
+            when (val status = runtime.ensureFex()) {
+                is FexStatus.Ready -> Result.success(
+                    ResolvedTranslator(
+                        name = NativeLoader.TRANSLATOR_FEX,
+                        executable = status.executable,
+                        environment = buildList {
+                            // FEX resolves the guest's x86_64 libraries (glibc, …) from its RootFS.
+                            status.rootFs?.let { add("$FEX_ROOTFS_ENV=${it.absolutePath}") }
+                        },
+                        earlyExitHint = if (status.rootFs == null) {
+                            "the FEX package has no x86_64 RootFS; set $FEX_ROOTFS_ENV in the container's environment"
+                        } else {
+                            null
+                        },
+                    )
+                )
+                FexStatus.NotDownloaded -> Result.failure(
+                    IllegalStateException(
+                        "${container.name} uses FEX, which isn't installed. " +
+                            "Install FEX$wineToo from the Assets tab, or switch the container to Box64"
+                    )
+                )
+                is FexStatus.NoExecutable -> Result.failure(
+                    IllegalStateException(
+                        "${status.packageName} has no FEXInterpreter executable. " +
+                            "Download a different FEX build, or switch the container to Box64"
+                    )
+                )
+            }
+        } else {
+            when (val status = runtime.ensureBox64()) {
+                is Box64Status.Ready -> Result.success(
+                    ResolvedTranslator(
+                        name = NativeLoader.TRANSLATOR_BOX64,
+                        executable = status.executable,
+                        environment = listOf("BOX64_NOBANNER=1"),
+                    )
+                )
+                Box64Status.NotDownloaded -> Result.failure(
+                    IllegalStateException("Install Box64$wineToo from the Assets tab first")
+                )
+                is Box64Status.NoExecutable -> Result.failure(
+                    IllegalStateException("${status.packageName} has no box64 executable. Download a different Box64 build")
+                )
+            }
+        }
     }
 
     private suspend fun setStatus(id: String, status: ContainerStatus) {
@@ -467,6 +527,13 @@ class ContainerRepository internal constructor(
     companion object {
         private const val TAG = "ContainerRepository"
 
+        /** True when [container] is set to run through FEX rather than Box64. */
+        internal fun usesFex(container: Container): Boolean =
+            container.translator.trim().equals(NativeLoader.TRANSLATOR_FEX, ignoreCase = true)
+
+        /** Environment variable that points FEX at its x86_64 guest root file system. */
+        private const val FEX_ROOTFS_ENV = "FEX_ROOTFS"
+
         /** How long a freshly started process is watched for an immediate crash. */
         private const val EARLY_EXIT_WINDOW_MS = 1_200L
         private const val PROCESS_POLL_MS = 1_500L
@@ -521,6 +588,19 @@ class ContainerRepository internal constructor(
     }
 }
 
+/**
+ * The translator a launch goes through: [name] is passed to the native launcher
+ * ([NativeLoader.TRANSLATOR_BOX64] / [NativeLoader.TRANSLATOR_FEX]), [executable] is `box64` or
+ * `FEXInterpreter`, and [environment] holds translator-specific `KEY=VALUE` pairs.
+ * [earlyExitHint] is appended to the error when the process dies straight away.
+ */
+private data class ResolvedTranslator(
+    val name: String,
+    val executable: File,
+    val environment: List<String>,
+    val earlyExitHint: String? = null,
+)
+
 /** Outcome of [ContainerRepository.launch]. */
 sealed interface LaunchResult {
     /** Wine started; [pid] is the launcher process id. */
@@ -529,7 +609,7 @@ sealed interface LaunchResult {
     /** Launching is not possible on this device or build (e.g. the native runtime didn't load). */
     data class Unavailable(val reason: String) : LaunchResult
 
-    /** The launch couldn't happen: a missing Box64/Wine download, a bad request, or a crash on start. */
+    /** The launch couldn't happen: a missing Box64/FEX/Wine download, a bad request, or a crash on start. */
     data class Failed(val reason: String) : LaunchResult
 }
 
