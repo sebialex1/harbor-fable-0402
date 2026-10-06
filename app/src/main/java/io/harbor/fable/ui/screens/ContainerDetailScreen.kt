@@ -1,5 +1,7 @@
 package io.harbor.fable.ui.screens
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -49,17 +51,6 @@ fun ContainerDetailScreen(
         title = container?.name ?: "Container",
         subtitle = container?.wineVersion,
         onBack = onBack,
-        actions = {
-            GlassIconButton(
-                icon = Icons.Outlined.PlayArrow,
-                contentDescription = "Launch",
-                onClick = {
-                    scope.launch {
-                        fableUi.showMessage(repository.launch(containerId).message(), long = true)
-                    }
-                },
-            )
-        },
     ) {
         if (container == null) {
             item {
@@ -73,6 +64,37 @@ fun ContainerDetailScreen(
                 )
             }
             return@FableScreen
+        }
+
+        // Launch controls
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                val primaryName = container.exeName?.takeIf { !container.exePath.isNullOrBlank() }
+                if (primaryName != null) {
+                    GlassButton(
+                        text = "Launch $primaryName",
+                        icon = Icons.Outlined.PlayArrow,
+                        primary = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            scope.launch {
+                                fableUi.showMessage(repository.launch(containerId).message(), long = true)
+                            }
+                        },
+                    )
+                }
+                GlassButton(
+                    text = "Launch Desktop",
+                    icon = Icons.Outlined.DesktopWindows,
+                    primary = primaryName == null,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        scope.launch {
+                            fableUi.showMessage(repository.launchDesktop(containerId).message(), long = true)
+                        }
+                    },
+                )
+            }
         }
 
         // Overview section

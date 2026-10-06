@@ -226,6 +226,17 @@ class ContainerRepository internal constructor(
         LaunchResult.Unavailable("Wine runtime isn't bundled yet, so ${exe.name} can't start in this build")
     }
 
+    /**
+     * Starts the full Wine desktop (explorer) in the container, without any executable.
+     *
+     * Stub like [launch]: reports [LaunchResult.Unavailable] until a Wine runtime ships.
+     */
+    suspend fun launchDesktop(containerId: String): LaunchResult = mutex.withLock {
+        val container = containersById[containerId]
+            ?: return@withLock LaunchResult.Failed("Container not found")
+        LaunchResult.Unavailable("Wine runtime isn't bundled yet, so the ${container.name} desktop can't start in this build")
+    }
+
     private fun persistLocked() {
         publish()
         runCatching { dao.write(ContainerSnapshot(containersById.values.toList(), exesById.values.toList())) }
