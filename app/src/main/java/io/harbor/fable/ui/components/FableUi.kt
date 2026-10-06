@@ -21,12 +21,22 @@ class FableUi(
     val scope: CoroutineScope,
     val snackbarHostState: SnackbarHostState,
 ) {
-    fun showMessage(message: String, long: Boolean = false) {
+    /**
+     * Shows a snackbar the user can always dismiss by hand (close icon, or tapping it).
+     * [long] keeps it up longer; [indefinite] keeps it until dismissed, for messages that must
+     * be read (install failures, say) and should not time out underneath the user.
+     */
+    fun showMessage(message: String, long: Boolean = false, indefinite: Boolean = false) {
         scope.launch {
             snackbarHostState.currentSnackbarData?.dismiss()
             snackbarHostState.showSnackbar(
                 message = message,
-                duration = if (long) SnackbarDuration.Long else SnackbarDuration.Short,
+                withDismissAction = true,
+                duration = when {
+                    indefinite -> SnackbarDuration.Indefinite
+                    long -> SnackbarDuration.Long
+                    else -> SnackbarDuration.Short
+                },
             )
         }
     }

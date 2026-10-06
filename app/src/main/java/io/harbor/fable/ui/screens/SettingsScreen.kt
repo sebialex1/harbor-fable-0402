@@ -40,7 +40,7 @@ fun SettingsScreen() {
     if (showResetConfirm) {
         ConfirmDialog(
             title = "Reset settings?",
-            message = "All app settings will be restored to their default values. Your containers are not affected.",
+            message = "Settings return to their defaults. Containers are not affected.",
             confirmLabel = "Reset",
             destructive = true,
             onConfirm = {

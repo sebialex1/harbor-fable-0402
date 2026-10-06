@@ -224,7 +224,7 @@ private fun WelcomeStep(deviceInfo: DeviceGpuInfo, onStart: () -> Unit, onSkip: 
         Spacer(Modifier.height(Spacing.sm))
         Staggered(index = 2) {
             Text(
-                text = "Windows apps and games on your Xclipse phone. Wine runs through Box64 with a Mesa RADV driver built for Samsung GPUs.",
+                text = "Windows apps and games on your Xclipse phone",
                 style = MaterialTheme.typography.bodyLarge,
                 color = FableTextDim,
                 textAlign = TextAlign.Center,
@@ -445,7 +445,7 @@ private fun DownloadStep(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         else -> Text(
-                            text = "You can leave the app; downloads keep going and show in the notification shade.",
+                            text = "Downloads continue in the background",
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),

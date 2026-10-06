@@ -16,6 +16,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
@@ -57,6 +59,7 @@ import io.harbor.fable.ui.theme.FableBg
 import io.harbor.fable.ui.theme.FableGlassShadow
 import io.harbor.fable.ui.theme.FableGlassShadowSpot
 import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.GlassShadow
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.ScreenPadding
@@ -321,6 +324,7 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
                 .padding(bottom = snackbarBottom + Spacing.sm, start = ScreenPadding, end = ScreenPadding),
         ) { data ->
             val shape = RoundedCornerShape(ControlRadius + 2.dp)
+            // Always dismissible: the close icon (withDismissAction) or a tap anywhere on it.
             Snackbar(
                 snackbarData = data,
                 modifier = Modifier
@@ -330,11 +334,14 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
                         ambientColor = FableGlassShadow,
                         spotColor = FableGlassShadowSpot,
                     )
-                    .glassRim(shape, GlassLevel.Overlay),
+                    .glassRim(shape, GlassLevel.Overlay)
+                    .clip(shape)
+                    .clickable(onClick = { data.dismiss() }),
                 shape = shape,
                 containerColor = GlassLevel.Overlay.fill,
                 contentColor = FableText,
                 actionColor = FableAccent,
+                dismissActionContentColor = FableTextDim,
             )
         }
 

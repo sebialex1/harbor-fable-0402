@@ -185,7 +185,8 @@ fun FableScreen(
                 contentPadding = PaddingValues(
                     start = ScreenPadding,
                     end = ScreenPadding,
-                    top = Spacing.xs,
+                    // Enough breathing room that the first card does not sit glued to the top bar.
+                    top = Spacing.md,
                     bottom = bottomPadding,
                 ),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
