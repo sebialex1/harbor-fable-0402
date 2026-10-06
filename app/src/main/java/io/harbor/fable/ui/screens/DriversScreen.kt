@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
+import io.harbor.fable.data.DownloadStatus
 import io.harbor.fable.data.DownloadTask
 import io.harbor.fable.data.DriverInstallResult
 import io.harbor.fable.data.models.InstalledDriver
@@ -46,8 +47,9 @@ import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
 /**
- * The RADV Xclipse driver: what is active, the latest release, and the older builds. One
- * driver is active at a time; releases are downloaded here and installed as the active one.
+ * The RADV Xclipse driver: device, the one active driver (with the latest release as the install
+ * target or the update prompt), the Vulkan extensions link, and the older builds. One driver is
+ * active at a time; releases are downloaded here and installed as the active one.
  * [onOpenVulkanExtensions] pushes the screen that lists what the driver reports through Vulkan.
  */
 @Composable
@@ -75,11 +77,19 @@ fun DriversScreen(onOpenVulkanExtensions: () -> Unit = {}) {
     var pendingReplace by remember { mutableStateOf<RadvRelease?>(null) }
     var confirmUninstall by remember { mutableStateOf(false) }
 
-    // Installs run on the app scope so leaving the tab mid-extraction does not cancel them.
+    // Installs run on the app scope so leaving the tab mid-extraction does not cancel them. A
+    // release that is not on disk yet is downloaded first and installed when the bytes land.
     fun install(release: RadvRelease) {
         fableUi.scope.launch {
-            val result = repository.install(release.tag)
-            fableUi.showMessage(result.message, long = result is DriverInstallResult.Failed)
+            if (release.isDownloaded) {
+                val result = repository.install(release.tag)
+                fableUi.showMessage(result.message, long = result is DriverInstallResult.Failed)
+            } else {
+                val task = repository.downloadAndInstall(release.tag)
+                fableUi.showMessage(
+                    if (task != null) "Downloading ${release.tag}; it installs when the download finishes" else "Installing ${release.tag}",
+                )
+            }
         }
     }
 
@@ -152,9 +162,14 @@ internal fun DriversContent(
     val expansion = rememberExpansionState()
     val appear = rememberLiquidAppear()
     val latest = remember(releases) { releases.firstOrNull { it.channel == ReleaseChannel.LATEST } }
-    val older = remember(releases) { releases.filter { it.channel != ReleaseChannel.LATEST } }
     val updateAvailable = latest != null && installed != null && installed.tag != latest.tag &&
         RadvRelease.versionComparator.compare(latest.versionParts, RadvRelease.parseVersion(installed.tag)) > 0
+    // The latest release is shown once: as the active driver, as the install target of the empty
+    // state, or as the update prompt. Only when none of those apply does it join the list below.
+    val latestCovered = latest == null || installed == null || installed.tag == latest.tag || updateAvailable
+    val older = remember(releases, latestCovered) {
+        if (latestCovered) releases.filter { it.channel != ReleaseChannel.LATEST } else releases
+    }
 
     FableScreen(
         title = "Drivers",
@@ -184,8 +199,11 @@ internal fun DriversContent(
             ActiveDriverCard(
                 installed = installed,
                 installing = installing,
+                latest = latest,
+                latestTask = latest?.let { tasks.taskFor(it) },
                 updateAvailable = if (updateAvailable) latest else null,
-                onInstallUpdate = { latest?.let(onInstall) },
+                onDownloadLatest = { latest?.let(onDownload) },
+                onInstallLatest = { latest?.let(onInstall) },
                 onUninstall = onUninstall,
                 modifier = Modifier.animateItem().liquidAppear(appear, 1),
             )
@@ -231,31 +249,11 @@ internal fun DriversContent(
             }
         }
 
-        // Only show the Latest Release section when no driver is installed (it's the install
-        // target). When a driver is active, the Active Driver card already covers the latest
-        // release — either as "Up to date" or with an inline "Update to X" button — so a
-        // separate card would duplicate the same information.
-        if (latest != null && installed == null) {
-            item(key = "latest-label") { SectionLabel("Latest Release", Modifier.animateItem().liquidAppear(appear, 3)) }
-            item(key = "latest") {
-                GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
-                    DriverReleaseRow(
-                        release = latest,
-                        task = tasks.taskFor(latest),
-                        installed = false,
-                        installing = installing == latest.tag,
-                        onDownload = { onDownload(latest) },
-                        onInstall = { onInstall(latest) },
-                    )
-                }
-            }
-        }
-
         if (older.isNotEmpty()) {
             item(key = "older") {
                 val downloadedCount = older.count { it.isDownloaded }
                 CollapsibleSection(
-                    title = "Previous Versions",
+                    title = if (latestCovered) "Previous Versions" else "All Versions",
                     expanded = expansion.isExpanded(OLDER_KEY, default = false),
                     onToggle = { expansion.toggle(OLDER_KEY, default = false) },
                     modifier = Modifier.animateItem().liquidAppear(appear, 4),
@@ -295,16 +293,21 @@ internal fun DriversContent(
 }
 
 /**
- * The single active driver with its actions, or the empty state explaining that one driver is
- * active at a time. While [installing] is set the card shows the extraction in progress. The
+ * The single active driver with its actions, or the empty state offering the [latest] release as
+ * the install target. While [installing] is set the card shows the extraction in progress. When
+ * [updateAvailable] is set the installed face carries a compact update prompt (with the download
+ * progress of [latestTask] once it starts) instead of the screen listing the release twice. The
  * three states cross-fade and the card resizes between them instead of snapping.
  */
 @Composable
 internal fun ActiveDriverCard(
     installed: InstalledDriver?,
     installing: String?,
+    latest: RadvRelease?,
+    latestTask: DownloadTask?,
     updateAvailable: RadvRelease?,
-    onInstallUpdate: () -> Unit,
+    onDownloadLatest: () -> Unit,
+    onInstallLatest: () -> Unit,
     onUninstall: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -348,22 +351,36 @@ internal fun ActiveDriverCard(
                     }
                     ThinProgressBar(progress = null, modifier = Modifier.padding(horizontal = RowPaddingHorizontal).padding(bottom = Spacing.sm))
                 }
-                ActiveDriverState.Empty -> Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingHorizontal),
-                ) {
-                    Text("No driver installed", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        text = "Install the latest RADV Xclipse release below",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = Spacing.xxs),
-                    )
+                ActiveDriverState.Empty -> Column(Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingHorizontal),
+                    ) {
+                        Text("No driver installed", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = if (latest != null) "Install the latest RADV Xclipse release" else "Refresh to load releases",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = Spacing.xxs),
+                        )
+                    }
+                    if (latest != null) {
+                        CardDivider()
+                        DriverReleaseRow(
+                            release = latest,
+                            task = latestTask,
+                            installed = false,
+                            installing = false,
+                            onDownload = onDownloadLatest,
+                            onInstall = onInstallLatest,
+                        )
+                    }
                 }
                 ActiveDriverState.Installed -> InstalledDriverFace(
                     driver = installed ?: lastInstalled[0],
                     updateAvailable = updateAvailable,
-                    onInstallUpdate = onInstallUpdate,
+                    updateTask = latestTask,
+                    onInstallUpdate = onInstallLatest,
                     onUninstall = onUninstall,
                 )
             }
@@ -371,15 +388,22 @@ internal fun ActiveDriverCard(
     }
 }
 
-/** The installed face of [ActiveDriverCard]: summary, then update/uninstall actions. */
+/**
+ * The installed face of [ActiveDriverCard]: summary, then the update prompt (or "Up to date")
+ * beside the uninstall action. While the update is downloading the prompt turns into progress.
+ */
 @Composable
 private fun InstalledDriverFace(
     driver: InstalledDriver?,
     updateAvailable: RadvRelease?,
+    updateTask: DownloadTask?,
     onInstallUpdate: () -> Unit,
     onUninstall: () -> Unit,
 ) {
     if (driver == null) return
+    val transferring = updateAvailable != null && updateTask?.status in setOf(
+        DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING, DownloadStatus.VERIFYING,
+    )
     Column(Modifier.fillMaxWidth()) {
         // Short title and short facts: "v1.5.0 · Vulkan 1.4" fits one line next to the pill, and
         // the full Mesa build string gets its own line instead of being cut off.
@@ -402,16 +426,28 @@ private fun InstalledDriverFace(
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // "Up to date" and the update button swap in place when a release lands.
+            // "Up to date", the update button and the download progress swap in place.
             AnimatedContent(
-                targetState = updateAvailable,
+                targetState = updateAvailable to transferring,
                 transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) },
                 contentAlignment = Alignment.CenterStart,
                 modifier = Modifier.weight(1f),
                 label = "driverUpdate",
-            ) { update ->
-                if (update != null) {
-                    GlassButton(
+            ) { (update, downloading) ->
+                when {
+                    update != null && downloading -> Column(Modifier.fillMaxWidth()) {
+                        val percent = ((updateTask?.progressFraction ?: 0f) * 100).toInt()
+                        Text(
+                            text = if (updateTask?.status == DownloadStatus.VERIFYING) "Verifying ${update.tag}" else "Downloading ${update.tag} · $percent%",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                        )
+                        ThinProgressBar(
+                            progress = updateTask?.takeIf { it.totalBytes > 0 }?.progressFraction,
+                            modifier = Modifier.padding(top = Spacing.xs),
+                        )
+                    }
+                    update != null -> GlassButton(
                         text = "Update to ${update.tag}",
                         icon = Icons.Outlined.Upgrade,
                         primary = true,
@@ -419,8 +455,7 @@ private fun InstalledDriverFace(
                         onClick = onInstallUpdate,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                } else {
-                    Text(
+                    else -> Text(
                         text = "Up to date",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.fillMaxWidth(),
