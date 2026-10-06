@@ -7,6 +7,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,6 +40,10 @@ fun DriversScreen() {
     val isRefreshing by repository.isRefreshing.collectAsStateWithLifecycle()
     val downloadSnapshot by downloadManager.snapshot.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+
+    // Re-runs on every button press; the initial value (0) refreshes from cache on entry.
+    var refreshTrigger by remember { mutableIntStateOf(0) }
+    LaunchedEffect(refreshTrigger) { repository.refresh(forceRefresh = refreshTrigger > 0) }
     val expansion = rememberExpansionState()
 
     val deviceInfo = remember { DeviceProbe.read() }
@@ -56,6 +63,14 @@ fun DriversScreen() {
     FableScreen(
         title = "Drivers",
         subtitle = "Vulkan driver packages",
+        actions = {
+            GlassIconButton(
+                icon = Icons.Outlined.Refresh,
+                contentDescription = "Refresh drivers",
+                enabled = !isRefreshing,
+                onClick = { refreshTrigger++ },
+            )
+        },
     ) {
         // Device info card
         item {

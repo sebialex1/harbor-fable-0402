@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -25,6 +26,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import io.harbor.fable.app.FableApp
 import io.harbor.fable.ui.components.DockTab
 import io.harbor.fable.ui.components.FableUi
 import io.harbor.fable.ui.components.GlassDock
@@ -57,6 +59,15 @@ fun FableRoot() {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
             snackbarHostState = snackbarHostState,
         )
+    }
+
+    // Refresh the catalog once per app launch when the user has it enabled.
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        val app = FableApp.from(context)
+        if (app.settingsRepository.current.refreshCatalogOnLaunch) {
+            runCatching { app.assetRepository.refresh() }
+        }
     }
 
     val backStack by navController.currentBackStackEntryAsState()

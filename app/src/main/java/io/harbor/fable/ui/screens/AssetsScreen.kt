@@ -6,6 +6,9 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,6 +38,10 @@ fun AssetsScreen() {
     val isRefreshing by repository.isRefreshing.collectAsStateWithLifecycle()
     val downloadSnapshot by downloadManager.snapshot.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+
+    // Re-runs on every button press; the initial value (0) refreshes from cache on entry.
+    var refreshTrigger by remember { mutableIntStateOf(0) }
+    LaunchedEffect(refreshTrigger) { repository.refresh(forceRefresh = refreshTrigger > 0) }
     val expansion = rememberExpansionState()
 
     val grouped = remember(assets) {
@@ -54,6 +61,14 @@ fun AssetsScreen() {
     FableScreen(
         title = "Assets",
         subtitle = "Wine, DXVK, Proton and more",
+        actions = {
+            GlassIconButton(
+                icon = Icons.Outlined.Refresh,
+                contentDescription = "Refresh assets",
+                enabled = !isRefreshing,
+                onClick = { refreshTrigger++ },
+            )
+        },
     ) {
         if (isRefreshing) {
             item { LoadingCard(message = "Refreshing asset catalog…") }
