@@ -1,7 +1,7 @@
 package io.harbor.fable.ui.screens
 
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -26,7 +26,6 @@ import io.harbor.fable.nativebridge.DeviceProbe
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableSuccess
-import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.FableTextDim
 import kotlinx.coroutines.launch
 
@@ -48,21 +47,16 @@ fun DriversScreen() {
 
     val deviceInfo = remember { DeviceProbe.read() }
 
-    // RADV Xclipse first (Samsung Xclipse/RDNA2 is the primary target), then Turnip, then the rest.
-    val grouped = remember(drivers) {
-        val groupOrder = listOf("RADV Xclipse", "Turnip (Adreno)", "Other")
-        drivers.groupBy { driver ->
-            when {
-                driver.sourceRepo.orEmpty().contains("radv-xclipse", ignoreCase = true) -> "RADV Xclipse"
-                driver.sourceRepo.orEmpty().contains("AdrenoToolsDrivers", ignoreCase = true) -> "Turnip (Adreno)"
-                else -> "Other"
-            }
-        }.toList().sortedBy { (name, _) -> groupOrder.indexOf(name) }.toMap()
+    // One source (RADV Xclipse) is listed flat; extra sources get a collapsible group each,
+    // with RADV Xclipse first.
+    val groups = remember(drivers) {
+        drivers.groupBy { driverTitle(it) }
+            .toList()
+            .sortedWith(compareBy({ if (it.first == XCLIPSE_TITLE) 0 else 1 }, { it.first }))
     }
 
     FableScreen(
         title = "Drivers",
-        subtitle = "Vulkan driver packages",
         actions = {
             GlassIconButton(
                 icon = Icons.Outlined.Refresh,
@@ -76,9 +70,9 @@ fun DriversScreen() {
         item {
             GlassCard {
                 InfoRow(
-                    label = "GPU",
-                    value = deviceInfo.gpu,
-                    icon = Icons.Outlined.Memory,
+                    label = "Device",
+                    value = deviceInfo.device,
+                    icon = Icons.Outlined.Smartphone,
                 )
                 CardDivider()
                 InfoRow(
@@ -88,22 +82,15 @@ fun DriversScreen() {
                 )
                 CardDivider()
                 InfoRow(
-                    label = "Device",
-                    value = deviceInfo.device,
-                    icon = Icons.Outlined.Smartphone,
-                )
-                CardDivider()
-                InfoRow(
                     label = "ABI",
                     value = deviceInfo.abi,
                     icon = Icons.Outlined.Architecture,
                 )
                 CardDivider()
                 InfoRow(
-                    label = "Adrenotools",
-                    value = if (deviceInfo.adrenoToolsSupported) "Supported" else "Not available",
-                    icon = Icons.Outlined.Verified,
-                    valueColor = if (deviceInfo.adrenoToolsSupported) FableSuccess else FableWarn,
+                    label = "Graphics",
+                    value = deviceInfo.gpu,
+                    icon = Icons.Outlined.Memory,
                 )
             }
         }
@@ -122,39 +109,57 @@ fun DriversScreen() {
             }
         } else {
             item { SectionLabel("Available Packages") }
-            items(grouped.keys.toList()) { groupName ->
-                val groupDrivers = grouped[groupName].orEmpty()
-                val downloadedCount = groupDrivers.count { it.isDownloaded }
-
-                CollapsibleCard(
-                    expanded = expansion.isExpanded(groupName, default = true),
-                    onToggle = { expansion.toggle(groupName, default = true) },
-                    header = {
-                        Pill(text = groupName, color = FableAccent)
-                        Spacer(Modifier.weight(1f))
-                        Pill(
-                            text = "$downloadedCount/${groupDrivers.size}",
-                            color = FableSuccess,
-                        )
-                    },
-                ) {
-                    groupDrivers.forEachIndexed { index, driver ->
-                        val task = downloadSnapshot.tasks
-                            .filter { it.assetId == driver.id }
-                            .maxByOrNull { it.updatedAt }
-                        DriverRow(
-                            driver = driver,
-                            task = task,
-                            onDownload = {
-                                scope.launch { repository.downloadDriver(driver.id) }
-                            },
-                        )
-                        if (index != groupDrivers.lastIndex) {
-                            CardDivider()
+            if (groups.size == 1) {
+                item {
+                    GlassCard {
+                        DriverRows(groups.first().second, downloadSnapshot.tasks) { driver ->
+                            scope.launch { repository.downloadDriver(driver.id) }
+                        }
+                    }
+                }
+            } else {
+                items(groups, key = { it.first }) { (groupName, groupDrivers) ->
+                    val downloadedCount = groupDrivers.count { it.isDownloaded }
+                    CollapsibleCard(
+                        expanded = expansion.isExpanded(groupName, default = true),
+                        onToggle = { expansion.toggle(groupName, default = true) },
+                        header = {
+                            Pill(text = groupName, color = FableAccent)
+                            Spacer(Modifier.weight(1f))
+                            Pill(
+                                text = "$downloadedCount/${groupDrivers.size}",
+                                color = FableSuccess,
+                            )
+                        },
+                    ) {
+                        DriverRows(groupDrivers, downloadSnapshot.tasks) { driver ->
+                            scope.launch { repository.downloadDriver(driver.id) }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/** Driver rows separated by dividers, each showing the latest download task for its package. */
+@Composable
+private fun ColumnScope.DriverRows(
+    drivers: List<DriverPackage>,
+    tasks: List<DownloadTask>,
+    onDownload: (DriverPackage) -> Unit,
+) {
+    drivers.forEachIndexed { index, driver ->
+        val task = tasks
+            .filter { it.assetId == driver.id }
+            .maxByOrNull { it.updatedAt }
+        DriverRow(
+            driver = driver,
+            task = task,
+            onDownload = { onDownload(driver) },
+        )
+        if (index != drivers.lastIndex) {
+            CardDivider()
         }
     }
 }
@@ -214,8 +219,9 @@ private fun DriverRow(
     )
 }
 
+private const val XCLIPSE_TITLE = "RADV Xclipse"
+
 private fun driverTitle(driver: DriverPackage): String = when {
-    driver.sourceRepo.orEmpty().contains("AdrenoToolsDrivers", ignoreCase = true) -> "Turnip (Adreno)"
-    driver.sourceRepo.orEmpty().contains("radv-xclipse", ignoreCase = true) -> "RADV Xclipse"
+    driver.sourceRepo.orEmpty().contains("radv-xclipse", ignoreCase = true) -> XCLIPSE_TITLE
     else -> driver.sourceRepo ?: driver.name
 }

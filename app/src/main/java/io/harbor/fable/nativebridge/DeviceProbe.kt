@@ -9,7 +9,6 @@ data class DeviceGpuInfo(
     val device: String,
     val abi: String,
     val sdk: String,
-    val adrenoToolsSupported: Boolean,
     val fromNative: Boolean,
 )
 
@@ -33,7 +32,6 @@ object DeviceProbe {
             device = fields["Device"].orEmpty().ifBlank { fallback.device },
             abi = fields["ABI"].orEmpty().ifBlank { fallback.abi },
             sdk = fields["SDK"].orEmpty().ifBlank { fallback.sdk },
-            adrenoToolsSupported = AdrenoToolsBridge.isAdrenoToolsSupported(),
             fromNative = true,
         )
     }.getOrNull()
@@ -44,7 +42,6 @@ object DeviceProbe {
         device = Build.MODEL.orEmpty(),
         abi = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
         sdk = Build.VERSION.SDK_INT.toString(),
-        adrenoToolsSupported = false,
         fromNative = false,
     )
 }

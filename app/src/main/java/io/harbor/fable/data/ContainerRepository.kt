@@ -619,7 +619,7 @@ class FileContainerStore(private val file: File) : ContainerDao {
         status = runCatching { ContainerStatus.valueOf(optString("status")) }
             .getOrDefault(ContainerStatus.CREATED),
         createdAt = optLong("createdAt", System.currentTimeMillis()),
-        graphicsDriver = optString("graphicsDriver", ContainerDefaults.GRAPHICS_DRIVER),
+        graphicsDriver = optString("graphicsDriver", ContainerDefaults.GRAPHICS_DRIVER).removeSuffix(" (default)"),
         envVars = optJSONObject("envVars")?.toStringMap() ?: emptyMap(),
         screenResolution = optString("screenResolution", ContainerDefaults.SCREEN_RESOLUTION),
         isFullscreen = optBoolean("isFullscreen", false),

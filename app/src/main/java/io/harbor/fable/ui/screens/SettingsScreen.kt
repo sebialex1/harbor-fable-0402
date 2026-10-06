@@ -150,12 +150,6 @@ fun SettingsScreen() {
                     value = deviceInfo.sdk,
                     icon = Icons.Outlined.Code,
                 )
-                CardDivider()
-                InfoRow(
-                    label = "Adrenotools",
-                    value = if (deviceInfo.adrenoToolsSupported) "Supported" else "Not available",
-                    icon = Icons.Outlined.Verified,
-                )
             }
         }
 

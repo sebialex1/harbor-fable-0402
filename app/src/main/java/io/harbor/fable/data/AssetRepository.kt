@@ -470,15 +470,7 @@ class AssetRepository internal constructor(
                 displayName = "RADV Xclipse (Mesa Vulkan)",
                 type = AssetType.VULKAN_DRIVER,
                 assetGlobs = listOf("*.apk", "*.zip"),
-                notes = "RADV (Mesa) for Samsung Xclipse 920 (RDNA2)",
-            ),
-            CatalogSource(
-                owner = "K11MCH1",
-                repo = "AdrenoToolsDrivers",
-                displayName = "Turnip Adreno Drivers",
-                type = AssetType.VULKAN_DRIVER,
-                assetGlobs = listOf("*.zip"),
-                notes = "Turnip (Adreno) Vulkan driver packages",
+                notes = "Mesa RADV driver for Samsung Xclipse (RDNA2)",
             ),
             CatalogSource(
                 owner = "GGlessT",

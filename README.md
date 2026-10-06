@@ -5,7 +5,7 @@ A minimal Android Wine container manager with refraction glass UI.
 ## Features
 
 - **Container management** — create and manage Wine environments
-- **Adrenotools driver support** — load custom Vulkan driver zips (RADV Xclipse, Turnip, etc.)
+- **Custom Vulkan drivers** — RADV Xclipse (Mesa) for Samsung Xclipse GPUs
 - **Asset downloads** — fetch Wine builds, DXVK, VKD3D, Proton from GitHub releases
 - **Refraction glass design** — frosted translucent surfaces, animated transitions, custom dock
 - **Minimal** — no bloat, focused on the essentials

@@ -64,7 +64,6 @@ Wired up as the application entry point.
 | ptitSeb | box64 | BOX64 | `*aarch64*.tar.gz`, `*android*.tar.gz` |
 | doitsujin | dxvk | DXVK | `*.tar.gz`, `*.tar.zst` |
 | JimVulkan | radv-xclipse | VULKAN_DRIVER | `*.apk`, `*.zip` |
-| K11MCH1 | AdrenoToolsDrivers | VULKAN_DRIVER | `*.zip` |
 | GGlessT | modern-treex | OTHER | `*.zip`, `*.tar.gz` |
 
 `GGlessT/modern-treex` is included as requested. The GitHub API may return a
