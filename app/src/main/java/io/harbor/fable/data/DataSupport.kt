@@ -1,13 +1,14 @@
 package io.harbor.fable.data
 
 import android.util.Log
+import io.harbor.fable.BuildConfig
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.Locale
 
-internal const val FABLE_USER_AGENT = "Fable/0.1.0 (io.harbor.fable; Android)"
+internal const val FABLE_USER_AGENT = "Fable/" + BuildConfig.VERSION_NAME + " (io.harbor.fable; Android)"
 
 private const val TAG = "FableData"
 private val SHA256_HEX = Regex("[a-f0-9]{64}")
