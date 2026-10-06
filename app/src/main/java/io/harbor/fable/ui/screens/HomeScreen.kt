@@ -129,5 +129,5 @@ internal fun HomeContent(
 internal fun LaunchResult.message(): String = when (this) {
     is LaunchResult.Started -> "Launched (pid $pid)"
     is LaunchResult.Unavailable -> reason
-    is LaunchResult.Failed -> reason
+    is LaunchResult.Failed -> if (logPath != null && !reason.endsWith("Log saved")) "$reason. Log in Settings" else reason
 }

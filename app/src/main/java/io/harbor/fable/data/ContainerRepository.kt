@@ -41,6 +41,8 @@ class ContainerRepository internal constructor(
     private val dao: ContainerDao,
     private val containersRoot: File,
     private val runtime: WineRuntime? = null,
+    /** Where [LaunchLog] files go (`filesDir/logs`); null disables persisted launch logs. */
+    private val logsRoot: File? = null,
 ) {
     private val mutex = Mutex()
     private val containersById = LinkedHashMap<String, Container>()
@@ -332,36 +334,85 @@ class ContainerRepository internal constructor(
         }
     }
 
+    /**
+     * Crash containment for the whole launch path. Anything thrown while preparing or starting
+     * Wine (I/O, SecurityException from a revoked document, OOM while unpacking, a JNI error…)
+     * ends up as a short [LaunchResult.Failed] plus a persisted [LaunchLog] with the stack trace,
+     * never as an uncaught exception on the UI scope. Cancellation is still propagated.
+     */
     private suspend fun start(container: Container, exe: ExeEntry?): LaunchResult {
         // A second tap while the first launch is still preparing would start Wine twice.
         if (!starting.add(container.id)) return LaunchResult.Failed("${container.name} is already starting")
+        val log = LaunchLog.begin(logsRoot, container.name, container.id)
+        log.line("target: ${exe?.let { "${it.name} (${it.path})" } ?: "Wine desktop"}")
         try {
-            return startLocked(container, exe)
+            val result = startLocked(container, exe, log)
+            log.section("Result")
+            log.line(result.toString())
+            return result.withLog(log.path)
+        } catch (error: CancellationException) {
+            log.line("cancelled")
+            throw error
+        } catch (error: Throwable) {
+            log.error("launch threw ${error.javaClass.name}", error)
+            runCatching { setStatus(container.id, ContainerStatus.READY) }
+            val detail = error.message?.lineSequence()?.firstOrNull()?.take(90)
+            return LaunchResult.Failed(
+                "Launch failed: ${error.javaClass.simpleName}${detail?.let { " ($it)" }.orEmpty()}. Log saved",
+                log.path,
+            )
         } finally {
             starting.remove(container.id)
         }
     }
 
-    private suspend fun startLocked(container: Container, exe: ExeEntry?): LaunchResult {
+    private suspend fun startLocked(container: Container, exe: ExeEntry?, log: LaunchLog): LaunchResult {
         val runtime = runtime
             ?: return LaunchResult.Unavailable("Wine runtime isn't available in this build")
         if (!NativeLoader.isLoaded) {
             return LaunchResult.Unavailable("The native runtime couldn't load on this device")
         }
         val dir = directory(container.id).also { it.mkdirs() }
+        log.section("Pre-flight")
+        log.line("container dir: ${dir.absolutePath} (exists=${dir.isDirectory}, writable=${dir.canWrite()})")
+        log.line("wine version requested: ${container.wineVersion.ifBlank { "(newest bionic)" }}")
+        log.line("downloaded bionic Wine packages: ${runtime.wineArchives().joinToString { it.name }.ifEmpty { "none" }}")
 
         // 1. The container's translator (Box64 or FEX) and a Wine build have to be downloaded.
         val hasWine = runtime.installedWine(dir) != null || runtime.wineArchives().isNotEmpty()
         // Read the translator from the latest record: it may have been switched since the tap.
         val configured = mutex.withLock { containersById[container.id] } ?: container
         val translator = resolveTranslator(runtime, configured, hasWine)
-            .getOrElse { error -> return LaunchResult.Failed(error.message ?: "Couldn't set up the x86_64 translator") }
-        if (!hasWine) return LaunchResult.Failed("Install Wine in Assets")
+            .getOrElse { error ->
+                log.error("translator: ${error.message}")
+                return LaunchResult.Failed(error.message ?: "Couldn't set up the x86_64 translator")
+            }
+        describeBinary(log, "translator ${translator.name}", translator.executable)
+        if (!translator.executable.canExecute() && !translator.executable.setExecutable(true, false)) {
+            log.error("chmod +x failed on ${translator.executable}")
+            return LaunchResult.Failed("Couldn't mark ${translator.executable.name} executable")
+        }
+        ElfInfo.interpreter(translator.executable)?.takeIf { it.contains("ld-linux") }?.let { interp ->
+            log.error("translator is a glibc build ($interp); it cannot run on Android without a glibc rootfs")
+            return LaunchResult.Failed("${translator.executable.name} is a glibc build. Download a bionic (Android) build")
+        }
+        if (!hasWine) {
+            log.error("no Wine installed and no bionic Wine package downloaded")
+            return LaunchResult.Failed("Install Wine in Assets")
+        }
 
         // 2. Unpack Wine into the container's prefix (first launch only).
-        installWine(container.id).getOrElse { error ->
+        val wineBuild = installWine(container.id).getOrElse { error ->
+            log.error("Wine setup failed", error)
             return LaunchResult.Failed(error.message?.let { "Couldn't set up Wine: $it" } ?: "Couldn't set up Wine")
         }
+        log.line("wine build: $wineBuild")
+        val wineBinary = runtime.wineBinary(dir)
+        if (wineBinary == null) {
+            log.error("bin/wine missing after setup in ${dir.absolutePath}")
+            return LaunchResult.Failed("Wine isn't installed in this container")
+        }
+        describeBinary(log, "wine", wineBinary)
 
         // 3. Resolve what to run.
         val current = mutex.withLock { containersById[container.id] } ?: container
@@ -372,8 +423,13 @@ class ContainerRepository internal constructor(
             arguments = listOf("/desktop=Fable,${current.screenResolution}")
         } else {
             program = runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
-                ?: return LaunchResult.Failed("Can't open ${exe.name}. Add it again")
+                ?: run {
+                    log.error("executable not readable: ${exe.path}")
+                    return LaunchResult.Failed("Can't open ${exe.name}. Add it again")
+                }
             arguments = emptyList()
+            val programFile = File(program)
+            log.line("program: $program (exists=${programFile.isFile}, size=${programFile.length()})")
         }
         val label = exe?.name ?: "${current.name} desktop"
 
@@ -385,6 +441,11 @@ class ContainerRepository internal constructor(
             current.envVars.forEach { (key, value) -> add("$key=$value") }
         }
         val driver = runtime.activeDriverLibrary()
+        log.section("Command")
+        log.line("${translator.executable.absolutePath} ${wineBinary.absolutePath} $program ${arguments.joinToString(" ")}".trim())
+        log.line("driver: ${driver ?: "none (system Vulkan)"}")
+        log.section("Environment (Fable additions; the native launcher also sets WINEPREFIX, HOME, TMPDIR, PATH, BOX64_*)")
+        environment.forEach { log.line(it) }
         val pid = try {
             withContext(Dispatchers.IO) {
                 NativeLoader.launchWineContainer(
@@ -398,16 +459,23 @@ class ContainerRepository internal constructor(
                 )
             }
         } catch (error: UnsatisfiedLinkError) {
+            log.error("native launcher missing", error)
             return LaunchResult.Unavailable("The native runtime couldn't load on this device")
         }
+        val processLog = File(dir, WineRuntime.LAUNCH_LOG)
         if (pid <= 0) {
-            val reason = NativeLoader.lastLaunchError()
+            val reason = runCatching { NativeLoader.lastLaunchError() }.getOrNull()
+            log.error("native launcher returned $pid: ${reason ?: "no reason"}")
+            log.attachTail(processLog, "Process output (${processLog.name})")
             return LaunchResult.Failed(reason?.let { "Couldn't start $label: $it" } ?: "Couldn't start $label")
         }
+        log.line("spawned pid $pid")
 
         // 5. A process that dies straight away has a reason worth showing (missing libraries, …).
         delay(EARLY_EXIT_WINDOW_MS)
         if (!WineRuntime.isAlive(pid) && !WineRuntime.exitedCleanly(dir)) {
+            log.error("process $pid exited within ${EARLY_EXIT_WINDOW_MS}ms")
+            log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
             setStatus(container.id, ContainerStatus.READY)
             val reason = WineRuntime.lastLogLine(dir)
             val hint = translator.earlyExitHint
@@ -418,7 +486,7 @@ class ContainerRepository internal constructor(
                 (if (reason != null) "$label stopped right away: $reason" else "$label stopped right away") + hint
             )
         }
-        markStarted(container.id, exe?.id, pid)
+        markStarted(container.id, exe?.id, pid, log, processLog)
         return LaunchResult.Started(pid)
     }
 
@@ -481,6 +549,20 @@ class ContainerRepository internal constructor(
         }
     }
 
+    /** Logs what [file] is: size, exec bit, ELF machine and loader (bionic vs glibc). */
+    private fun describeBinary(log: LaunchLog, label: String, file: File) {
+        val machine = when (ElfInfo.machine(file)) {
+            ElfInfo.MACHINE_X86_64 -> "x86_64"
+            ElfInfo.MACHINE_AARCH64 -> "aarch64"
+            null -> "not ELF64"
+            else -> "other"
+        }
+        log.line(
+            "$label: ${file.absolutePath} (exists=${file.isFile}, size=${file.length()}, exec=${file.canExecute()}, " +
+                "elf=$machine, interp=${ElfInfo.interpreter(file) ?: "none/static"})",
+        )
+    }
+
     private suspend fun setStatus(id: String, status: ContainerStatus) {
         mutex.withLock {
             val existing = containersById[id] ?: return
@@ -492,7 +574,7 @@ class ContainerRepository internal constructor(
     }
 
     /** Records a started process: container RUNNING, exe play stats, and a watcher that flips back on exit. */
-    private suspend fun markStarted(containerId: String, exeId: String?, pid: Int) {
+    private suspend fun markStarted(containerId: String, exeId: String?, pid: Int, log: LaunchLog, processLog: File) {
         mutex.withLock {
             containersById[containerId]?.let { containersById[containerId] = it.copy(status = ContainerStatus.RUNNING) }
             exeId?.let { id ->
@@ -503,6 +585,10 @@ class ContainerRepository internal constructor(
         runningPids.getOrPut(containerId) { ConcurrentHashMap.newKeySet() }.add(pid)
         scope.launch {
             while (WineRuntime.isAlive(pid)) delay(PROCESS_POLL_MS)
+            // The native reaper appends "[fable] exit code N" / "killed by signal N"; give it a beat.
+            delay(PROCESS_POLL_MS)
+            log.section("Process $pid ended")
+            log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
             val remaining = runningPids[containerId]?.also { it.remove(pid) }
             if (remaining.isNullOrEmpty()) {
                 mutex.withLock {
@@ -591,7 +677,12 @@ class ContainerRepository internal constructor(
             val app = context.applicationContext
             val root = File(app.filesDir, "containers")
             val runtime = WineRuntime(app, AssetRepository.get(app), DriverRepository.get(app), File(app.filesDir, "runtime"))
-            val created = ContainerRepository(FileContainerStore(File(root, "index.json")), root, runtime)
+            val created = ContainerRepository(
+                FileContainerStore(File(root, "index.json")),
+                root,
+                runtime,
+                LaunchLog.logsDir(app),
+            )
             instance = created
             return created
         }
@@ -613,14 +704,23 @@ private data class ResolvedTranslator(
 
 /** Outcome of [ContainerRepository.launch]. */
 sealed interface LaunchResult {
+    /** Path of the persisted [LaunchLog] for this attempt, when one could be written. */
+    val logPath: String?
+
     /** Wine started; [pid] is the launcher process id. */
-    data class Started(val pid: Int) : LaunchResult
+    data class Started(val pid: Int, override val logPath: String? = null) : LaunchResult
 
     /** Launching is not possible on this device or build (e.g. the native runtime didn't load). */
-    data class Unavailable(val reason: String) : LaunchResult
+    data class Unavailable(val reason: String, override val logPath: String? = null) : LaunchResult
 
     /** The launch couldn't happen: a missing Box64/FEX/Wine download, a bad request, or a crash on start. */
-    data class Failed(val reason: String) : LaunchResult
+    data class Failed(val reason: String, override val logPath: String? = null) : LaunchResult
+}
+
+private fun LaunchResult.withLog(path: String?): LaunchResult = when (this) {
+    is LaunchResult.Started -> copy(logPath = path)
+    is LaunchResult.Unavailable -> copy(logPath = path)
+    is LaunchResult.Failed -> copy(logPath = path)
 }
 
 /** Snapshot written by [ContainerDao]. Mirrors the two Room tables. */

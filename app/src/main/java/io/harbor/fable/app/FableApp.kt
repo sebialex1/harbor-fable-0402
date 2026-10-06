@@ -1,5 +1,6 @@
 package io.harbor.fable.app
 
+import io.harbor.fable.data.LaunchLog
 import android.app.Application
 import android.content.Context
 import io.harbor.fable.data.AssetRepository
@@ -47,6 +48,14 @@ class FableApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Anything that still escapes (a background thread, a framework callback) is written to
+        // filesDir/logs/crash-*.log before the default handler ends the process, so the next
+        // launch can show what happened (Settings > Diagnostics).
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            LaunchLog.crash(this, thread, error)
+            previous?.uncaughtException(thread, error)
+        }
         // Eagerly create the download manager so its persisted queue is
         // restored before the user interacts with the UI. The notification
         // channel is created when the foreground service is first started.

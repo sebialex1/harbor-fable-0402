@@ -14,6 +14,16 @@ import io.harbor.fable.BuildConfig
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.AppSettings
 import io.harbor.fable.data.FramePacing
+import io.harbor.fable.data.LaunchLog
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.nativebridge.DeviceGpuInfo
 import io.harbor.fable.nativebridge.DeviceProbe
@@ -28,14 +38,40 @@ fun SettingsScreen() {
     val settings by settingsRepo.settings.collectAsStateWithLifecycle()
     val deviceInfo = remember { DeviceProbe.read() }
     var showResetConfirm by remember { mutableStateOf(false) }
+    // Newest launch/crash log under filesDir/logs, re-read each time Settings opens.
+    val latestLog = remember { LaunchLog.latest(context) }
+    var logText by remember { mutableStateOf<String?>(null) }
 
     SettingsContent(
+        latestLogName = latestLog?.name,
+        onShowLog = {
+            logText = latestLog?.let { LaunchLog.tail(it, 48 * 1024) } ?: "No launch log yet"
+        },
         settings = settings,
         deviceInfo = deviceInfo,
         versionName = BuildConfig.VERSION_NAME,
         onUpdate = { transform -> settingsRepo.update(transform) },
         onResetClick = { showResetConfirm = true },
     )
+
+    logText?.let { text ->
+        FableSheet(
+            title = "Last Launch Log",
+            subtitle = latestLog?.absolutePath,
+            onDismiss = { logText = null },
+        ) {
+            SelectionContainer {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 520.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
+            }
+        }
+    }
 
     if (showResetConfirm) {
         ConfirmDialog(
@@ -54,6 +90,8 @@ fun SettingsScreen() {
 
 @Composable
 internal fun SettingsContent(
+    latestLogName: String? = null,
+    onShowLog: () -> Unit = {},
     settings: AppSettings,
     deviceInfo: DeviceGpuInfo,
     versionName: String,
@@ -126,6 +164,12 @@ internal fun SettingsContent(
                     title = "Refresh on Launch",
                     checked = settings.refreshCatalogOnLaunch,
                     onCheckedChange = { r -> onUpdate { it.copy(refreshCatalogOnLaunch = r) } },
+                )
+                CardDivider()
+                ListRow(
+                    title = "Last Launch Log",
+                    subtitle = latestLogName ?: "None yet",
+                    onClick = onShowLog,
                 )
                 CardDivider()
                 ListRow(

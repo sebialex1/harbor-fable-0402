@@ -154,7 +154,7 @@ class SetupManager internal constructor(
     }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), SetupState())
 
     /**
-     * Refreshes the catalog, then downloads the latest Wine (amd64), Box64, RADV Xclipse and DXVK
+     * Refreshes the catalog, then downloads the latest bionic Wine (.wcp), Box64, RADV Xclipse and DXVK
      * packages that are not on disk yet. The driver is installed as the active driver as soon as
      * its download completes.
      */
@@ -246,7 +246,7 @@ class SetupManager internal constructor(
      * active driver for the graphics driver (a downloaded zip alone is not enough).
      */
     private fun isInstalled(kind: RecommendedKind, installedDriver: InstalledDriver?): Boolean = when (kind) {
-        RecommendedKind.WINE -> assets.downloadedFiles(AssetType.WINE).isNotEmpty()
+        RecommendedKind.WINE -> assets.downloadedFiles(AssetType.WINE).any { WineRuntime.isBionicWinePackageName(it.name) }
         RecommendedKind.BOX64 -> assets.downloadedFiles(AssetType.BOX64).isNotEmpty()
         RecommendedKind.DXVK -> assets.downloadedFiles(AssetType.DXVK).isNotEmpty()
         RecommendedKind.DRIVER -> installedDriver != null

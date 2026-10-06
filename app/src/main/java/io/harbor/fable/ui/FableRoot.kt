@@ -1,5 +1,6 @@
 package io.harbor.fable.ui
 
+import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
@@ -44,6 +45,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.harbor.fable.app.FableApp
+import io.harbor.fable.data.LaunchLog
 import io.harbor.fable.ui.components.TabBarTab
 import io.harbor.fable.ui.components.FableUi
 import io.harbor.fable.ui.components.FableTabBar
@@ -62,6 +64,7 @@ import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.ScreenPadding
 import io.harbor.fable.ui.theme.Spacing
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -131,13 +134,21 @@ private val DetailPopExit: AnimatedContentTransitionScope<NavBackStackEntry>.() 
 @Composable
 fun FableRoot() {
     val snackbarHostState = remember { SnackbarHostState() }
-    val fableUi = remember {
-        FableUi(
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
-            snackbarHostState = snackbarHostState,
-        )
-    }
     val context = LocalContext.current
+    val fableUi = remember {
+        // Work launched from screens (container launches above all) must never take the app
+        // down: an exception that escapes is logged to filesDir/logs and shown as a message.
+        val holder = arrayOfNulls<FableUi>(1)
+        val guard = CoroutineExceptionHandler { _, error ->
+            Log.e("FableUi", "Uncaught error in UI scope", error)
+            LaunchLog.crash(context, Thread.currentThread(), error)
+            holder[0]?.showMessage("Something failed: ${error.javaClass.simpleName}. Log saved", long = true)
+        }
+        FableUi(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + guard),
+            snackbarHostState = snackbarHostState,
+        ).also { holder[0] = it }
+    }
     val app = remember(context) { FableApp.from(context) }
     val settings by app.settingsRepository.settings.collectAsStateWithLifecycle()
 
