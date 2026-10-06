@@ -40,9 +40,10 @@ import kotlinx.coroutines.launch
 /**
  * The RADV Xclipse driver: what is active, the latest release, and the older builds. One
  * driver is active at a time; releases are downloaded here and installed as the active one.
+ * [onOpenVulkanExtensions] pushes the screen that lists what the driver reports through Vulkan.
  */
 @Composable
-fun DriversScreen() {
+fun DriversScreen(onOpenVulkanExtensions: () -> Unit = {}) {
     val context = LocalContext.current
     val app = remember(context) { FableApp.from(context) }
     val repository = app.driverRepository
@@ -90,6 +91,7 @@ fun DriversScreen() {
             if (current != null && current.tag != release.tag) pendingReplace = release else install(release)
         },
         onUninstall = { confirmUninstall = true },
+        onOpenVulkanExtensions = onOpenVulkanExtensions,
     )
 
     pendingReplace?.let { release ->
@@ -137,6 +139,7 @@ internal fun DriversContent(
     onDownload: (RadvRelease) -> Unit,
     onInstall: (RadvRelease) -> Unit,
     onUninstall: () -> Unit,
+    onOpenVulkanExtensions: () -> Unit = {},
 ) {
     val expansion = rememberExpansionState()
     val latest = remember(releases) { releases.firstOrNull { it.channel == ReleaseChannel.LATEST } }
@@ -177,6 +180,20 @@ internal fun DriversContent(
                 onUninstall = onUninstall,
                 modifier = Modifier.animateItem(),
             )
+        }
+        item(key = "vulkan") {
+            GlassCard(Modifier.animateItem(), onClick = onOpenVulkanExtensions) {
+                ListRow(
+                    title = "Vulkan extensions",
+                    subtitle = when {
+                        installed?.vulkanVersion != null -> "What ${installed.tag} reports · Vulkan ${installed.vulkanVersion}"
+                        installed != null -> "What ${installed.tag} reports through Vulkan"
+                        else -> "What the system driver reports through Vulkan"
+                    },
+                    icon = Icons.Outlined.Extension,
+                    showChevron = true,
+                )
+            }
         }
 
         if (refreshError != null && releases.isEmpty()) {

@@ -66,6 +66,7 @@ private object Routes {
     const val CONTAINERS = "containers"
     const val CONTAINER_DETAIL = "container/{containerId}"
     const val DRIVERS = "drivers"
+    const val VULKAN_EXTENSIONS = "drivers/vulkan"
     const val ASSETS = "assets"
     const val SETTINGS = "settings"
 
@@ -77,7 +78,7 @@ private const val NAV_MS = 320
 private fun tabIndex(route: String?): Int = when (route) {
     Routes.HOME -> 0
     Routes.CONTAINERS, Routes.CONTAINER_DETAIL -> 1
-    Routes.DRIVERS -> 2
+    Routes.DRIVERS, Routes.VULKAN_EXTENSIONS -> 2
     Routes.ASSETS -> 3
     Routes.SETTINGS -> 4
     else -> 0
@@ -212,14 +213,7 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
         )
     }
 
-    val activeTab = when (currentRoute) {
-        Routes.HOME -> 0
-        Routes.CONTAINERS, Routes.CONTAINER_DETAIL -> 1
-        Routes.DRIVERS -> 2
-        Routes.ASSETS -> 3
-        Routes.SETTINGS -> 4
-        else -> 0
-    }
+    val activeTab = tabIndex(currentRoute)
 
     Box(
         Modifier
@@ -277,7 +271,18 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
                 exitTransition = TabExit,
                 popEnterTransition = TabPopEnter,
                 popExitTransition = TabPopExit,
-            ) { DriversScreen() }
+            ) {
+                DriversScreen(onOpenVulkanExtensions = { navController.navigate(Routes.VULKAN_EXTENSIONS) })
+            }
+            composable(
+                route = Routes.VULKAN_EXTENSIONS,
+                enterTransition = DetailEnter,
+                exitTransition = DetailExit,
+                popEnterTransition = DetailPopEnter,
+                popExitTransition = DetailPopExit,
+            ) {
+                VulkanExtensionsScreen(onBack = { navController.popBackStack() })
+            }
             composable(
                 Routes.ASSETS,
                 enterTransition = TabEnter,

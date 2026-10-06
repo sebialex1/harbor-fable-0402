@@ -47,4 +47,15 @@ object AdrenoToolsBridge {
      * Get the GPU info string from the system.
      */
     external fun getGpuInfo(): String
+
+    /**
+     * Enumerate the Vulkan instance and device extensions reported by a driver.
+     *
+     * [libraryPath] is the installed ICD to open through the adrenotools namespace loader, or
+     * null for the system `libvulkan.so`. Returns the JSON document described in
+     * `vulkan_probe.h`; failures are inside the document (`ok: false`), never thrown. Slow enough
+     * (instance creation, device enumeration) that it must run off the main thread; see
+     * [VulkanProbe].
+     */
+    external fun probeVulkanExtensions(libraryPath: String?): String
 }

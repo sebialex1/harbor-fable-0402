@@ -6,6 +6,7 @@
 
 #include "common/fable_log.h"
 #include "meta/driver_meta.h"
+#include "vulkan/vulkan_probe.h"
 #include "wine/wine_launcher.h"
 
 #include <adrenotools/driver.h>
@@ -174,6 +175,26 @@ Java_io_harbor_fable_nativebridge_AdrenoToolsBridge_getGpuInfo(
     std::string info = "GPU: " + gpu + " | Vendor: " + vendor + " | Device: " + model +
                        " | ABI: " + abi + " | SDK: " + sdk;
     return env->NewStringUTF(info.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_io_harbor_fable_nativebridge_AdrenoToolsBridge_probeVulkanExtensions(
+    JNIEnv* env, jobject /*thiz*/, jstring jLibraryPath) {
+    std::string library;
+    if (jLibraryPath) {
+        JString library_path(env, jLibraryPath);
+        if (!library_path.ok()) {
+            return env->NewStringUTF("{\"ok\":false,\"error\":\"Failed to read the driver path\"}");
+        }
+        library = library_path.get();
+    }
+    try {
+        const std::string json = fable::probe_vulkan_extensions(library);
+        return env->NewStringUTF(json.c_str());
+    } catch (const std::exception& ex) {
+        FABLE_LOGE("probeVulkanExtensions exception: %s", ex.what());
+        return env->NewStringUTF("{\"ok\":false,\"error\":\"The Vulkan probe threw an exception\"}");
+    }
 }
 
 JNIEXPORT jint JNICALL

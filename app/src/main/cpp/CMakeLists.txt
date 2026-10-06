@@ -6,7 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # adrenotools driver loader, a minimal ZIP reader (NDK zlib — the NDK does not
-# ship libzip), and the Wine process launcher.
+# ship libzip), the Wine process launcher, and the Vulkan extension probe
+# (header-only Vulkan use: entry points are resolved through
+# vkGetInstanceProcAddr, so libvulkan is not linked).
 add_library(fable_native SHARED
     native_bridge.cpp
     json/mini_json.cpp
@@ -15,6 +17,7 @@ add_library(fable_native SHARED
     adrenotools/src/driver.cpp
     adrenotools/lib/linkernsbypass/linkernsbypass.cpp
     wine/wine_launcher.cpp
+    vulkan/vulkan_probe.cpp
 )
 
 target_include_directories(fable_native PRIVATE
