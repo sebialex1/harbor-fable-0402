@@ -11,6 +11,7 @@
 #include <adrenotools/driver.h>
 
 #include <cstdlib>
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -147,11 +148,12 @@ Java_io_harbor_fable_nativebridge_AdrenoToolsBridge_getVkGetInstanceProcAddr(
 JNIEXPORT jboolean JNICALL
 Java_io_harbor_fable_nativebridge_AdrenoToolsBridge_isAdrenoToolsSupported(
     JNIEnv* /*env*/, jobject /*thiz*/) {
-    // Linker namespaces used by adrenotools exist from Android 9 (API 28).
+    // Namespace bypass is usable from Android 9; memfd unique-load wants API 29.
+    // The bridge reports support on arm64 + API 29+, matching the previous check.
     const std::string abi = system_property("ro.product.cpu.abi");
     const int sdk = std::atoi(system_property("ro.build.version.sdk").c_str());
     const bool arm64 = abi == "arm64-v8a";
-    const bool sdk_ok = sdk >= 28;
+    const bool sdk_ok = sdk >= 29;
     FABLE_LOGI("Adrenotools support check: abi=%s sdk=%d -> %s",
                abi.c_str(), sdk, (arm64 && sdk_ok) ? "true" : "false");
     return (arm64 && sdk_ok) ? JNI_TRUE : JNI_FALSE;

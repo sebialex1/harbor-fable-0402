@@ -15,8 +15,9 @@ enum {
 #define ADRENOTOOLS_GPU_MAPPING_SUCCEEDED_MAGIC 0xDEADBEEF
 
 // host_ptr / size describe the CPU range. gpu_addr is the KGSL address after
-// a successful import, or ADRENOTOOLS_GPU_MAPPING_SUCCEEDED_MAGIC once the
-// mapping has been validated.
+// a successful import or allocation. adrenotools_validate_gpu_mapping() also
+// accepts ADRENOTOOLS_GPU_MAPPING_SUCCEEDED_MAGIC, which the upstream hook
+// writes after the driver confirms the mapping.
 struct adrenotools_gpu_mapping {
     void* host_ptr;
     uint64_t gpu_addr;
