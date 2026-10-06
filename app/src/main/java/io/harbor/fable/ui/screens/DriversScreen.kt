@@ -41,14 +41,16 @@ fun DriversScreen() {
 
     val deviceInfo = remember { DeviceProbe.read() }
 
+    // RADV Xclipse first (Samsung Xclipse/RDNA2 is the primary target), then Turnip, then the rest.
     val grouped = remember(drivers) {
+        val groupOrder = listOf("RADV Xclipse", "Turnip (Adreno)", "Other")
         drivers.groupBy { driver ->
             when {
-                driver.sourceRepo.orEmpty().contains("AdrenoToolsDrivers", ignoreCase = true) -> "Turnip (Adreno)"
                 driver.sourceRepo.orEmpty().contains("radv-xclipse", ignoreCase = true) -> "RADV Xclipse"
+                driver.sourceRepo.orEmpty().contains("AdrenoToolsDrivers", ignoreCase = true) -> "Turnip (Adreno)"
                 else -> "Other"
             }
-        }
+        }.toList().sortedBy { (name, _) -> groupOrder.indexOf(name) }.toMap()
     }
 
     FableScreen(

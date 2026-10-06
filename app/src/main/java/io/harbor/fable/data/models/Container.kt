@@ -11,7 +11,7 @@ enum class ContainerStatus { CREATED, CONFIGURING, READY, RUNNING, ERROR }
  */
 object ContainerDefaults {
     const val WINE_VERSION = "wine-9.0"
-    const val GRAPHICS_DRIVER = "Turnip (default)"
+    const val GRAPHICS_DRIVER = "RADV Xclipse (default)"
     const val SCREEN_RESOLUTION = "1280x720"
 
     val RESOLUTION_PRESETS: List<String> = listOf(

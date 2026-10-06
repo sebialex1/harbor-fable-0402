@@ -59,7 +59,9 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
         val defaults = AppSettings()
         return AppSettings(
             defaultWineVersion = prefs.getString(KEY_WINE, null) ?: defaults.defaultWineVersion,
-            defaultGraphicsDriver = prefs.getString(KEY_DRIVER_LABEL, null) ?: defaults.defaultGraphicsDriver,
+            defaultGraphicsDriver = prefs.getString(KEY_DRIVER_LABEL, null)
+                ?.takeUnless { it == LEGACY_DEFAULT_DRIVER }
+                ?: defaults.defaultGraphicsDriver,
             defaultDriverId = prefs.getString(KEY_DRIVER_ID, null),
             defaultDxvkVersion = prefs.getString(KEY_DXVK, null),
             defaultResolution = prefs.getString(KEY_RESOLUTION, null) ?: defaults.defaultResolution,
@@ -89,6 +91,8 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
     companion object {
         private const val PREFS_NAME = "fable_settings"
         private const val KEY_WINE = "default_wine_version"
+        /** Pre-Xclipse default label; migrated to [ContainerDefaults.GRAPHICS_DRIVER] on read. */
+        private const val LEGACY_DEFAULT_DRIVER = "Turnip (default)"
         private const val KEY_DRIVER_LABEL = "default_graphics_driver"
         private const val KEY_DRIVER_ID = "default_driver_id"
         private const val KEY_DXVK = "default_dxvk_version"
