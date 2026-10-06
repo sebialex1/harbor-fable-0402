@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Fable</string>
+    <string name="download_channel_name">Downloads</string>
+    <string name="download_channel_desc">Wine, driver, and asset downloads</string>
+    <string name="download_pause">Pause</string>
+    <string name="download_resume">Resume</string>
+    <string name="download_cancel">Cancel</string>
+    <string name="download_retry">Retry</string>
 </resources>
