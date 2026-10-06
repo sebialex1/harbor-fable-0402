@@ -23,10 +23,17 @@ val RowPaddingVertical = 11.dp
 
 /** Bottom tab bar geometry. Screens reserve [Clearance] (plus the nav-bar inset) at the bottom. */
 object TabBarMetrics {
-    val Height = 56.dp
+    /** Height of the floating pill itself. */
+    val Height = 60.dp
 
-    /** Vertical space the tab bar occupies above the navigation-bar inset. */
-    val Clearance = Height
+    /** Gap between the pill and the navigation-bar inset (and above it). */
+    val FloatGap = 10.dp
+
+    /** Inset of the sliding active-tab capsule inside the pill. */
+    val IndicatorInset = 5.dp
+
+    /** Vertical space the floating pill occupies above the navigation-bar inset. */
+    val Clearance = Height + FloatGap * 2
 }
 
 /** Control heights, so buttons, chips and fields line up in a row. */

@@ -163,12 +163,16 @@ fun FableScreen(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         ) {
+            // Tab screens carry their actions on the large-title row, vertically centred on the
+            // title, so the + lines up with "Containers" instead of floating above it. Once the
+            // large title scrolls away the actions move up into the compact bar.
+            val actionsInBar = !largeTitle || pastLargeTitle
             FableTopBar(
                 title = title,
                 onBack = onBack,
                 showDivider = scrolled,
-                showInlineTitle = !largeTitle || pastLargeTitle,
-                actions = actions,
+                showInlineTitle = actionsInBar,
+                actions = if (actionsInBar) actions else ({}),
             )
             LazyColumn(
                 state = listState,
@@ -188,12 +192,27 @@ fun FableScreen(
                     item(key = LargeTitleKey) {
                         Column(Modifier.fillMaxWidth().padding(bottom = Spacing.xs)) {
                             if (largeTitle) {
-                                Text(
-                                    text = title,
-                                    style = MaterialTheme.typography.headlineLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = LargeTitleRowHeight),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = title,
+                                        style = MaterialTheme.typography.headlineLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    if (!pastLargeTitle) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            content = actions,
+                                        )
+                                    }
+                                }
                             }
                             if (!subtitle.isNullOrBlank()) {
                                 Text(subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1)
@@ -206,6 +225,9 @@ fun FableScreen(
         }
     }
 }
+
+/** Minimum height of the large-title row, so title and icon buttons share one centre line. */
+private val LargeTitleRowHeight = 44.dp
 
 /** How far the large title scrolls before the inline title takes over. */
 private val LargeTitleCollapse = 30.dp

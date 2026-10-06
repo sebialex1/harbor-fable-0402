@@ -56,7 +56,7 @@ val FableWarn = Color(0xFFD1D1D6)
  */
 val FableError = FableText
 
-// Tab bar: solid black with a hairline on top.
-val TabBarBg = FableBg
+// Tab bar: a floating, opaque dark-grey pill over the black canvas.
+val TabBarBg = FableSurface
 val TabItemActive = FableText
 val TabItemIdle = FableTextDim

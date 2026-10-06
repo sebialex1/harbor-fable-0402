@@ -28,8 +28,8 @@ import io.harbor.fable.ui.theme.TabItemActive
 import io.harbor.fable.ui.theme.TabItemIdle
 
 /**
- * Tab bar item: icon over a small label, white when active and gray otherwise. No highlight
- * pill and no bounce; selection is shown by contrast alone.
+ * Tab bar item: icon over a small label, white when active and gray otherwise. The pill bar
+ * draws the sliding grey capsule behind the active item; the item itself only changes tint.
  */
 @Composable
 fun FableTabBarItem(
