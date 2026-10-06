@@ -18,12 +18,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 
-/** The four packages a fresh install needs before anything can run. */
-enum class RecommendedKind(val label: String) {
+/**
+ * The packages setup knows about. The four [required] ones are needed before anything can run;
+ * FEX is an optional alternative to Box64 that containers can opt into, so it is tracked (the
+ * Assets tab can show whether a build exists) but never blocks setup or is auto-downloaded.
+ */
+enum class RecommendedKind(val label: String, val required: Boolean = true) {
     WINE("Wine"),
     BOX64("Box64"),
     DRIVER("RADV Xclipse"),
     DXVK("DXVK"),
+    FEX("FEX", required = false),
 }
 
 enum class RecommendedStatus {
@@ -48,30 +53,37 @@ data class RecommendedItem(
     val progress: Float = 0f,
 )
 
-/** Where the recommended downloads stand. Empty until the first catalog/disk check. */
+/**
+ * Where the recommended downloads stand. Empty until the first catalog/disk check. Everything
+ * derived here (what is pending, progress, whether setup is needed) only counts the
+ * [RecommendedKind.required] items; optional kinds such as FEX ride along in [items] only.
+ */
 data class SetupState(val items: List<RecommendedItem> = emptyList()) {
-    /** True while something recommended can still be downloaded or is on its way. */
+    /** The items setup is responsible for. */
+    val required: List<RecommendedItem> get() = items.filter { it.kind.required }
+
+    /** True while something required can still be downloaded or is on its way. */
     val needsSetup: Boolean
-        get() = items.any { it.status == RecommendedStatus.AVAILABLE || it.status == RecommendedStatus.DOWNLOADING }
+        get() = required.any { it.status == RecommendedStatus.AVAILABLE || it.status == RecommendedStatus.DOWNLOADING }
 
-    val isDownloading: Boolean get() = items.any { it.status == RecommendedStatus.DOWNLOADING }
+    val isDownloading: Boolean get() = required.any { it.status == RecommendedStatus.DOWNLOADING }
 
-    /** True on a fresh install: nothing recommended has been downloaded yet. */
+    /** True on a fresh install: nothing required has been downloaded yet. */
     val nothingInstalled: Boolean
-        get() = items.isNotEmpty() && items.none { it.status == RecommendedStatus.INSTALLED }
+        get() = required.isNotEmpty() && required.none { it.status == RecommendedStatus.INSTALLED }
 
-    /** Items that still need to be downloaded or are downloading. */
+    /** Required items that still need to be downloaded or are downloading. */
     val pending: List<RecommendedItem>
-        get() = items.filter { it.status == RecommendedStatus.AVAILABLE || it.status == RecommendedStatus.DOWNLOADING }
+        get() = required.filter { it.status == RecommendedStatus.AVAILABLE || it.status == RecommendedStatus.DOWNLOADING }
 
-    val unavailable: List<RecommendedItem> get() = items.filter { it.status == RecommendedStatus.UNAVAILABLE }
+    val unavailable: List<RecommendedItem> get() = required.filter { it.status == RecommendedStatus.UNAVAILABLE }
 
     val pendingBytes: Long get() = pending.sumOf { it.sizeBytes }
 
-    /** Share of the downloadable items that is done, 0..1. */
+    /** Share of the downloadable required items that is done, 0..1. */
     val progress: Float
         get() {
-            val tracked = items.filter { it.status != RecommendedStatus.UNAVAILABLE }
+            val tracked = required.filter { it.status != RecommendedStatus.UNAVAILABLE }
             if (tracked.isEmpty()) return 0f
             return tracked.sumOf { item ->
                 when (item.status) {
@@ -159,6 +171,8 @@ class SetupManager internal constructor(
             val unavailable = mutableListOf<RecommendedKind>()
             val failed = mutableListOf<RecommendedKind>()
             for (kind in RecommendedKind.entries) {
+                // Optional kinds (FEX) are a per-container choice, not part of first-run setup.
+                if (!kind.required) continue
                 if (isInstalled(kind, drivers.installed.value)) {
                     installed += kind
                     continue
@@ -236,6 +250,7 @@ class SetupManager internal constructor(
         RecommendedKind.BOX64 -> assets.downloadedFiles(AssetType.BOX64).isNotEmpty()
         RecommendedKind.DXVK -> assets.downloadedFiles(AssetType.DXVK).isNotEmpty()
         RecommendedKind.DRIVER -> installedDriver != null
+        RecommendedKind.FEX -> assets.downloadedFiles(AssetType.FEX).isNotEmpty()
     }
 
     /**
@@ -254,6 +269,9 @@ class SetupManager internal constructor(
             ?.let { picks[RecommendedKind.BOX64] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
         entries.firstOrNull { it.type == AssetType.DXVK && !it.name.contains("native", ignoreCase = true) }
             ?.let { picks[RecommendedKind.DXVK] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
+        entries.filter { it.type == AssetType.FEX }
+            .minByOrNull { box64Rank(it.name) }
+            ?.let { picks[RecommendedKind.FEX] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
         releases.firstOrNull { it.channel == ReleaseChannel.LATEST }
             ?.let { picks[RecommendedKind.DRIVER] = Pick(it.tag, it.asset.sizeBytes, isDriver = true, taskId = it.id) }
         return picks
@@ -276,6 +294,7 @@ class SetupManager internal constructor(
             else -> 3
         }
 
+        /** Also used for FEX packages: an Android build first, then any ARM64 one. */
         internal fun box64Rank(name: String): Int = when {
             name.contains("android", ignoreCase = true) -> 0
             name.contains("aarch64", ignoreCase = true) || name.contains("arm64", ignoreCase = true) -> 1

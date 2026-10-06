@@ -350,7 +350,8 @@ private fun DownloadStep(
     onContinue: () -> Unit,
     onSkip: () -> Unit,
 ) {
-    val items = setup.items
+    // Only the required packages take part in setup; optional ones (FEX) are picked per container.
+    val items = setup.required
     val tracked = items.filter { it.status != RecommendedStatus.UNAVAILABLE }
     val readyCount = items.count { it.status == RecommendedStatus.INSTALLED }
     val allDone = items.isNotEmpty() && !preparing && !setup.needsSetup
@@ -394,7 +395,7 @@ private fun DownloadStep(
                 ProgressRing(
                     progress = setup.progress,
                     indeterminate = preparing && tracked.isEmpty(),
-                    label = "$readyCount of ${items.size.coerceAtLeast(RecommendedKind.entries.size)}",
+                    label = "$readyCount of ${items.size.coerceAtLeast(RecommendedKind.entries.count { it.required })}",
                     sublabel = if (setup.pendingBytes > 0) "${formatBytes(setup.pendingBytes)} left" else "ready",
                 )
             }
@@ -402,7 +403,8 @@ private fun DownloadStep(
         Spacer(Modifier.height(Spacing.xxl))
         Staggered(index = 3) {
             GlassCard(Modifier.fillMaxWidth()) {
-                val rows = RecommendedKind.entries
+                // Optional kinds (FEX) are chosen per container later, not during first-run setup.
+                val rows = RecommendedKind.entries.filter { it.required }
                 rows.forEachIndexed { index, kind ->
                     if (index > 0) CardDivider()
                     val item = items.firstOrNull { it.kind == kind }
@@ -472,6 +474,7 @@ private fun SetupItemRow(kind: RecommendedKind, item: RecommendedItem?, preparin
         RecommendedKind.BOX64 -> "Runs x86_64 code on ARM64"
         RecommendedKind.DRIVER -> "Mesa Vulkan driver for Xclipse"
         RecommendedKind.DXVK -> "DirectX 9–11 on Vulkan"
+        RecommendedKind.FEX -> "Alternative x86_64 translator"
     }
     val statusText = when {
         installed -> "Ready"
@@ -529,6 +532,7 @@ private fun kindIcon(kind: RecommendedKind) = when (kind) {
     RecommendedKind.BOX64 -> Icons.Outlined.Terminal
     RecommendedKind.DRIVER -> Icons.Outlined.Memory
     RecommendedKind.DXVK -> Icons.Outlined.Layers
+    RecommendedKind.FEX -> Icons.Outlined.SwapHoriz
 }
 
 /** Overall progress as a glowing ring with the count in the middle. Real progress only. */
@@ -603,8 +607,8 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
 
 @Composable
 private fun ReadyStep(setup: SetupState, onFinish: () -> Unit) {
-    val ready = setup.items.filter { it.status == RecommendedStatus.INSTALLED }.map { it.kind.label }
-    val missing = setup.items.filter { it.status != RecommendedStatus.INSTALLED }.map { it.kind.label }
+    val ready = setup.required.filter { it.status == RecommendedStatus.INSTALLED }.map { it.kind.label }
+    val missing = setup.required.filter { it.status != RecommendedStatus.INSTALLED }.map { it.kind.label }
     SetupColumn {
         Spacer(Modifier.weight(1f))
         Staggered(index = 0) { SuccessMark() }

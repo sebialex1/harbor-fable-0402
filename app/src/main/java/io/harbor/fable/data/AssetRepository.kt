@@ -398,6 +398,16 @@ class AssetRepository internal constructor(
                 notes = "ARM64 x86_64 translator — required to run Wine",
             ),
             CatalogSource(
+                owner = "FEX-Emu",
+                repo = "FEX",
+                displayName = "FEX (x86_64 Emulator)",
+                type = AssetType.FEX,
+                // Upstream releases ship source archives only; these globs pick up ARM64 binary
+                // packages when a release carries them, and match nothing otherwise.
+                assetGlobs = listOf("*aarch64*.tar.*", "*arm64*.tar.*", "*android*.tar.*", "*aarch64*.zip", "*arm64*.zip"),
+                notes = "Optional alternative to Box64 for containers that opt in",
+            ),
+            CatalogSource(
                 owner = "doitsujin",
                 repo = "dxvk",
                 displayName = "DXVK",
