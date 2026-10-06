@@ -122,7 +122,7 @@ fun DriverReleaseRow(
                     label = "releaseState",
                 ) { current ->
                     when (current) {
-                        ReleaseUiState.AVAILABLE -> GlassIconButton(
+                        ReleaseUiState.AVAILABLE -> FableIconButton(
                             icon = Icons.Outlined.Download,
                             contentDescription = "Download ${release.tag}",
                             size = 32.dp,
@@ -132,7 +132,7 @@ fun DriverReleaseRow(
                         ReleaseUiState.DOWNLOADING -> StateText("$percent%")
                         ReleaseUiState.VERIFYING -> StateText("Verifying")
                         ReleaseUiState.DOWNLOADED -> if (onInstall != null) {
-                            GlassButton(text = "Install", onClick = onInstall, compact = true)
+                            FableButton(text = "Install", onClick = onInstall, compact = true)
                         } else {
                             StateText("Downloaded")
                         }

@@ -47,7 +47,7 @@ val LocalFableUi = staticCompositionLocalOf<FableUi> {
 }
 
 /**
- * Extra bottom space a screen must reserve for floating chrome (the dock) on top of the
+ * Extra bottom space a screen must reserve for floating chrome (the tab bar) on top of the
  * navigation-bar inset. `FableRoot` provides it per screen; [FableScreen] applies it.
  */
-val LocalDockClearance = staticCompositionLocalOf<Dp> { 0.dp }
+val LocalTabBarClearance = staticCompositionLocalOf<Dp> { 0.dp }

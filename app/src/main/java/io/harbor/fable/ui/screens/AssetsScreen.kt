@@ -100,7 +100,7 @@ internal fun AssetsContent(
     onDownload: (AssetEntry) -> Unit,
 ) {
     val expansion = rememberExpansionState()
-    val appear = rememberLiquidAppear()
+    val appear = rememberEntrance()
     val grouped = remember(assets) { assets.groupBy { it.type } }
     // Build the user picked per version ("WINE/11.19" -> asset id); unpicked versions use the default.
     val selectedVariants = rememberSaveable(saver = SelectionSaver) { mutableStateMapOf() }
@@ -133,7 +133,7 @@ internal fun AssetsContent(
         title = "Assets",
         actions = {
             // "Download recommended" lives in the setup row below, which only shows when needed.
-            GlassIconButton(
+            FableIconButton(
                 icon = Icons.Outlined.Refresh,
                 contentDescription = "Refresh assets",
                 enabled = !isRefreshing,
@@ -145,7 +145,7 @@ internal fun AssetsContent(
             item(key = "setup-banner") {
                 AnimatedVisibility(
                     visible = bannerVisible,
-                    modifier = Modifier.liquidAppear(appear, 0),
+                    modifier = Modifier.entrance(appear, 0),
                     enter = fadeIn(Motion.enter()) + expandVertically(Motion.enter()),
                     exit = fadeOut(Motion.exit()) + slideOutVertically(Motion.exit(Motion.Standard)) { -it / 2 } +
                         shrinkVertically(Motion.exit(Motion.Standard)),
@@ -157,7 +157,7 @@ internal fun AssetsContent(
 
         if (isRefreshing) {
             item(key = "refreshing") {
-                LoadingCard(message = "Refreshing…", modifier = Modifier.animateItem().liquidAppear(appear, 0))
+                LoadingCard(message = "Refreshing…", modifier = Modifier.animateItem().entrance(appear, 0))
             }
         }
 
@@ -167,7 +167,7 @@ internal fun AssetsContent(
                     icon = Icons.Outlined.Download,
                     title = "No assets",
                     message = "Refresh to load the catalog",
-                    modifier = Modifier.animateItem().liquidAppear(appear, 1),
+                    modifier = Modifier.animateItem().entrance(appear, 1),
                 )
             }
         } else {
@@ -183,7 +183,7 @@ internal fun AssetsContent(
                             title = typeDisplayName(type),
                             expanded = expanded,
                             onToggle = { expansion.toggle(typeKey, default = true) },
-                            modifier = Modifier.animateItem().liquidAppear(appear, typeIndex + 1),
+                            modifier = Modifier.animateItem().entrance(appear, typeIndex + 1),
                         ) {
                             versions.forEachIndexed { index, group ->
                                 AssetVersionRow(
@@ -261,14 +261,14 @@ private fun AssetVersionRow(
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
                 group.flavors.forEach { flavor ->
-                    GlassChip(
+                    FableChip(
                         text = flavor,
                         selected = selected.flavor == flavor,
                         onClick = { onSelect(group.pick(flavor, selected.wow64).asset) },
                     )
                 }
                 if (group.hasWow64Choice) {
-                    GlassChip(
+                    FableChip(
                         text = "WoW64",
                         selected = selected.wow64,
                         onClick = { onSelect(group.pick(selected.flavor, !selected.wow64).asset) },
@@ -294,7 +294,7 @@ internal fun SetupBanner(
         else -> state.pending.joinToString(", ") { it.kind.label } +
             if (state.pendingBytes > 0) " · ${formatBytes(state.pendingBytes)}" else ""
     }
-    GlassCard(modifier = modifier.fillMaxWidth()) {
+    FableCard(modifier = modifier.fillMaxWidth()) {
         ListRow(
             title = if (busy) "Downloading" else "Recommended",
             subtitle = detail,
@@ -302,7 +302,7 @@ internal fun SetupBanner(
             showChevron = false,
             trailing = {
                 if (!busy) {
-                    GlassButton(text = "Get", primary = true, compact = true, onClick = onDownloadAll)
+                    FableButton(text = "Get", primary = true, compact = true, onClick = onDownloadAll)
                 }
             },
         )

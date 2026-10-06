@@ -11,14 +11,11 @@ val FableShapes = Shapes(
     extraLarge = RoundedCornerShape(16.dp),
 )
 
-// Radii grow with the size of the pane: a chip is tighter than a card, a card tighter than a
-// sheet, so nested glass keeps concentric corners.
+// Radii grow with the size of the surface: a chip is tighter than a card, a card tighter than a
+// sheet, so nested surfaces keep concentric corners.
 
 /** Inset grouped sections, as in iOS Settings. */
-val GlassRadius = 12.dp
-
-/** The floating dock. */
-val DockRadius = 26.dp
+val CardRadius = 12.dp
 
 /** Modal sheets (top corners) and dialogs. */
 val SheetRadius = 14.dp
@@ -34,5 +31,5 @@ val ChipRadius = 7.dp
 /** Pills: fully rounded. */
 val PillRadius = 50.dp
 
-/** Width of the hairline edge on floating materials (see `Modifier.glassRim`). */
-val GlassEdgeStroke = 0.5.dp
+/** Width of the hairline edge on solid surfaces (see `Modifier.solidSurface`). */
+val HairlineStroke = 0.5.dp

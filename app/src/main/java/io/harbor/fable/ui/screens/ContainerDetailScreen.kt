@@ -120,7 +120,7 @@ internal fun ContainerDetailContent(
     onAddExe: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val appear = rememberLiquidAppear()
+    val appear = rememberEntrance()
 
     FableScreen(
         title = container?.name ?: "Container",
@@ -131,7 +131,7 @@ internal fun ContainerDetailContent(
                 EmptyState(
                     icon = Icons.Outlined.ErrorOutline,
                     title = "Container not found",
-                    modifier = Modifier.animateItem().liquidAppear(appear, 0),
+                    modifier = Modifier.animateItem().entrance(appear, 0),
                 )
             }
             return@FableScreen
@@ -141,11 +141,11 @@ internal fun ContainerDetailContent(
         item(key = "launch") {
             val primaryName = container.exeName?.takeIf { !container.exePath.isNullOrBlank() }
             Row(
-                Modifier.fillMaxWidth().animateItem().liquidAppear(appear, 0),
+                Modifier.fillMaxWidth().animateItem().entrance(appear, 0),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
                 if (primaryName != null) {
-                    GlassButton(
+                    FableButton(
                         text = primaryName,
                         icon = Icons.Outlined.PlayArrow,
                         primary = true,
@@ -153,7 +153,7 @@ internal fun ContainerDetailContent(
                         onClick = onLaunchPrimary,
                     )
                 }
-                GlassButton(
+                FableButton(
                     text = if (primaryName != null) "Desktop" else "Launch Desktop",
                     icon = Icons.Outlined.DesktopWindows,
                     primary = primaryName == null,
@@ -165,7 +165,7 @@ internal fun ContainerDetailContent(
 
         // Everything about the container itself is one section: what it runs, then how.
         item(key = "settings") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 1)) {
+            FableCard(Modifier.animateItem().entrance(appear, 1)) {
                 InfoRow(
                     label = "Status",
                     value = container.status.name.lowercase(),
@@ -202,16 +202,16 @@ internal fun ContainerDetailContent(
             }
         }
 
-        item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().liquidAppear(appear, 2)) }
+        item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().entrance(appear, 2)) }
         item(key = "apps") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 2)) {
+            FableCard(Modifier.animateItem().entrance(appear, 2)) {
                 exes.forEach { exe ->
                     ListRow(
                         title = exe.name,
                         subtitle = if (container.exePath == exe.path) "Primary" else null,
                         showChevron = false,
                         trailing = {
-                            GlassIconButton(
+                            FableIconButton(
                                 icon = Icons.Outlined.PlayArrow,
                                 contentDescription = "Launch ${exe.name}",
                                 tint = Color.Black,
@@ -234,7 +234,7 @@ internal fun ContainerDetailContent(
         }
 
         item(key = "delete") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 3).padding(top = Spacing.xl)) {
+            FableCard(Modifier.animateItem().entrance(appear, 3).padding(top = Spacing.xl)) {
                 ListRow(
                     title = "Delete Container",
                     titleColor = FableError,

@@ -69,7 +69,7 @@ fun AddAppSheet(
         onDismiss = onDismiss,
     ) { close ->
         // File and container share one section; the name is the only thing typed.
-        GlassCard {
+        FableCard {
             InfoRow(
                 label = "File",
                 value = pickedFileName.ifBlank { "Choose" },
@@ -86,7 +86,7 @@ fun AddAppSheet(
                 )
             }
         }
-        GlassTextField(
+        FableTextField(
             value = name,
             onValueChange = { name = it },
             label = "Name",
@@ -98,7 +98,7 @@ fun AddAppSheet(
                 modifier = Modifier.padding(horizontal = Spacing.lg),
             )
         }
-        GlassButton(
+        FableButton(
             text = "Add",
             primary = true,
             enabled = pickedUri != null && name.isNotBlank() && containerId != null,

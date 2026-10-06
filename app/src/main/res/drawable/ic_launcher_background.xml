@@ -1,35 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon background: near-black with a soft purple glow behind the glass. -->
+<!-- Adaptive icon background: pure black. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="linear"
-                android:startX="0"
-                android:startY="0"
-                android:endX="108"
-                android:endY="108">
-                <item android:offset="0" android:color="#FF1A1730" />
-                <item android:offset="1" android:color="#FF0A0B0F" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:type="radial"
-                android:centerX="54"
-                android:centerY="50"
-                android:gradientRadius="56">
-                <item android:offset="0" android:color="#667C5CFF" />
-                <item android:offset="0.55" android:color="#1F7C5CFF" />
-                <item android:offset="1" android:color="#007C5CFF" />
-            </gradient>
-        </aapt:attr>
-    </path>
+    <path
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z"
+        android:fillColor="#FF000000" />
 </vector>

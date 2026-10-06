@@ -16,6 +16,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,7 +32,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -44,25 +44,21 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.harbor.fable.app.FableApp
-import io.harbor.fable.ui.components.DockTab
+import io.harbor.fable.ui.components.TabBarTab
 import io.harbor.fable.ui.components.FableUi
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.haze
-import io.harbor.fable.ui.components.GlassDock
-import io.harbor.fable.ui.components.GlassLevel
-import io.harbor.fable.ui.components.LocalDockClearance
+import io.harbor.fable.ui.components.FableTabBar
+import io.harbor.fable.ui.components.SurfaceLevel
+import io.harbor.fable.ui.components.LocalTabBarClearance
 import io.harbor.fable.ui.components.LocalFableUi
-import io.harbor.fable.ui.components.glassRim
 import io.harbor.fable.ui.screens.*
 import io.harbor.fable.ui.theme.ControlRadius
-import io.harbor.fable.ui.theme.DockMetrics
+import io.harbor.fable.ui.theme.TabBarMetrics
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableBg
-import io.harbor.fable.ui.theme.FableGlassShadow
-import io.harbor.fable.ui.theme.FableGlassShadowSpot
+import io.harbor.fable.ui.theme.FableBorder
+import io.harbor.fable.ui.theme.HairlineStroke
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
-import io.harbor.fable.ui.theme.GlassShadow
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.ScreenPadding
 import io.harbor.fable.ui.theme.Spacing
@@ -129,7 +125,7 @@ private val DetailPopExit: AnimatedContentTransitionScope<NavBackStackEntry>.() 
 
 /**
  * Root of the UI. Shows the first-run [SetupScreen] until setup has been finished or skipped,
- * then the main shell (tabs, dock, sheets). The hand-over is one continuous motion: the setup
+ * then the main shell (tabs, tab bar, sheets). The hand-over is one continuous motion: the setup
  * canvas zooms through and fades while the shell settles in from slightly below.
  */
 @Composable
@@ -154,7 +150,7 @@ fun FableRoot() {
 
     CompositionLocalProvider(
         LocalFableUi provides fableUi,
-        LocalDockClearance provides DockMetrics.Clearance,
+        LocalTabBarClearance provides TabBarMetrics.Clearance,
     ) {
         Box(
             Modifier
@@ -191,7 +187,7 @@ fun FableRoot() {
     }
 }
 
-/** Tabs, dock, snackbar and sheets: the app once setup is out of the way. */
+/** Tabs, tab bar, snackbar and sheets: the app once setup is out of the way. */
 @Composable
 private fun MainShell(snackbarHostState: SnackbarHostState) {
     val navController = rememberNavController()
@@ -207,7 +203,6 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
     }
 
     var showAddApp by remember { mutableStateOf(false) }
-    val hazeState = remember { HazeState() }
 
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
@@ -215,11 +210,11 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
 
     val tabs = remember {
         listOf(
-            DockTab("Home", Icons.Outlined.Home),
-            DockTab("Containers", Icons.Outlined.Apps),
-            DockTab("Drivers", Icons.Outlined.Memory),
-            DockTab("Assets", Icons.Outlined.Download),
-            DockTab("Settings", Icons.Outlined.Settings),
+            TabBarTab("Home", Icons.Outlined.Home),
+            TabBarTab("Containers", Icons.Outlined.Apps),
+            TabBarTab("Drivers", Icons.Outlined.Memory),
+            TabBarTab("Assets", Icons.Outlined.Download),
+            TabBarTab("Settings", Icons.Outlined.Settings),
         )
     }
 
@@ -233,8 +228,7 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
         NavHost(
             navController = navController,
             startDestination = Routes.HOME,
-            // The screens are the backdrop the tab bar blurs.
-            modifier = Modifier.fillMaxSize().haze(hazeState),
+            modifier = Modifier.fillMaxSize(),
         ) {
             composable(
                 Routes.HOME,
@@ -314,9 +308,9 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
             AddAppSheet(onDismiss = { showAddApp = false })
         }
 
-        // Floats above the dock on tabs and near the bottom edge on pushed screens.
+        // Floats above the tab bar on tabs and near the bottom edge on pushed screens.
         val snackbarBottom by animateDpAsState(
-            targetValue = if (isTopLevel) DockMetrics.Clearance else Dp.Hairline,
+            targetValue = if (isTopLevel) TabBarMetrics.Clearance else Dp.Hairline,
             animationSpec = Motion.settle(),
             label = "snackbarBottom",
         )
@@ -332,33 +326,26 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
             Snackbar(
                 snackbarData = data,
                 modifier = Modifier
-                    .shadow(
-                        elevation = GlassShadow.Overlay,
-                        shape = shape,
-                        ambientColor = FableGlassShadow,
-                        spotColor = FableGlassShadowSpot,
-                    )
-                    .glassRim(shape, GlassLevel.Overlay)
+                    .border(HairlineStroke, FableBorder, shape)
                     .clip(shape)
                     .clickable(onClick = { data.dismiss() }),
                 shape = shape,
-                containerColor = GlassLevel.Overlay.fill,
+                containerColor = SurfaceLevel.Sheet.fill,
                 contentColor = FableText,
                 actionColor = FableAccent,
                 dismissActionContentColor = FableTextDim,
             )
         }
 
-        // Floating glass dock — only on top-level tabs. It rises with the pushed screen's pop
-        // and drops away as a detail screen slides in, on the same clock as those transitions.
+        // Tab bar — only on top-level tabs. It rises with the pushed screen's pop and drops away
+        // as a detail screen slides in, on the same clock as those transitions.
         AnimatedVisibility(
             visible = isTopLevel,
             enter = slideInVertically(Motion.enter(Motion.Slow)) { it } + fadeIn(Motion.enter()),
             exit = slideOutVertically(Motion.exit(Motion.Standard)) { it } + fadeOut(Motion.exit()),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            GlassDock(
-                hazeState = hazeState,
+            FableTabBar(
                 items = tabs,
                 activeIndex = activeTab,
                 onTabSelected = { index ->

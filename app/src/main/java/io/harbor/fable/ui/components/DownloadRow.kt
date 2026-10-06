@@ -98,7 +98,7 @@ fun DownloadRow(
                     label = "downloadState",
                 ) { current ->
                     when (current) {
-                        DownloadUi.AVAILABLE -> GlassIconButton(
+                        DownloadUi.AVAILABLE -> FableIconButton(
                             icon = Icons.Outlined.Download,
                             contentDescription = "Download $title",
                             size = 32.dp,

@@ -95,7 +95,7 @@ fun FableTopBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (onBack != null) {
-                    GlassIconButton(
+                    FableIconButton(
                         icon = Icons.AutoMirrored.Outlined.ArrowBack,
                         contentDescription = "Back",
                         onClick = onBack,
@@ -126,7 +126,7 @@ fun FableTopBar(
  * under the bar while the inline title fades in, as in iOS. [subtitle], when given, sits under
  * the large title in grey.
  *
- * Bottom padding always includes the navigation-bar inset plus [LocalDockClearance], so
+ * Bottom padding always includes the navigation-bar inset plus [LocalTabBarClearance], so
  * the last item is never hidden behind the floating tab bar. Items are spaced by [Spacing.sm];
  * use `SectionLabel` to start a new group. Give items a stable `key` and apply
  * `Modifier.animateItem()` so insertions, removals and reordering animate.
@@ -142,7 +142,7 @@ fun FableScreen(
     content: LazyListScope.() -> Unit,
 ) {
     val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val bottomPadding = LocalDockClearance.current + navigationBottom + Spacing.lg
+    val bottomPadding = LocalTabBarClearance.current + navigationBottom + Spacing.lg
     val largeTitle = onBack == null
     val density = LocalDensity.current
     val largeTitleGone = with(density) { LargeTitleCollapse.toPx() }

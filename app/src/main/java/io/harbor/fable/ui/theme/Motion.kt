@@ -29,7 +29,7 @@ object Motion {
     /** Symmetric ease for state changes in place. */
     val EaseInOut: Easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)
 
-    /** Liquid overshoot for emphasis (badges appearing, selection). */
+    /** Overshoot for emphasis (badges appearing, selection). */
     val Overshoot: Easing = CubicBezierEasing(0.34f, 1.56f, 0.64f, 1.0f)
 
     fun <T> enter(duration: Int = Standard, delay: Int = 0): TweenSpec<T> =

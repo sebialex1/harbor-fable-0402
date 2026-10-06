@@ -160,7 +160,7 @@ internal fun DriversContent(
     onOpenVulkanExtensions: () -> Unit = {},
 ) {
     val expansion = rememberExpansionState()
-    val appear = rememberLiquidAppear()
+    val appear = rememberEntrance()
     val latest = remember(releases) { releases.firstOrNull { it.channel == ReleaseChannel.LATEST } }
     val updateAvailable = latest != null && installed != null && installed.tag != latest.tag &&
         RadvRelease.versionComparator.compare(latest.versionParts, RadvRelease.parseVersion(installed.tag)) > 0
@@ -174,7 +174,7 @@ internal fun DriversContent(
     FableScreen(
         title = "Drivers",
         actions = {
-            GlassIconButton(
+            FableIconButton(
                 icon = Icons.Outlined.Refresh,
                 contentDescription = "Refresh releases",
                 enabled = !isRefreshing,
@@ -182,7 +182,7 @@ internal fun DriversContent(
             )
         },
     ) {
-        item(key = "active-label") { SectionLabel("Active Driver", Modifier.animateItem().liquidAppear(appear, 0)) }
+        item(key = "active-label") { SectionLabel("Active Driver", Modifier.animateItem().entrance(appear, 0)) }
         item(key = "active") {
             // The driver, its actions and its Vulkan extensions share one section.
             ActiveDriverCard(
@@ -194,7 +194,7 @@ internal fun DriversContent(
                 onDownloadLatest = { latest?.let(onDownload) },
                 onInstallLatest = { latest?.let(onInstall) },
                 onUninstall = onUninstall,
-                modifier = Modifier.animateItem().liquidAppear(appear, 0),
+                modifier = Modifier.animateItem().entrance(appear, 0),
                 footer = {
                     CardDivider()
                     ListRow(
@@ -218,7 +218,7 @@ internal fun DriversContent(
                     icon = Icons.Outlined.CloudOff,
                     title = "Couldn't load releases",
                     lines = listOf(refreshError),
-                    modifier = Modifier.animateItem().liquidAppear(appear, 3),
+                    modifier = Modifier.animateItem().entrance(appear, 3),
                 )
             }
         } else if (stale) {
@@ -227,14 +227,14 @@ internal fun DriversContent(
                     icon = Icons.Outlined.CloudOff,
                     title = "Offline",
                     lines = emptyList(),
-                    modifier = Modifier.animateItem().liquidAppear(appear, 3),
+                    modifier = Modifier.animateItem().entrance(appear, 3),
                 )
             }
         }
 
         if (isRefreshing && releases.isEmpty()) {
             item(key = "refreshing") {
-                LoadingCard(message = "Loading releases…", modifier = Modifier.animateItem().liquidAppear(appear, 3))
+                LoadingCard(message = "Loading releases…", modifier = Modifier.animateItem().entrance(appear, 3))
             }
         }
 
@@ -245,7 +245,7 @@ internal fun DriversContent(
                     title = if (latestCovered) "Previous Versions" else "All Versions",
                     expanded = expansion.isExpanded(OLDER_KEY, default = false),
                     onToggle = { expansion.toggle(OLDER_KEY, default = false) },
-                    modifier = Modifier.animateItem().liquidAppear(appear, 2).padding(top = Spacing.lg),
+                    modifier = Modifier.animateItem().entrance(appear, 2).padding(top = Spacing.lg),
                     badge = {
                         Text(
                             text = if (downloadedCount > 0) "$downloadedCount of ${older.size}" else "${older.size}",
@@ -274,7 +274,7 @@ internal fun DriversContent(
                     icon = Icons.Outlined.Memory,
                     title = "No releases",
                     
-                    modifier = Modifier.animateItem().liquidAppear(appear, 3),
+                    modifier = Modifier.animateItem().entrance(appear, 3),
                 )
             }
         }
@@ -312,7 +312,7 @@ internal fun ActiveDriverCard(
     val lastInstalling = remember { arrayOfNulls<String>(1) }
     if (installed != null) lastInstalled[0] = installed
     if (installing != null) lastInstalling[0] = installing
-    GlassCard(modifier.fillMaxWidth()) {
+    FableCard(modifier.fillMaxWidth()) {
         AnimatedContent(
             targetState = state,
             transitionSpec = {
@@ -439,7 +439,7 @@ private fun InstalledDriverFace(
                             modifier = Modifier.padding(top = Spacing.xs),
                         )
                     }
-                    update != null -> GlassButton(
+                    update != null -> FableButton(
                         text = "Update to ${update.tag}",
                         primary = true,
                         compact = true,
@@ -453,7 +453,7 @@ private fun InstalledDriverFace(
                     )
                 }
             }
-            GlassButton(
+            FableButton(
                 text = "Uninstall",
                 destructive = true,
                 compact = true,

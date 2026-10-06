@@ -19,7 +19,7 @@ import kotlin.math.min
 /**
  * Entrance helper: fades and rises [content] into place once, [index] * [staggerMs] after the
  * first composition. Use for hero screens where elements should arrive one after another.
- * For lazy lists use [rememberLiquidAppear] with [Modifier.liquidAppear] instead, which
+ * For lazy lists use [rememberEntrance] with [Modifier.entrance] instead, which
  * survives scrolling and state restoration.
  */
 @Composable
@@ -51,16 +51,16 @@ fun Staggered(
  * The flag is saved, so returning to a tab with restored state does not replay the entrance.
  */
 @Stable
-class LiquidAppearState internal constructor(shown: Boolean) {
+class EntranceState internal constructor(shown: Boolean) {
     var shown by mutableStateOf(shown)
         internal set
 }
 
 /** Remembers the entrance state for a screen; call once at the top of the screen's content. */
 @Composable
-fun rememberLiquidAppear(): LiquidAppearState {
+fun rememberEntrance(): EntranceState {
     var shown by rememberSaveable { mutableStateOf(false) }
-    val state = remember { LiquidAppearState(shown) }
+    val state = remember { EntranceState(shown) }
     LaunchedEffect(state) {
         shown = true
         state.shown = true
@@ -69,30 +69,30 @@ fun rememberLiquidAppear(): LiquidAppearState {
 }
 
 /** How far apart consecutive items arrive, and the point past which they arrive together. */
-private const val LiquidAppearStaggerMs = 30
-private const val LiquidAppearMaxStagger = 6
-private const val LiquidAppearRiseDp = 6f
+private const val EntranceStaggerMs = 30
+private const val EntranceMaxStagger = 6
+private const val EntranceRiseDp = 6f
 
 /**
  * Fades and rises this element into place as part of [state]'s entrance, [index] steps after the
  * first. Composable so it can drive an `animateFloatAsState`; chain it after `animateItem()`.
  */
 @Composable
-fun Modifier.liquidAppear(state: LiquidAppearState, index: Int): Modifier {
+fun Modifier.entrance(state: EntranceState, index: Int): Modifier {
     val progress by animateFloatAsState(
         targetValue = if (state.shown) 1f else 0f,
         animationSpec = Motion.enter(
             duration = Motion.Entrance,
-            delay = min(index, LiquidAppearMaxStagger) * LiquidAppearStaggerMs,
+            delay = min(index, EntranceMaxStagger) * EntranceStaggerMs,
         ),
-        label = "liquidAppear",
+        label = "entrance",
     )
     return if (progress >= 1f) {
         this
     } else {
         graphicsLayer {
             alpha = progress
-            translationY = (1f - progress) * LiquidAppearRiseDp * density
+            translationY = (1f - progress) * EntranceRiseDp * density
         }
     }
 }

@@ -21,24 +21,12 @@ val ScreenPadding = 16.dp
 val RowPaddingHorizontal = 16.dp
 val RowPaddingVertical = 11.dp
 
-/** Floating dock geometry. Screens reserve [Clearance] (plus the nav-bar inset) at the bottom. */
-object DockMetrics {
-    val Height = 64.dp
-    val Margin = 10.dp
+/** Bottom tab bar geometry. Screens reserve [Clearance] (plus the nav-bar inset) at the bottom. */
+object TabBarMetrics {
+    val Height = 56.dp
 
-    /** Vertical space the dock occupies above the navigation-bar inset. */
-    val Clearance = Height + Margin * 2
-}
-
-/**
- * Shadow elevation per material level (see `GlassLevel`). Sections in a list have none; only
- * chrome that floats over moving content gets a soft falloff.
- */
-object GlassShadow {
-    val Card = 0.dp
-    val Floating = 12.dp
-    val Sheet = 0.dp
-    val Overlay = 16.dp
+    /** Vertical space the tab bar occupies above the navigation-bar inset. */
+    val Clearance = Height
 }
 
 /** Control heights, so buttons, chips and fields line up in a row. */

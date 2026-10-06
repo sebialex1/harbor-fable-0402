@@ -56,12 +56,12 @@ internal fun HomeContent(
     onLaunch: (ExeEntry) -> Unit,
 ) {
     val containerNames = remember(containers) { containers.associate { it.id to it.name } }
-    val appear = rememberLiquidAppear()
+    val appear = rememberEntrance()
 
     FableScreen(
         title = "Fable",
         actions = {
-            GlassIconButton(
+            FableIconButton(
                 icon = Icons.Outlined.Add,
                 contentDescription = "Add app",
                 onClick = onAddApp,
@@ -69,19 +69,19 @@ internal fun HomeContent(
         },
     ) {
         if (exes.isNotEmpty()) {
-            item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().liquidAppear(appear, 0)) }
+            item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().entrance(appear, 0)) }
             item(key = "apps") {
-                GlassCard(Modifier.animateItem().liquidAppear(appear, 1)) {
+                FableCard(Modifier.animateItem().entrance(appear, 1)) {
                     exes.forEachIndexed { index, exe ->
                         if (index > 0) CardDivider(afterIcon = true)
                         ListRow(
-                            modifier = Modifier.liquidAppear(appear, index + 2),
+                            modifier = Modifier.entrance(appear, index + 2),
                             title = exe.name,
                             subtitle = containerNames[exe.containerId] ?: "Unassigned",
                             icon = Icons.Outlined.SportsEsports,
                             showChevron = false,
                             trailing = {
-                                GlassIconButton(
+                                FableIconButton(
                                     icon = Icons.Outlined.PlayArrow,
                                     contentDescription = "Launch ${exe.name}",
                                     tint = Color.Black,
@@ -102,7 +102,7 @@ internal fun HomeContent(
                 EmptyState(
                     icon = Icons.Outlined.SportsEsports,
                     title = "No apps",
-                    modifier = Modifier.animateItem().liquidAppear(appear, 0),
+                    modifier = Modifier.animateItem().entrance(appear, 0),
                 )
             }
         }
@@ -111,16 +111,16 @@ internal fun HomeContent(
             item(key = "containers-label") {
                 SectionLabel(
                     text = "Containers",
-                    modifier = Modifier.animateItem().liquidAppear(appear, 2),
+                    modifier = Modifier.animateItem().entrance(appear, 2),
                     trailing = { SectionAction(text = "See all", onClick = onSeeAllContainers) },
                 )
             }
             item(key = "containers") {
-                GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
+                FableCard(Modifier.animateItem().entrance(appear, 3)) {
                     containers.take(5).forEachIndexed { index, container ->
                         if (index > 0) CardDivider(afterIcon = true)
                         ListRow(
-                            modifier = Modifier.liquidAppear(appear, index + 4),
+                            modifier = Modifier.entrance(appear, index + 4),
                             title = container.name,
                             subtitle = container.wineVersion,
                             icon = Icons.Outlined.Inventory2,

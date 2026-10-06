@@ -31,14 +31,14 @@ import io.harbor.fable.ui.theme.Motion
  * that want the disc without the default fill.
  */
 @Composable
-fun GlassIconButton(
+fun FableIconButton(
     icon: ImageVector,
     contentDescription: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: Dp = ControlHeight.Icon,
     tint: Color = FableText,
-    containerColor: Color = GlassLevel.Control.fill,
+    containerColor: Color = SurfaceLevel.Control.fill,
     bordered: Boolean = true,
     enabled: Boolean = true,
 ) {
@@ -50,7 +50,7 @@ fun GlassIconButton(
         label = "iconButtonPress",
     )
     val surface = if (bordered) {
-        Modifier.glassSurface(shape = CircleShape, level = GlassLevel.Control, fill = containerColor)
+        Modifier.solidSurface(shape = CircleShape, level = SurfaceLevel.Control, fill = containerColor)
     } else {
         Modifier
             .clip(CircleShape)

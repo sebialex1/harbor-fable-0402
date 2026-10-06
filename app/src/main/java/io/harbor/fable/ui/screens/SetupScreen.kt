@@ -82,6 +82,7 @@ import io.harbor.fable.ui.theme.FableBg
 import io.harbor.fable.ui.theme.FableError
 import io.harbor.fable.ui.theme.FableTextFaint
 import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.FableTrack
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.Motion
@@ -94,7 +95,7 @@ import kotlinx.coroutines.launch
 private enum class SetupStep { WELCOME, DOWNLOAD, READY }
 
 /**
- * First-open setup. Three steps on one liquid-glass canvas: a welcome that names the device,
+ * First-open setup. Three steps on a plain black canvas: a welcome that names the device,
  * a download step that shows the real progress of the recommended Wine, Box64, RADV Xclipse and
  * DXVK packages (through [io.harbor.fable.data.SetupManager]), and a ready step that hands over
  * to the app. [onFinished] is called when the user continues or skips; the caller persists it.
@@ -235,7 +236,7 @@ private fun WelcomeStep(deviceInfo: DeviceGpuInfo, onStart: () -> Unit, onSkip: 
         Spacer(Modifier.weight(1.2f))
         Staggered(index = 4) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                GlassButton(
+                FableButton(
                     text = "Set Up",
                     primary = true,
                     onClick = onStart,
@@ -341,7 +342,7 @@ private fun DownloadStep(
         }
         Spacer(Modifier.height(Spacing.xxl))
         Staggered(index = 3) {
-            GlassCard(Modifier.fillMaxWidth()) {
+            FableCard(Modifier.fillMaxWidth()) {
                 // Optional kinds (FEX) are chosen per container later, not during first-run setup.
                 val rows = RecommendedKind.entries.filter { it.required }
                 rows.forEachIndexed { index, kind ->
@@ -371,13 +372,13 @@ private fun DownloadStep(
                     label = "setupAction",
                 ) { (done, failed, missing) ->
                     when {
-                        done -> GlassButton(
+                        done -> FableButton(
                             text = if (missing) "Continue Anyway" else "Continue",
                             primary = true,
                             onClick = onContinue,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        failed -> GlassButton(
+                        failed -> FableButton(
                             text = "Try Again",
                             primary = true,
                             onClick = onRetry,
@@ -474,7 +475,7 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
             val arcSize = androidx.compose.ui.geometry.Size(size.width - inset * 2, size.height - inset * 2)
             val topLeft = Offset(inset, inset)
             drawArc(
-                color = Color.White.copy(alpha = 0.12f),
+                color = FableTrack,
                 startAngle = 0f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -536,7 +537,7 @@ private fun ReadyStep(setup: SetupState, onFinish: () -> Unit) {
         }
         Spacer(Modifier.weight(1.2f))
         Staggered(index = 3) {
-            GlassButton(
+            FableButton(
                 text = "Open Fable",
                 primary = true,
                 onClick = onFinish,

@@ -89,13 +89,13 @@ internal fun ContainersContent(
     onCreateClick: () -> Unit,
     onAddApp: () -> Unit = {},
 ) {
-    val appear = rememberLiquidAppear()
+    val appear = rememberEntrance()
 
     // Creating a container lives in the top bar only; the empty list does not repeat it.
     FableScreen(
         title = "Containers",
         actions = {
-            GlassIconButton(
+            FableIconButton(
                 icon = Icons.Outlined.Add,
                 contentDescription = "New container",
                 onClick = onCreateClick,
@@ -107,12 +107,12 @@ internal fun ContainersContent(
                 EmptyState(
                     icon = Icons.Outlined.Inventory2,
                     title = "No containers",
-                    modifier = Modifier.animateItem().liquidAppear(appear, 0),
+                    modifier = Modifier.animateItem().entrance(appear, 0),
                 )
             }
         } else {
             item(key = "list") {
-                GlassCard(Modifier.fillMaxWidth().animateItem().liquidAppear(appear, 0)) {
+                FableCard(Modifier.fillMaxWidth().animateItem().entrance(appear, 0)) {
                     containers.forEachIndexed { index, container ->
                         if (index > 0) CardDivider(afterIcon = true)
                         ListRow(
@@ -129,7 +129,7 @@ internal fun ContainersContent(
             // A short list gets one quick action that the top bar does not already offer.
             if (containers.size < 3) {
                 item(key = "quick-actions") {
-                    GlassCard(Modifier.fillMaxWidth().animateItem().liquidAppear(appear, 1)) {
+                    FableCard(Modifier.fillMaxWidth().animateItem().entrance(appear, 1)) {
                         ListRow(
                             title = "Add App",
                             titleColor = FableText,
@@ -163,14 +163,14 @@ private fun CreateContainerSheet(
         title = "New Container",
         onDismiss = onDismiss,
     ) { close ->
-        GlassTextField(
+        FableTextField(
             value = name,
             onValueChange = { name = it },
             label = "Name",
         )
 
         // All settings share one section.
-        GlassCard {
+        FableCard {
             OptionSelector(
                 label = "Resolution",
                 options = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) },
@@ -192,7 +192,7 @@ private fun CreateContainerSheet(
             )
         }
 
-        GlassButton(
+        FableButton(
             text = "Create",
             primary = true,
             enabled = name.isNotBlank(),

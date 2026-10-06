@@ -13,7 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import io.harbor.fable.ui.theme.FableSurfaceRaised
-import io.harbor.fable.ui.theme.GlassRadius
+import io.harbor.fable.ui.theme.CardRadius
 import io.harbor.fable.ui.theme.Motion
 
 /**
@@ -25,10 +25,10 @@ import io.harbor.fable.ui.theme.Motion
  * pressed, like a table cell, instead of scaling or glowing. [level] picks the material.
  */
 @Composable
-fun GlassCard(
+fun FableCard(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = GlassRadius,
-    level: GlassLevel = GlassLevel.Card,
+    cornerRadius: Dp = CardRadius,
+    level: SurfaceLevel = SurfaceLevel.Card,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -38,7 +38,7 @@ fun GlassCard(
     val fill by animateColorAsState(
         targetValue = if (pressed && onClick != null) FableSurfaceRaised else level.fill,
         animationSpec = Motion.inPlace(Motion.Fast),
-        label = "glassCardFill",
+        label = "cardFill",
     )
     val clickModifier = if (onClick != null) {
         Modifier.clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -47,7 +47,7 @@ fun GlassCard(
     }
     Column(
         modifier = modifier
-            .glassSurface(shape = shape, level = level, fill = fill)
+            .solidSurface(shape = shape, level = level, fill = fill)
             .then(clickModifier),
         content = content,
     )

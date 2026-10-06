@@ -7,6 +7,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,7 +52,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -62,15 +62,14 @@ import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.ControlRadius
 import io.harbor.fable.ui.theme.DialogRadius
 import io.harbor.fable.ui.theme.FableAccent
+import io.harbor.fable.ui.theme.FableBorder
 import io.harbor.fable.ui.theme.FableError
+import io.harbor.fable.ui.theme.HairlineStroke
 import io.harbor.fable.ui.theme.FableControl
-import io.harbor.fable.ui.theme.FableGlassShadow
-import io.harbor.fable.ui.theme.FableGlassShadowSpot
 import io.harbor.fable.ui.theme.FableOutline
 import io.harbor.fable.ui.theme.FableSurface
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
-import io.harbor.fable.ui.theme.GlassShadow
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
@@ -80,7 +79,7 @@ import kotlinx.coroutines.launch
 
 /** Outlined text field with the Fable palette. */
 @Composable
-fun GlassTextField(
+fun FableTextField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
@@ -242,7 +241,7 @@ private fun <T> OptionRow(option: SelectOption<T>, selected: Boolean, onClick: (
 }
 
 /**
- * Modal sheet in the iOS manner: a grey [GlassLevel.Sheet] pane over the dimmed screen with a
+ * Modal sheet in the iOS manner: a grey [SurfaceLevel.Sheet] pane over the dimmed screen with a
  * hairline top edge, a title, optional subtitle and scrollable content. The sheet slides up with the system animation while its content
  * fades and rises into place a beat later, so the pane arrives first and its contents settle onto it.
  *
@@ -272,17 +271,13 @@ fun FableSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = GlassLevel.Sheet.fill,
+        containerColor = SurfaceLevel.Sheet.fill,
         contentColor = FableText,
         shape = shape,
-        scrimColor = Color.Black.copy(alpha = 0.6f),
+        scrimColor = Color.Black.copy(alpha = 0.7f),
         dragHandle = null,
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .glassLight(shape, GlassLevel.Sheet),
-        ) {
+        Column(Modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 BottomSheetDefaults.DragHandle(color = FableTextDim.copy(alpha = 0.35f))
             }
@@ -323,15 +318,8 @@ fun ConfirmDialog(
     val shape = RoundedCornerShape(DialogRadius)
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier
-            .shadow(
-                elevation = GlassShadow.Overlay,
-                shape = shape,
-                ambientColor = FableGlassShadow,
-                spotColor = FableGlassShadowSpot,
-            )
-            .glassRim(shape, GlassLevel.Overlay),
-        containerColor = GlassLevel.Overlay.fill,
+        modifier = Modifier.border(HairlineStroke, FableBorder, shape),
+        containerColor = SurfaceLevel.Sheet.fill,
         titleContentColor = FableText,
         textContentColor = FableTextDim,
         shape = shape,
@@ -342,7 +330,7 @@ fun ConfirmDialog(
                 Text(
                     text = confirmLabel,
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (destructive) FableError else FableText,
+                    color = FableText,
                 )
             }
         },

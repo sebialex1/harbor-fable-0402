@@ -40,7 +40,7 @@ import io.harbor.fable.ui.theme.PillRadius
  * inline use. Pressing dims it slightly, like an iOS button, instead of a ripple or a glow.
  */
 @Composable
-fun GlassButton(
+fun FableButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -55,10 +55,10 @@ fun GlassButton(
     val pressedAlpha by animateFloatAsState(
         targetValue = if (pressed && enabled) 0.7f else 1f,
         animationSpec = Motion.inPlace(Motion.Fast),
-        label = "glassButtonPress",
+        label = "buttonPress",
     )
     val shape = RoundedCornerShape(PillRadius)
-    val fill = if (primary) FableAccent else GlassLevel.Control.fill
+    val fill = if (primary) FableAccent else SurfaceLevel.Control.fill
     val contentColor = when {
         primary -> Color.Black
         destructive -> FableError
@@ -69,7 +69,7 @@ fun GlassButton(
         modifier = modifier
             .graphicsLayer { alpha = (if (enabled) 1f else 0.4f) * pressedAlpha }
             .height(if (compact) ControlHeight.Compact else ControlHeight.Regular)
-            .glassSurface(shape = shape, level = GlassLevel.Control, fill = fill)
+            .solidSurface(shape = shape, level = SurfaceLevel.Control, fill = fill)
             .clickable(
                 interactionSource = interaction,
                 indication = null,

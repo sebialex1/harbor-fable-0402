@@ -115,7 +115,7 @@ internal fun VulkanExtensionsContent(
         title = "Vulkan Extensions",
         onBack = onBack,
         actions = {
-            GlassIconButton(
+            FableIconButton(
                 icon = Icons.Outlined.Refresh,
                 contentDescription = "Probe again",
                 enabled = !probing,
@@ -132,7 +132,7 @@ internal fun VulkanExtensionsContent(
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
                 VulkanSource.entries.forEach { candidate ->
-                    GlassChip(
+                    FableChip(
                         text = candidate.label,
                         selected = candidate == source,
                         onClick = { onSelectSource(candidate) },
@@ -176,7 +176,7 @@ internal fun VulkanExtensionsContent(
         if (result?.ok == true && result.totalCount > 0) {
             item(key = "filters") {
                 Column(Modifier.animateItem(), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    GlassTextField(
+                    FableTextField(
                         value = query,
                         onValueChange = { query = it },
                         label = "Search",
@@ -188,9 +188,9 @@ internal fun VulkanExtensionsContent(
                             .padding(horizontal = Spacing.xs),
                         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                     ) {
-                        GlassChip(text = "All", selected = family == null, onClick = { family = null })
+                        FableChip(text = "All", selected = family == null, onClick = { family = null })
                         VulkanExtensionFamily.entries.forEach { candidate ->
-                            GlassChip(
+                            FableChip(
                                 text = candidate.label,
                                 selected = family == candidate,
                                 onClick = { family = if (family == candidate) null else candidate },
@@ -248,7 +248,7 @@ private fun VulkanSummaryCard(
     probing: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    GlassCard(modifier.fillMaxWidth()) {
+    FableCard(modifier.fillMaxWidth()) {
         // Each face is a single Column: AnimatedContent lays its content out in a Box, so sibling
         // rows placed directly in the lambda would stack on top of each other.
         AnimatedContent(

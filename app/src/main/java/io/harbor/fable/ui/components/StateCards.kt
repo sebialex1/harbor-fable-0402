@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.FableTrack
 import io.harbor.fable.ui.theme.FableTextFaint
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
@@ -61,7 +62,7 @@ fun EmptyState(
 /** Inline "working on it" card. */
 @Composable
 fun LoadingCard(message: String, modifier: Modifier = Modifier) {
-    GlassCard(modifier = modifier.fillMaxWidth()) {
+    FableCard(modifier = modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -88,7 +89,7 @@ fun NoticeCard(
     modifier: Modifier = Modifier,
     tint: Color = FableTextDim,
 ) {
-    GlassCard(modifier = modifier.fillMaxWidth()) {
+    FableCard(modifier = modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -123,7 +124,7 @@ fun ThinProgressBar(
                 .fillMaxWidth()
                 .height(2.dp),
             color = color,
-            trackColor = color.copy(alpha = 0.16f),
+            trackColor = FableTrack,
             gapSize = 0.dp,
         )
     } else {
@@ -134,7 +135,7 @@ fun ThinProgressBar(
                 .fillMaxWidth()
                 .height(2.dp),
             color = color,
-            trackColor = color.copy(alpha = 0.16f),
+            trackColor = FableTrack,
             gapSize = 0.dp,
             drawStopIndicator = {},
         )

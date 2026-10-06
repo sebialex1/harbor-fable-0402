@@ -63,12 +63,12 @@ internal fun SettingsContent(
     val resolutionOptions = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) }
     val translatorOptions = TRANSLATOR_OPTIONS
     val framePacingOptions = FramePacing.entries.map { SelectOption(it, it.label) }
-    val appear = rememberLiquidAppear()
+    val appear = rememberEntrance()
 
     FableScreen(title = "Settings") {
-        item(key = "defaults-label") { SectionLabel("New Containers", Modifier.animateItem().liquidAppear(appear, 0)) }
+        item(key = "defaults-label") { SectionLabel("New Containers", Modifier.animateItem().entrance(appear, 0)) }
         item(key = "defaults") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 0)) {
+            FableCard(Modifier.animateItem().entrance(appear, 0)) {
                 InfoRow(label = "Wine", value = settings.defaultWineVersion)
                 CardDivider()
                 OptionSelector(
@@ -93,9 +93,9 @@ internal fun SettingsContent(
             }
         }
 
-        item(key = "graphics-label") { SectionLabel("Graphics", Modifier.animateItem().liquidAppear(appear, 1)) }
+        item(key = "graphics-label") { SectionLabel("Graphics", Modifier.animateItem().entrance(appear, 1)) }
         item(key = "graphics") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 1)) {
+            FableCard(Modifier.animateItem().entrance(appear, 1)) {
                 InfoRow(label = "Driver", value = settings.defaultGraphicsDriver)
                 CardDivider()
                 ToggleRow(
@@ -113,9 +113,9 @@ internal fun SettingsContent(
             }
         }
 
-        item(key = "device-label") { SectionLabel("Device", Modifier.animateItem().liquidAppear(appear, 2)) }
+        item(key = "device-label") { SectionLabel("Device", Modifier.animateItem().entrance(appear, 2)) }
         item(key = "device") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 2)) {
+            FableCard(Modifier.animateItem().entrance(appear, 2)) {
                 InfoRow(label = "GPU", value = deviceInfo.gpu)
                 CardDivider()
                 InfoRow(label = "Model", value = listOf(deviceInfo.device, deviceInfo.vendor).filter { it.isNotBlank() }.distinct().joinToString(" · "))
@@ -124,9 +124,9 @@ internal fun SettingsContent(
             }
         }
 
-        item(key = "about-label") { SectionLabel("App", Modifier.animateItem().liquidAppear(appear, 3)) }
+        item(key = "about-label") { SectionLabel("App", Modifier.animateItem().entrance(appear, 3)) }
         item(key = "about") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
+            FableCard(Modifier.animateItem().entrance(appear, 3)) {
                 ToggleRow(
                     title = "Refresh catalog on launch",
                     checked = settings.refreshCatalogOnLaunch,

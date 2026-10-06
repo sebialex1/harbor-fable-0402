@@ -133,7 +133,7 @@ fun CollapsibleSection(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, Motion.inPlace(), label = "sectionChevron")
-    GlassCard(modifier.fillMaxWidth()) {
+    FableCard(modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()

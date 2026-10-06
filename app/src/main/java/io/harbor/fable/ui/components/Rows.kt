@@ -307,7 +307,7 @@ fun Pill(
  * selected, like an iOS segmented control segment.
  */
 @Composable
-fun GlassChip(
+fun FableChip(
     text: String,
     selected: Boolean,
     onClick: () -> Unit,
