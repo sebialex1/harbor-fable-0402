@@ -297,7 +297,7 @@ private fun DownloadStep(
         if (allDone && setup.unavailable.isNotEmpty()) {
             Spacer(Modifier.height(Spacing.xs))
             Text(
-                text = "Some packages have no build yet",
+                text = "Some packages have no build",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
@@ -358,12 +358,7 @@ private fun DownloadStep(
                             onClick = onRetry,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        else -> Text(
-                            text = "Downloads continue in the background",
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),
-                        )
+                        else -> Spacer(Modifier.fillMaxWidth())
                     }
                 }
                 Spacer(Modifier.height(Spacing.sm))

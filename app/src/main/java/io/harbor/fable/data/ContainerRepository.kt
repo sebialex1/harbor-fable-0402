@@ -258,7 +258,7 @@ class ContainerRepository internal constructor(
             val exe = when {
                 exeId != null -> candidates.firstOrNull { it.id == exeId }
                 else -> candidates.firstOrNull { it.path == container.exePath } ?: candidates.firstOrNull()
-            } ?: return LaunchResult.Failed("Add an executable to launch ${container.name}")
+            } ?: return LaunchResult.Failed("Add an app first")
             container to exe
         }
         return start(container, exe)
@@ -295,7 +295,7 @@ class ContainerRepository internal constructor(
                 return@withLock Result.success(installed.build)
             }
             val archive = runtime.pickWineArchive(container.wineVersion)
-                ?: return@withLock Result.failure(IllegalStateException("Install Wine from the Assets tab first"))
+                ?: return@withLock Result.failure(IllegalStateException("Install Wine in Assets"))
             if (installed != null && installed.build == WineRuntime.buildName(archive)) {
                 return@withLock Result.success(installed.build)
             }
@@ -344,7 +344,7 @@ class ContainerRepository internal constructor(
         val configured = mutex.withLock { containersById[container.id] } ?: container
         val translator = resolveTranslator(runtime, configured, hasWine)
             .getOrElse { error -> return LaunchResult.Failed(error.message ?: "Couldn't set up the x86_64 translator") }
-        if (!hasWine) return LaunchResult.Failed("Install Wine from the Assets tab first")
+        if (!hasWine) return LaunchResult.Failed("Install Wine in Assets")
 
         // 2. Unpack Wine into the container's prefix (first launch only).
         installWine(container.id).getOrElse { error ->
@@ -360,7 +360,7 @@ class ContainerRepository internal constructor(
             arguments = listOf("/desktop=Fable,${current.screenResolution}")
         } else {
             program = runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
-                ?: return LaunchResult.Failed("Couldn't open ${exe.name}. Add it again from the container")
+                ?: return LaunchResult.Failed("Can't open ${exe.name}. Add it again")
             arguments = emptyList()
         }
         val label = exe?.name ?: "${current.name} desktop"
@@ -441,14 +441,12 @@ class ContainerRepository internal constructor(
                 )
                 FexStatus.NotDownloaded -> Result.failure(
                     IllegalStateException(
-                        "${container.name} uses FEX, which isn't installed. " +
-                            "Install FEX$wineToo from the Assets tab, or switch the container to Box64"
+                        "Install FEX$wineToo in Assets, or switch to Box64"
                     )
                 )
                 is FexStatus.NoExecutable -> Result.failure(
                     IllegalStateException(
-                        "${status.packageName} has no FEXInterpreter executable. " +
-                            "Download a different FEX build, or switch the container to Box64"
+                        "${status.packageName} has no FEXInterpreter. Try another build, or switch to Box64"
                     )
                 )
             }
@@ -462,10 +460,10 @@ class ContainerRepository internal constructor(
                     )
                 )
                 Box64Status.NotDownloaded -> Result.failure(
-                    IllegalStateException("Install Box64$wineToo from the Assets tab first")
+                    IllegalStateException("Install Box64$wineToo in Assets")
                 )
                 is Box64Status.NoExecutable -> Result.failure(
-                    IllegalStateException("${status.packageName} has no box64 executable. Download a different Box64 build")
+                    IllegalStateException("${status.packageName} has no box64. Try another build")
                 )
             }
         }

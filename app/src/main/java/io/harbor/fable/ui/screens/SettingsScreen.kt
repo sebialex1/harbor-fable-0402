@@ -66,10 +66,13 @@ internal fun SettingsContent(
     val appear = rememberEntrance()
 
     FableScreen(title = "Settings") {
+        // Two sections: what new containers start with, and the app itself.
         item(key = "defaults-label") { SectionLabel("New Containers", Modifier.animateItem().entrance(appear, 0)) }
         item(key = "defaults") {
             FableCard(Modifier.animateItem().entrance(appear, 0)) {
                 InfoRow(label = "Wine", value = settings.defaultWineVersion)
+                CardDivider()
+                InfoRow(label = "Driver", value = settings.defaultGraphicsDriver)
                 CardDivider()
                 OptionSelector(
                     label = "Resolution",
@@ -85,57 +88,45 @@ internal fun SettingsContent(
                     onSelect = { t -> onUpdate { it.copy(defaultTranslator = t) } },
                 )
                 CardDivider()
-                ToggleRow(
-                    title = "Fullscreen",
-                    checked = settings.defaultFullscreen,
-                    onCheckedChange = { fs -> onUpdate { it.copy(defaultFullscreen = fs) } },
-                )
-            }
-        }
-
-        item(key = "graphics-label") { SectionLabel("Graphics", Modifier.animateItem().entrance(appear, 1)) }
-        item(key = "graphics") {
-            FableCard(Modifier.animateItem().entrance(appear, 1)) {
-                InfoRow(label = "Driver", value = settings.defaultGraphicsDriver)
-                CardDivider()
-                ToggleRow(
-                    title = "VSync",
-                    checked = settings.vsync,
-                    onCheckedChange = { v -> onUpdate { it.copy(vsync = v) } },
-                )
-                CardDivider()
                 OptionSelector(
                     label = "Frame pacing",
                     options = framePacingOptions,
                     selected = settings.framePacing,
                     onSelect = { fp -> onUpdate { it.copy(framePacing = fp) } },
                 )
+                CardDivider()
+                ToggleRow(
+                    title = "Fullscreen",
+                    checked = settings.defaultFullscreen,
+                    onCheckedChange = { fs -> onUpdate { it.copy(defaultFullscreen = fs) } },
+                )
+                CardDivider()
+                ToggleRow(
+                    title = "VSync",
+                    checked = settings.vsync,
+                    onCheckedChange = { v -> onUpdate { it.copy(vsync = v) } },
+                )
             }
         }
 
-        item(key = "device-label") { SectionLabel("Device", Modifier.animateItem().entrance(appear, 2)) }
-        item(key = "device") {
-            FableCard(Modifier.animateItem().entrance(appear, 2)) {
+        item(key = "about-label") { SectionLabel("About", Modifier.animateItem().entrance(appear, 1)) }
+        item(key = "about") {
+            FableCard(Modifier.animateItem().entrance(appear, 1)) {
+                InfoRow(label = "Version", value = versionName)
+                CardDivider()
+                InfoRow(label = "Device", value = listOf(deviceInfo.device, deviceInfo.vendor).filter { it.isNotBlank() }.distinct().joinToString(" · "))
+                CardDivider()
                 InfoRow(label = "GPU", value = deviceInfo.gpu)
                 CardDivider()
-                InfoRow(label = "Model", value = listOf(deviceInfo.device, deviceInfo.vendor).filter { it.isNotBlank() }.distinct().joinToString(" · "))
-                CardDivider()
                 InfoRow(label = "System", value = listOf(deviceInfo.abi, "SDK ${deviceInfo.sdk}").filter { it.isNotBlank() }.joinToString(" · "))
-            }
-        }
-
-        item(key = "about-label") { SectionLabel("App", Modifier.animateItem().entrance(appear, 3)) }
-        item(key = "about") {
-            FableCard(Modifier.animateItem().entrance(appear, 3)) {
+                CardDivider()
+                InfoRow(label = "License", value = "MIT")
+                CardDivider()
                 ToggleRow(
-                    title = "Refresh catalog on launch",
+                    title = "Refresh on Launch",
                     checked = settings.refreshCatalogOnLaunch,
                     onCheckedChange = { r -> onUpdate { it.copy(refreshCatalogOnLaunch = r) } },
                 )
-                CardDivider()
-                InfoRow(label = "Version", value = versionName)
-                CardDivider()
-                InfoRow(label = "License", value = "MIT")
                 CardDivider()
                 ListRow(
                     title = "Reset Settings",

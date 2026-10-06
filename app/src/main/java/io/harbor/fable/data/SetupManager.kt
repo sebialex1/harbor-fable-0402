@@ -115,10 +115,10 @@ data class SetupResult(
                     append(". No build available for ").append(unavailable.joinToString(", ") { it.label })
                 }
             }
-            !catalogReachable && unavailable.isNotEmpty() -> "Couldn't reach the catalog. Check your connection"
+            !catalogReachable && unavailable.isNotEmpty() -> "Can't reach the catalog"
             failed.isNotEmpty() -> "Couldn't start the download for ${failed.joinToString(", ") { it.label }}"
             unavailable.isNotEmpty() -> "No build available for ${unavailable.joinToString(", ") { it.label }}"
-            else -> "Everything is already downloaded"
+            else -> "Already downloaded"
         }
 }
 

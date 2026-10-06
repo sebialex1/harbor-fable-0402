@@ -116,7 +116,7 @@ fun DriversScreen(onOpenVulkanExtensions: () -> Unit = {}) {
     pendingReplace?.let { release ->
         ConfirmDialog(
             title = "Replace active driver?",
-            message = "${installed?.tag ?: "The current driver"} will be removed and ${release.tag} becomes the active driver. Only one driver can be active at a time.",
+            message = "${installed?.tag ?: "The current driver"} will be removed.",
             confirmLabel = "Replace",
             onConfirm = {
                 pendingReplace = null
@@ -129,14 +129,14 @@ fun DriversScreen(onOpenVulkanExtensions: () -> Unit = {}) {
     if (confirmUninstall) {
         ConfirmDialog(
             title = "Uninstall driver?",
-            message = "${installed?.tag ?: "The active driver"} will be removed. Containers fall back to the system Vulkan driver until another release is installed. Downloaded packages are kept.",
+            message = "Containers will use the system driver.",
             confirmLabel = "Uninstall",
             destructive = true,
             onConfirm = {
                 confirmUninstall = false
                 fableUi.scope.launch {
                     val removed = repository.uninstall()
-                    fableUi.showMessage(if (removed != null) "Removed ${removed.tag}" else "No driver was installed")
+                    fableUi.showMessage(if (removed != null) "Removed ${removed.tag}" else "No driver installed")
                 }
             },
             onDismiss = { confirmUninstall = false },

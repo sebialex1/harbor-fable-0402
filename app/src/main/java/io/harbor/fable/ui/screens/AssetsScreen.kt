@@ -166,7 +166,6 @@ internal fun AssetsContent(
                 EmptyState(
                     icon = Icons.Outlined.Download,
                     title = "No assets",
-                    message = "Refresh to load the catalog",
                     modifier = Modifier.animateItem().entrance(appear, 1),
                 )
             }

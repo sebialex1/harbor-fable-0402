@@ -41,7 +41,7 @@ sealed interface DriverInstallResult {
                 "Installed ${driver.tag}"
             }
             is Failed -> reason
-            Busy -> "Another driver is still being installed"
+            Busy -> "Another install is running"
         }
 }
 
