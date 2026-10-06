@@ -12,7 +12,7 @@ private val FableColorScheme = darkColorScheme(
     surface = FableSurface,
     surfaceTint = Color.Transparent,
     surfaceVariant = FableSurfaceRaised,
-    onPrimary = Color.White,
+    onPrimary = Color.Black,
     onSecondary = FableText,
     onBackground = FableText,
     onSurface = FableText,
@@ -24,7 +24,7 @@ private val FableColorScheme = darkColorScheme(
 
 @Composable
 fun FableTheme(content: @Composable () -> Unit) {
-    // Always dark: the glass surfaces are charcoal on a near-black canvas.
+    // Always dark: grey grouped surfaces on a true-black OLED canvas.
     MaterialTheme(
         colorScheme = FableColorScheme,
         typography = FableTypography,

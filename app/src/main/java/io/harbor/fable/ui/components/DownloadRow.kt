@@ -36,7 +36,7 @@ internal fun displayAssetName(fileName: String): String {
 
 /**
  * A catalog row with a live download state. The trailing control animates between the
- * download button, a progress pill and the "Ready" check as the [task] moves along, and a thin
+ * download button, the progress and a quiet "Downloaded" as the [task] moves along, and a thin
  * progress line runs along the bottom edge while bytes are coming in.
  */
 @Composable
@@ -44,7 +44,6 @@ fun DownloadRow(
     title: String,
     version: String,
     sizeBytes: Long,
-    icon: ImageVector,
     isDownloaded: Boolean,
     task: DownloadTask?,
     onDownload: () -> Unit,
@@ -83,8 +82,6 @@ fun DownloadRow(
         ListRow(
             title = displayAssetName(title),
             subtitle = subtitle,
-            icon = icon,
-            iconTint = if (done) FableSuccess else FableAccent,
             showChevron = false,
             trailing = {
                 AnimatedContent(
@@ -102,10 +99,10 @@ fun DownloadRow(
                             size = 32.dp,
                             onClick = onDownload,
                         )
-                        DownloadUi.QUEUED -> Pill(text = "Queued", color = FableAccent)
-                        DownloadUi.DOWNLOADING -> Pill(text = "$percent%", color = FableAccent)
-                        DownloadUi.VERIFYING -> Pill(text = "Verifying", color = FableAccent)
-                        DownloadUi.DONE -> Pill(text = "Ready", color = FableSuccess, icon = Icons.Outlined.Check)
+                        DownloadUi.QUEUED -> StateText("Queued")
+                        DownloadUi.DOWNLOADING -> StateText("$percent%")
+                        DownloadUi.VERIFYING -> StateText("Verifying")
+                        DownloadUi.DONE -> StateText("Downloaded")
                     }
                 }
             },

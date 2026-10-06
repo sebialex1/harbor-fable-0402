@@ -38,29 +38,34 @@ private fun style(
 )
 
 /**
- * Type scale. Screens use these styles (via `MaterialTheme.typography`) instead of ad-hoc
- * font sizes:
+ * Type scale, sized after the iOS text styles (Large Title, Headline, Body, Subheadline,
+ * Footnote) and set in Inter. Weight does little of the work: titles are Medium, everything else
+ * Regular, and hierarchy comes from size and the grey label colours.
  *
- * - headlineLarge / headlineMedium — screen and sheet titles, 20sp Medium
- * - titleMedium — section labels and empty-state titles, 16sp Medium
- * - titleSmall  — list row titles, 14sp Medium
- * - bodyLarge   — input text, 14sp Regular
- * - bodyMedium  — values and messages, 13sp Regular
- * - bodySmall   — subtitles and metadata, 12sp Light
- * - labelLarge  — buttons, 14sp Medium
- * - labelMedium / labelSmall — links and pills, 12sp / 11sp Medium
+ * - displaySmall   — large screen title, 32sp Medium
+ * - headlineLarge  — large title on tabs, 32sp Medium
+ * - headlineMedium — inline (collapsed) bar title and sheet titles, 17sp Medium
+ * - titleLarge     — dialog titles, 20sp Medium
+ * - titleMedium    — emphasised row titles, 17sp Medium
+ * - titleSmall     — list row titles, 16sp Regular
+ * - bodyLarge      — input text and values, 16sp Regular
+ * - bodyMedium     — secondary values and messages, 15sp Regular grey
+ * - bodySmall      — subtitles and footnotes, 13sp Regular grey
+ * - labelLarge     — buttons, 16sp Medium
+ * - labelMedium / labelSmall — section headers, links and tags, 13sp / 12sp
  */
 val FableTypography = Typography(
-    headlineLarge = style(FontWeight.Medium, 20.sp, 24.sp, letterSpacing = (-0.2).sp),
-    headlineMedium = style(FontWeight.Medium, 20.sp, 24.sp, letterSpacing = (-0.2).sp),
-    headlineSmall = style(FontWeight.Medium, 18.sp, 22.sp),
-    titleLarge = style(FontWeight.Medium, 18.sp, 22.sp),
-    titleMedium = style(FontWeight.Medium, 16.sp, 20.sp),
-    titleSmall = style(FontWeight.Medium, 14.sp, 18.sp),
-    bodyLarge = style(FontWeight.Normal, 14.sp, 19.sp),
-    bodyMedium = style(FontWeight.Normal, 13.sp, 17.sp, color = FableTextDim),
-    bodySmall = style(FontWeight.Light, 12.sp, 15.sp, color = FableTextDim),
-    labelLarge = style(FontWeight.Medium, 14.sp, 18.sp),
-    labelMedium = style(FontWeight.Medium, 12.sp, 16.sp, color = FableTextDim),
-    labelSmall = style(FontWeight.Medium, 11.sp, 14.sp, color = FableTextDim),
+    displaySmall = style(FontWeight.Medium, 32.sp, 38.sp, letterSpacing = (-0.6).sp),
+    headlineLarge = style(FontWeight.Medium, 32.sp, 38.sp, letterSpacing = (-0.6).sp),
+    headlineMedium = style(FontWeight.Medium, 17.sp, 22.sp, letterSpacing = (-0.2).sp),
+    headlineSmall = style(FontWeight.Medium, 20.sp, 25.sp, letterSpacing = (-0.3).sp),
+    titleLarge = style(FontWeight.Medium, 20.sp, 25.sp, letterSpacing = (-0.3).sp),
+    titleMedium = style(FontWeight.Medium, 17.sp, 22.sp, letterSpacing = (-0.2).sp),
+    titleSmall = style(FontWeight.Normal, 16.sp, 21.sp, letterSpacing = (-0.2).sp),
+    bodyLarge = style(FontWeight.Normal, 16.sp, 21.sp, letterSpacing = (-0.2).sp),
+    bodyMedium = style(FontWeight.Normal, 15.sp, 20.sp, color = FableTextDim, letterSpacing = (-0.1).sp),
+    bodySmall = style(FontWeight.Normal, 13.sp, 17.sp, color = FableTextDim),
+    labelLarge = style(FontWeight.Medium, 16.sp, 21.sp, letterSpacing = (-0.2).sp),
+    labelMedium = style(FontWeight.Normal, 13.sp, 17.sp, color = FableTextDim),
+    labelSmall = style(FontWeight.Medium, 12.sp, 15.sp, color = FableTextDim),
 )

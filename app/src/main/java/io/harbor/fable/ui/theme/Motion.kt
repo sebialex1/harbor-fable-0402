@@ -18,7 +18,7 @@ object Motion {
     const val Quick = 220
     const val Standard = 320
     const val Slow = 440
-    const val Entrance = 560
+    const val Entrance = 400
 
     /** Decelerating "settle" for things entering the screen. */
     val EaseOut: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f)
@@ -41,12 +41,12 @@ object Motion {
     fun <T> inPlace(duration: Int = Quick, delay: Int = 0): TweenSpec<T> =
         tween(durationMillis = duration, delayMillis = delay, easing = EaseInOut)
 
-    /** Press feedback: quick, a little bouncy. */
-    fun <T> press(): SpringSpec<T> = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow)
+    /** Press feedback: quick, barely any bounce. */
+    fun <T> press(): SpringSpec<T> = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium)
 
     /** Soft, non-bouncy spring for layout and position changes. */
     fun <T> settle(): SpringSpec<T> = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow)
 
-    /** Playful spring for things popping into view. */
-    fun <T> pop(): SpringSpec<T> = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium)
+    /** Gentle spring for things popping into view; no visible wobble. */
+    fun <T> pop(): SpringSpec<T> = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium)
 }

@@ -37,8 +37,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableBg
@@ -48,85 +49,70 @@ import io.harbor.fable.ui.theme.ScreenPadding
 import io.harbor.fable.ui.theme.Spacing
 
 /**
- * Pinned top bar used by every screen.
+ * iOS-style navigation bar used by every screen.
  *
- * Tab screens show a large [title]; pushed screens pass [onBack] and get a back button
- * with a smaller title. [actions] render at the end (e.g. the settings gear). The bar is a
- * translucent wash of the canvas colour, so the liquid backdrop glows faintly through it and
- * content scrolling underneath dims instead of cutting off; a hairline appears once scrolled.
+ * Tab screens show their title large at the top of the list (see [FableScreen]); the bar then
+ * carries only the actions, and a compact centred title fades in once the large one scrolls
+ * away ([showInlineTitle]). Pushed screens pass [onBack] and always show the inline title. The
+ * bar is the black canvas itself; a hairline appears under it once content scrolls beneath.
  */
 @Composable
 fun FableTopBar(
     title: String,
     modifier: Modifier = Modifier,
-    subtitle: String? = null,
     onBack: (() -> Unit)? = null,
     showDivider: Boolean = false,
+    showInlineTitle: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val dividerAlpha by animateFloatAsState(if (showDivider) 1f else 0f, Motion.inPlace(), label = "topBarDivider")
+    val titleAlpha by animateFloatAsState(if (showInlineTitle) 1f else 0f, Motion.inPlace(Motion.Fast), label = "topBarTitle")
     Column(
         modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    0f to FableBg.copy(alpha = 0.96f),
-                    1f to FableBg.copy(alpha = 0.88f),
-                ),
-            )
+            .background(FableBg)
             .statusBarsPadding(),
     ) {
-        Row(
+        Box(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = 52.dp)
-                .padding(
-                    start = if (onBack != null) ScreenPadding else ScreenPadding + Spacing.sm,
-                    end = ScreenPadding,
-                    top = Spacing.sm,
-                    bottom = Spacing.sm,
-                ),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(horizontal = ScreenPadding, vertical = Spacing.sm),
+            contentAlignment = Alignment.Center,
         ) {
-            if (onBack != null) {
-                GlassIconButton(
-                    icon = Icons.AutoMirrored.Outlined.ArrowBack,
-                    contentDescription = "Back",
-                    onClick = onBack,
-                )
-                Spacer(Modifier.width(Spacing.md))
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = if (onBack == null) {
-                        MaterialTheme.typography.headlineLarge
-                    } else {
-                        MaterialTheme.typography.headlineMedium
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (!subtitle.isNullOrBlank()) {
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .padding(horizontal = 96.dp)
+                    .graphicsLayer { alpha = titleAlpha },
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (onBack != null) {
+                    GlassIconButton(
+                        icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onBack,
                     )
                 }
+                Spacer(Modifier.weight(1f))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = actions,
+                )
             }
-            Spacer(Modifier.width(Spacing.sm))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
-                content = actions,
-            )
         }
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(1.dp)
+                .height(0.5.dp)
                 .graphicsLayer { alpha = dividerAlpha }
                 .background(FableDivider),
         )
@@ -134,13 +120,15 @@ fun FableTopBar(
 }
 
 /**
- * Standard screen layout: the liquid backdrop, [FableTopBar] and a lazy list with consistent
- * padding. Every screen carries its own (static, identical) backdrop so the glass panes have
- * light behind them and screens stay opaque to each other during navigation transitions.
+ * Standard screen layout: the black canvas, [FableTopBar] and a lazy list with 16dp margins.
+ *
+ * Tab screens (no [onBack]) open with a large title as the first list item, which scrolls away
+ * under the bar while the inline title fades in, as in iOS. [subtitle], when given, sits under
+ * the large title in grey.
  *
  * Bottom padding always includes the navigation-bar inset plus [LocalDockClearance], so
- * the last item is never hidden behind the floating dock. Content items are spaced by
- * [Spacing.sm]; use `SectionLabel` to start a new group. Give items a stable `key` and apply
+ * the last item is never hidden behind the floating tab bar. Items are spaced by [Spacing.sm];
+ * use `SectionLabel` to start a new group. Give items a stable `key` and apply
  * `Modifier.animateItem()` so insertions, removals and reordering animate.
  */
 @Composable
@@ -155,8 +143,14 @@ fun FableScreen(
 ) {
     val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val bottomPadding = LocalDockClearance.current + navigationBottom + Spacing.lg
+    val largeTitle = onBack == null
+    val density = LocalDensity.current
+    val largeTitleGone = with(density) { LargeTitleCollapse.toPx() }
     val scrolled by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
+    }
+    val pastLargeTitle by remember(listState, largeTitleGone) {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > largeTitleGone }
     }
 
     Box(
@@ -164,7 +158,6 @@ fun FableScreen(
             .fillMaxSize()
             .background(FableBg),
     ) {
-        LiquidBackdrop(intensity = ShellBackdropIntensity, animated = false)
         Column(
             Modifier
                 .fillMaxSize()
@@ -172,9 +165,9 @@ fun FableScreen(
         ) {
             FableTopBar(
                 title = title,
-                subtitle = subtitle,
                 onBack = onBack,
                 showDivider = scrolled,
+                showInlineTitle = !largeTitle || pastLargeTitle,
                 actions = actions,
             )
             LazyColumn(
@@ -185,16 +178,36 @@ fun FableScreen(
                 contentPadding = PaddingValues(
                     start = ScreenPadding,
                     end = ScreenPadding,
-                    // Enough breathing room that the first card does not sit glued to the top bar.
-                    top = Spacing.md,
+                    // Breathing room so the first section never sits glued to the bar.
+                    top = if (largeTitle) 0.dp else Spacing.md,
                     bottom = bottomPadding,
                 ),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-                content = content,
-            )
+            ) {
+                if (largeTitle || !subtitle.isNullOrBlank()) {
+                    item(key = LargeTitleKey) {
+                        Column(Modifier.fillMaxWidth().padding(bottom = Spacing.xs)) {
+                            if (largeTitle) {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.headlineLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (!subtitle.isNullOrBlank()) {
+                                Text(subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+                content()
+            }
         }
     }
 }
 
-/** How strongly the liquid light shows behind list screens; the setup screen uses 1f. */
-const val ShellBackdropIntensity = 0.42f
+/** How far the large title scrolls before the inline title takes over. */
+private val LargeTitleCollapse = 30.dp
+
+private const val LargeTitleKey = "fable-large-title"

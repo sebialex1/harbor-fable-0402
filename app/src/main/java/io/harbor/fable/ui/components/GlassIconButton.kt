@@ -25,10 +25,10 @@ import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.Motion
 
 /**
- * Circular glass icon button used for top-bar actions (back, refresh, add) and compact inline
- * actions such as the download and play buttons on rows. With [bordered] the button is a small
- * pane of glass (sheen and rim light); without it, a flat disc of [containerColor] for filled
- * accent buttons.
+ * Circular icon button for top-bar actions (back, refresh, add) and compact inline actions such
+ * as the download and play buttons on rows: a neutral grey disc that dims while pressed. Pass
+ * [containerColor] for a filled variant (white play buttons); [bordered] is kept for callers
+ * that want the disc without the default fill.
  */
 @Composable
 fun GlassIconButton(
@@ -44,40 +44,23 @@ fun GlassIconButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val pressedNow = pressed && enabled
-    val scale by animateFloatAsState(
-        targetValue = if (pressedNow) 0.9f else 1f,
-        animationSpec = Motion.press(),
-        label = "iconButtonScale",
-    )
-    val lift by animateFloatAsState(
-        targetValue = if (pressedNow) 1f else 0f,
+    val pressedAlpha by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.6f else 1f,
         animationSpec = Motion.inPlace(Motion.Fast),
-        label = "iconButtonLift",
+        label = "iconButtonPress",
     )
     val surface = if (bordered) {
-        Modifier.glassSurface(
-            shape = CircleShape,
-            level = GlassLevel.Control,
-            fill = containerColor,
-            sheenAlpha = GlassLevel.Control.sheen + 0.08f * lift,
-        )
+        Modifier.glassSurface(shape = CircleShape, level = GlassLevel.Control, fill = containerColor)
     } else {
         Modifier
             .clip(CircleShape)
             .background(containerColor)
-            .background(GlassSheen)
-            .background(Color.White.copy(alpha = 0.14f * lift))
     }
 
     Box(
         modifier = modifier
             .size(size)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                alpha = if (enabled) 1f else 0.4f
-            }
+            .graphicsLayer { alpha = (if (enabled) 1f else 0.35f) * pressedAlpha }
             .then(surface)
             .clickable(
                 interactionSource = interaction,
@@ -92,7 +75,7 @@ fun GlassIconButton(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = tint,
-            modifier = Modifier.size(size * 0.5f),
+            modifier = Modifier.size(size * 0.52f),
         )
     }
 }

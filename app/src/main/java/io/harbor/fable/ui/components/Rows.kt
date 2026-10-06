@@ -38,8 +38,8 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.runtime.getValue
 import io.harbor.fable.data.models.ContainerStatus
-import io.harbor.fable.ui.theme.FableSuccess
-import io.harbor.fable.ui.theme.FableWarn
+import io.harbor.fable.ui.theme.FableError
+import io.harbor.fable.ui.theme.FableSurfaceRaised
 import io.harbor.fable.ui.theme.ChipRadius
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableAccentLight
@@ -53,27 +53,25 @@ import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
 
-/** Rounded square with a tinted icon — the leading visual of list rows. */
+/**
+ * Leading visual of list rows: a small grey rounded square with a white glyph, like the icons in
+ * iOS Settings but without the colour coding. [tint] colours the glyph only.
+ */
 @Composable
 fun IconTile(
     icon: ImageVector,
     modifier: Modifier = Modifier,
-    tint: Color = FableAccent,
-    size: Dp = 34.dp,
+    tint: Color = FableText,
+    size: Dp = RowIconSize,
 ) {
-    val shape = RoundedCornerShape(ChipRadius + 2.dp)
     Box(
         modifier
             .size(size)
-            .clip(shape)
-            .background(tint.copy(alpha = 0.14f))
-            .background(
-                Brush.verticalGradient(listOf(tint.copy(alpha = 0.10f), Color.Transparent)),
-            )
-            .glassRim(shape, GlassLevel.Control, tint.copy(alpha = 0.7f)),
+            .clip(RoundedCornerShape(ChipRadius))
+            .background(FableSurfaceRaised),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.52f))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.6f))
     }
 }
 
@@ -99,7 +97,7 @@ fun ListRow(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     icon: ImageVector? = null,
-    iconTint: Color = FableAccent,
+    iconTint: Color = FableText,
     titleColor: Color = FableText,
     onClick: (() -> Unit)? = null,
     showChevron: Boolean = onClick != null,
@@ -112,7 +110,7 @@ fun ListRow(
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = 44.dp)
             .then(clickModifier)
             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
         verticalAlignment = Alignment.CenterVertically,
@@ -242,7 +240,7 @@ fun ToggleRow(
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
+            .heightIn(min = 44.dp)
             .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
         verticalAlignment = Alignment.CenterVertically,
@@ -261,26 +259,26 @@ fun ToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = null,
-            modifier = Modifier.scale(0.88f),
+            modifier = Modifier.scale(0.85f),
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
+                checkedThumbColor = Color.Black,
                 checkedTrackColor = FableAccent,
                 checkedBorderColor = FableAccent,
                 uncheckedThumbColor = FableTextDim,
                 uncheckedTrackColor = FableControl,
-                uncheckedBorderColor = FableControlBorder,
+                uncheckedBorderColor = FableControl,
             ),
         )
     }
 }
 
-/** Small rounded label: version badges, statuses, counts. */
+/** Small grey tag: version badges, counts. Monochrome; the text carries the meaning. */
 @Composable
 fun Pill(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = FableTextDim,
-    containerColor: Color = color.copy(alpha = 0.14f),
+    containerColor: Color = FableSurfaceRaised,
     icon: ImageVector? = null,
 ) {
     Row(
@@ -304,7 +302,10 @@ fun Pill(
     }
 }
 
-/** Selectable glass chip (resolution presets, type filters). */
+/**
+ * Selectable chip (variant pickers, presets): grey when idle, white with black text when
+ * selected, like an iOS segmented control segment.
+ */
 @Composable
 fun GlassChip(
     text: String,
@@ -312,33 +313,28 @@ fun GlassChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(ChipRadius + 2.dp)
+    val shape = RoundedCornerShape(PillRadius)
     val fill by animateColorAsState(
-        targetValue = if (selected) FableAccent.copy(alpha = 0.26f) else GlassLevel.Control.fill,
-        animationSpec = Motion.inPlace(),
+        targetValue = if (selected) FableAccent else FableSurfaceRaised,
+        animationSpec = Motion.inPlace(Motion.Fast),
         label = "chipFill",
     )
     val textColor by animateColorAsState(
-        targetValue = if (selected) FableText else FableTextDim,
-        animationSpec = Motion.inPlace(),
+        targetValue = if (selected) Color.Black else FableText,
+        animationSpec = Motion.inPlace(Motion.Fast),
         label = "chipText",
     )
     Box(
         modifier
-            .glassSurface(
-                shape = shape,
-                level = GlassLevel.Control,
-                fill = fill,
-                sheenColor = if (selected) FableAccentLight else Color.White,
-                sheenAlpha = if (selected) 0.14f else GlassLevel.Control.sheen,
-            )
+            .clip(shape)
+            .background(fill)
             .clickable(role = Role.RadioButton, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             color = textColor,
             maxLines = 1,
         )
@@ -349,15 +345,20 @@ fun GlassChip(
 internal fun containerStatusLabel(status: ContainerStatus): String = status.name.lowercase()
 
 internal fun containerStatusColor(status: ContainerStatus): Color = when (status) {
-    ContainerStatus.READY, ContainerStatus.RUNNING -> FableSuccess
-    ContainerStatus.ERROR -> FableWarn
-    else -> FableAccent
+    ContainerStatus.RUNNING -> FableText
+    ContainerStatus.ERROR -> FableError
+    else -> FableTextDim
 }
 
-/** Container state as a pill. A change of state crossfades instead of snapping. */
+/** Container state as quiet grey text. A change of state crossfades instead of snapping. */
 @Composable
 fun StatusPill(status: ContainerStatus, modifier: Modifier = Modifier) {
     Crossfade(targetState = status, label = "containerStatus", modifier = modifier) { current ->
-        Pill(text = containerStatusLabel(current), color = containerStatusColor(current))
+        Text(
+            text = containerStatusLabel(current).replaceFirstChar { it.uppercase() },
+            style = MaterialTheme.typography.bodyMedium,
+            color = containerStatusColor(current),
+            maxLines = 1,
+        )
     }
 }

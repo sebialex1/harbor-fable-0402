@@ -2,64 +2,68 @@ package io.harbor.fable.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Premium dark palette: a near-black canvas, liquid light drifting behind it, and panes of
-// charcoal glass on top. Glass is never fully opaque; the light behind it is what makes it glass.
-val FableBg = Color(0xFF0B0B0E)
+// Monochrome OLED palette, modelled on the iOS dark system colours: a true-black canvas, grouped
+// surfaces one step up in grey, and white as the only emphasis. There are no hues in the UI; the
+// single exception is [FableError], reserved for destructive actions and real failures.
 
-/** Opaque reference tones the glass fills are derived from. Use the glass colours for surfaces. */
-val FableSurface = Color(0xFF151518)
-val FableSurfaceRaised = Color(0xFF1D1D22)
+/** True black canvas, so OLED pixels are off behind the content. */
+val FableBg = Color(0xFF000000)
 
-// --- Glass fills, from the canvas up. Alpha is the depth cue: each level is a touch more solid.
+/** Grouped-list surface (iOS secondarySystemGroupedBackground). */
+val FableSurface = Color(0xFF1C1C1E)
 
-/** Cards and rows: charcoal at 78%, so the liquid light behind shows through the pane. */
-val FableGlass = Color(0xC71A1A1F)
+/** One step above a grouped surface: controls, chips and tiles on a card (iOS tertiary). */
+val FableSurfaceRaised = Color(0xFF2C2C2E)
 
-/** Controls on a card (buttons, chips, icon buttons): a lift of white rather than more charcoal. */
-val FableGlassRaised = Color(0x1AFFFFFF)
+// --- Materials. Opaque surfaces sit in lists; only chrome floating over moving content (the tab
+// bar, the top bar, sheets) is translucent, and those are blurred where the platform can.
 
-/** Chrome floating over scrolling content (the dock): 90%, content stays legible underneath. */
-val FableGlassDeep = Color(0xE616161A)
+/** Rows and grouped sections. Opaque: nothing moves behind a list section. */
+val FableGlass = FableSurface
 
-/** Sheets, dialogs and snackbars: 94%, the topmost pane. */
-val FableGlassSheet = Color(0xF0191920)
+/** Controls on a surface (secondary buttons, chips, icon buttons): a neutral lift of white. */
+val FableGlassRaised = Color(0x24FFFFFF)
 
-/** Shadow colours for glass panes: ambient is broad and faint, spot is tighter and deeper. */
+/** Chrome over scrolling content (tab bar). Dark, mostly opaque material; blur fills the rest. */
+val FableGlassDeep = Color(0xC7161618)
+
+/** Sheets, dialogs and snackbars. */
+val FableGlassSheet = Color(0xFF1C1C1E)
+
+/** Shadow colours for floating panes. On true black they only soften the edge. */
 val FableGlassShadow = Color(0x66000000)
-val FableGlassShadowSpot = Color(0xB3000000)
+val FableGlassShadowSpot = Color(0x99000000)
 
-/** Hairline between rows that share a pane. */
-val FableDivider = Color(0x0FFFFFFF)
+/** Hairline between rows that share a section (iOS separator). */
+val FableDivider = Color(0xFF38383A)
 
-/**
- * Edge of text fields and other outlines that must read as interactive. Glass panes have no
- * border (see `Modifier.glassRim`); this is for Material components that insist on one.
- */
-val FableOutline = Color(0x29FFFFFF)
+/** Outline for text fields and other controls that must read as interactive. */
+val FableOutline = Color(0x33FFFFFF)
 
-/** Kept for Material components that take a flat container/border pair (switch tracks). */
-val FableControl = FableGlassRaised
-val FableControlBorder = Color(0x1AFFFFFF)
-val FableGlassBorder = Color(0x0FFFFFFF)
+/** Material components that take a flat container/border pair (switch tracks). */
+val FableControl = Color(0xFF39393D)
+val FableControlBorder = Color(0x00000000)
+val FableGlassBorder = Color(0x1AFFFFFF)
 
-// --- Accent and semantic colours.
-val FableAccent = Color(0xFF7C5CFF)
-val FableAccentLight = Color(0xFF9F8BFF)
-val FableAccentDim = Color(0xFF4A3A8A)
+// --- Emphasis. White is the accent: primary buttons, selection, progress.
+val FableAccent = Color(0xFFFFFFFF)
+val FableAccentLight = Color(0xFFE5E5EA)
+val FableAccentDim = Color(0xFF8E8E93)
 
-/** Secondary hues for the liquid backdrop; chosen to sit next to the accent, not compete with it. */
-val FableLiquidBlue = Color(0xFF3B7BF6)
-val FableLiquidMagenta = Color(0xFFE879F9)
-val FableLiquidTeal = Color(0xFF2DD4BF)
+/** Label colours (iOS label / secondaryLabel / tertiaryLabel on black). */
+val FableText = Color(0xFFFFFFFF)
+val FableTextDim = Color(0xFF8E8E93)
+val FableTextFaint = Color(0xFF636366)
 
-val FableText = Color(0xFFF2F2F5)
-val FableTextDim = Color(0xFF8E8E99)
-val FableSuccess = Color(0xFF4ADE80)
-val FableWarn = Color(0xFFFBBF24)
-val FableError = Color(0xFFF0525B)
+/** Status tones. Success and warning are greys: the words carry the meaning, not the colour. */
+val FableSuccess = FableTextDim
+val FableWarn = Color(0xFFD1D1D6)
 
-// Dock items.
+/** The one hue: destructive actions and failures only (iOS systemRed, dark). */
+val FableError = Color(0xFFFF453A)
+
+// Tab bar.
 val DockBg = FableGlassDeep
-val DockBorder = FableControlBorder
-val DockItemActive = FableAccent
-val DockItemIdle = Color(0xFF74747F)
+val DockBorder = FableGlassBorder
+val DockItemActive = FableText
+val DockItemIdle = Color(0xFF7C7C80)

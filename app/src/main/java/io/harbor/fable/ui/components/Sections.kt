@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,20 +40,25 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableDivider
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
+import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
 
-private val LabelTopPadding = 6.dp
+private val LabelTopPadding = 18.dp
+
+/** Size of the leading [IconTile] in list rows. */
+internal val RowIconSize = 30.dp
 
 /**
- * Quiet, dimmed heading that starts a group of rows. The group's rows share one card below it,
- * so sections read as one flowing list rather than separate floating panels. The small top
- * padding, combined with the list's item spacing, separates groups.
+ * iOS-style grouped-list header: small uppercase grey text aligned with the row titles below.
+ * The group's rows share one section card under it. The top padding, together with the list's
+ * item spacing, separates groups.
  */
 @Composable
 fun SectionLabel(
@@ -63,12 +69,12 @@ fun SectionLabel(
     Row(
         modifier
             .fillMaxWidth()
-            .padding(top = LabelTopPadding, start = Spacing.sm, end = Spacing.xs),
+            .padding(top = LabelTopPadding, start = RowPaddingHorizontal, end = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = text,
-            style = MaterialTheme.typography.titleMedium,
+            text = text.uppercase(),
+            style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.2.sp),
             color = FableTextDim,
             modifier = Modifier.weight(1f),
         )
@@ -76,13 +82,13 @@ fun SectionLabel(
     }
 }
 
-/** Accent text action placed at the end of a [SectionLabel] ("Expand all", "See all"). */
+/** Text action placed at the end of a [SectionLabel] ("See all"). */
 @Composable
 fun SectionAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelMedium,
-        color = FableAccent,
+        color = FableText,
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable(role = Role.Button, onClick = onClick)
@@ -91,24 +97,30 @@ fun SectionAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifi
 }
 
 /**
- * Hairline divider between rows inside a card. Inset by default so the rows read as one
- * continuous surface; the line stops short of the card edge on both sides.
+ * Hairline separator between rows inside a section. Like iOS it starts at the row text and runs
+ * to the trailing edge; [inset] off makes it full width, [afterIcon] starts it past a row's
+ * leading [IconTile] so it lines up with the titles.
  */
 @Composable
-fun CardDivider(modifier: Modifier = Modifier, inset: Boolean = true) {
+fun CardDivider(modifier: Modifier = Modifier, inset: Boolean = true, afterIcon: Boolean = false) {
+    val start = when {
+        afterIcon -> RowPaddingHorizontal + RowIconSize + Spacing.md
+        inset -> RowPaddingHorizontal
+        else -> 0.dp
+    }
     Box(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = if (inset) RowPaddingHorizontal else 0.dp)
+            .padding(start = start)
             .height(0.5.dp)
             .background(FableDivider),
     )
 }
 
 /**
- * One glass surface for a collapsible group: the header row (title, optional [badge] such as a
- * count, rotating chevron) is the top of the card and toggles it; the rows flow directly below a
- * hairline inside the same card. There is no card inside a card and no floating label, so a
+ * One section for a collapsible group: the header row (title, optional [badge] such as a
+ * count, rotating chevron) is the top of the section and toggles it; the rows flow directly below
+ * a hairline inside the same section. There is no card inside a card and no floating label, so a
  * collapsed group is one quiet row and an expanded one is a single continuous surface.
  */
 @Composable
@@ -126,13 +138,14 @@ fun CollapsibleSection(
             Modifier
                 .fillMaxWidth()
                 .clickable(role = Role.Button, onClick = onToggle)
-                .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.md),
+                .heightIn(min = 44.dp)
+                .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
-                color = if (expanded) FableText else FableTextDim,
+                color = FableText,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),

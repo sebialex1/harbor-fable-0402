@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
@@ -30,12 +31,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.DockItemActive
 import io.harbor.fable.ui.theme.DockItemIdle
-import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.Motion
 
 /**
- * Dock item: icon and label that light up when active. Selecting a tab springs the icon up a
- * little; pressing settles the whole item. Width comes from the caller (the dock gives every
+ * Tab bar item: icon and label, white when active and grey otherwise, on a faint neutral
+ * highlight; pressing settles the whole item a touch. Width comes from the caller (the dock gives every
  * item an equal weight).
  */
 @Composable
@@ -49,19 +49,14 @@ fun GlassDockItem(
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
-        targetValue = if (pressed) 0.92f else 1f,
+        targetValue = if (pressed) 0.96f else 1f,
         animationSpec = Motion.press(),
         label = "dockPress",
     )
-    val iconScale by animateFloatAsState(
-        targetValue = if (active) 1.12f else 1f,
-        animationSpec = Motion.pop(),
-        label = "dockIconScale",
-    )
-    val glow by animateFloatAsState(
+    val highlight by animateFloatAsState(
         targetValue = if (active) 1f else 0f,
         animationSpec = Motion.inPlace(),
-        label = "dockGlow",
+        label = "dockHighlight",
     )
     val tint by animateColorAsState(
         targetValue = if (active) DockItemActive else DockItemIdle,
@@ -77,7 +72,7 @@ fun GlassDockItem(
                 scaleY = pressScale
             }
             .clip(RoundedCornerShape(20.dp))
-            .background(FableAccent.copy(alpha = 0.14f * glow))
+            .background(Color.White.copy(alpha = 0.10f * highlight))
             .semantics { selected = active }
             .clickable(
                 interactionSource = interactionSource,
@@ -93,11 +88,7 @@ fun GlassDockItem(
             contentDescription = null,
             tint = tint,
             modifier = Modifier
-                .size(22.dp)
-                .graphicsLayer {
-                    scaleX = iconScale
-                    scaleY = iconScale
-                },
+                .size(22.dp),
         )
         Spacer(Modifier.height(3.dp))
         Text(

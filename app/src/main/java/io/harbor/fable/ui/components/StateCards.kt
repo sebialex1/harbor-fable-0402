@@ -25,41 +25,35 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableTextDim
-import io.harbor.fable.ui.theme.FableWarn
+import io.harbor.fable.ui.theme.FableTextFaint
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
 
-/** Centered empty state with an optional call to action. */
+/**
+ * Centered empty state: a grey glyph, a title and at most one short line, straight on the
+ * canvas. No card and no button; the screen's own top-bar action is how you fill it.
+ */
 @Composable
 fun EmptyState(
     icon: ImageVector,
     title: String,
     modifier: Modifier = Modifier,
     message: String = "",
-    actionLabel: String? = null,
-    actionIcon: ImageVector? = null,
-    onAction: (() -> Unit)? = null,
 ) {
-    GlassCard(modifier = modifier.fillMaxWidth()) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.xxl, vertical = Spacing.xxl),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            IconTile(icon = icon, tint = FableTextDim, size = 44.dp)
-            Spacer(Modifier.height(Spacing.md))
-            Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-            if (message.isNotBlank()) {
-                Spacer(Modifier.height(Spacing.xs))
-                Text(message, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-            }
-            if (actionLabel != null && onAction != null) {
-                Spacer(Modifier.height(Spacing.lg))
-                GlassButton(text = actionLabel, onClick = onAction, primary = true, icon = actionIcon)
-            }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.xxl, vertical = 56.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, contentDescription = null, tint = FableTextFaint, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.height(Spacing.md))
+        Text(title, style = MaterialTheme.typography.titleMedium, color = FableTextDim, textAlign = TextAlign.Center)
+        if (message.isNotBlank()) {
+            Spacer(Modifier.height(Spacing.xs))
+            Text(message, style = MaterialTheme.typography.bodySmall, color = FableTextFaint, textAlign = TextAlign.Center)
         }
     }
 }
@@ -85,14 +79,14 @@ fun LoadingCard(message: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Compact warning/info card, e.g. for catalog sources that failed to refresh. */
+/** Compact notice row, e.g. for catalog sources that failed to refresh. Grey unless [tint] says otherwise. */
 @Composable
 fun NoticeCard(
     icon: ImageVector,
     title: String,
     lines: List<String>,
     modifier: Modifier = Modifier,
-    tint: Color = FableWarn,
+    tint: Color = FableTextDim,
 ) {
     GlassCard(modifier = modifier.fillMaxWidth()) {
         Row(
@@ -129,7 +123,7 @@ fun ThinProgressBar(
                 .fillMaxWidth()
                 .height(2.dp),
             color = color,
-            trackColor = color.copy(alpha = 0.12f),
+            trackColor = color.copy(alpha = 0.16f),
             gapSize = 0.dp,
         )
     } else {
@@ -140,7 +134,7 @@ fun ThinProgressBar(
                 .fillMaxWidth()
                 .height(2.dp),
             color = color,
-            trackColor = color.copy(alpha = 0.12f),
+            trackColor = color.copy(alpha = 0.16f),
             gapSize = 0.dp,
             drawStopIndicator = {},
         )

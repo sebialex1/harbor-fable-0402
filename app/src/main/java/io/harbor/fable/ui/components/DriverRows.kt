@@ -33,7 +33,7 @@ import io.harbor.fable.data.formatBytes
 import io.harbor.fable.data.models.RadvRelease
 import io.harbor.fable.data.models.ReleaseChannel
 import io.harbor.fable.ui.theme.FableAccent
-import io.harbor.fable.ui.theme.FableSuccess
+import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.Motion
@@ -97,26 +97,18 @@ fun DriverReleaseRow(
         ui == ReleaseUiState.VERIFYING -> 1f
         else -> null
     }
-    val tint = when (ui) {
-        ReleaseUiState.INSTALLED -> FableSuccess
-        ReleaseUiState.DOWNLOADED, ReleaseUiState.INSTALLING -> FableAccent
-        else -> if (release.isLatest) FableAccent else FableTextDim
-    }
-
     Box(modifier) {
         ListRow(
             title = release.tag,
             subtitle = releaseSubtitle(release, note),
-            icon = Icons.Outlined.Memory,
-            iconTint = tint,
             onClick = onClick,
             showChevron = false,
             // Mesa version, size and date do not fit one line on narrow screens.
             subtitleMaxLines = 2,
             titleBadge = {
                 when (release.channel) {
-                    ReleaseChannel.LATEST -> Pill(text = "Latest", color = FableAccent)
-                    ReleaseChannel.PRERELEASE -> Pill(text = "Pre-release", color = FableWarn)
+                    ReleaseChannel.LATEST -> Pill(text = "Latest")
+                    ReleaseChannel.PRERELEASE -> Pill(text = "Pre-release")
                     ReleaseChannel.VERSIONED -> Unit
                 }
             },
@@ -136,16 +128,16 @@ fun DriverReleaseRow(
                             size = 32.dp,
                             onClick = onDownload,
                         )
-                        ReleaseUiState.QUEUED -> Pill(text = "Queued", color = FableAccent)
-                        ReleaseUiState.DOWNLOADING -> Pill(text = "$percent%", color = FableAccent)
-                        ReleaseUiState.VERIFYING -> Pill(text = "Verifying", color = FableAccent)
+                        ReleaseUiState.QUEUED -> StateText("Queued")
+                        ReleaseUiState.DOWNLOADING -> StateText("$percent%")
+                        ReleaseUiState.VERIFYING -> StateText("Verifying")
                         ReleaseUiState.DOWNLOADED -> if (onInstall != null) {
                             GlassButton(text = "Install", onClick = onInstall, compact = true)
                         } else {
-                            Pill(text = "Downloaded", color = FableTextDim, icon = Icons.Outlined.Check)
+                            StateText("Downloaded")
                         }
-                        ReleaseUiState.INSTALLING -> Pill(text = "Installing", color = FableAccent)
-                        ReleaseUiState.INSTALLED -> Pill(text = "Active", color = FableSuccess, icon = Icons.Outlined.Check)
+                        ReleaseUiState.INSTALLING -> StateText("Installing")
+                        ReleaseUiState.INSTALLED -> StateText("Active")
                     }
                 }
             },
@@ -177,7 +169,7 @@ fun DriverSummaryRow(
     lines: List<String>,
     modifier: Modifier = Modifier,
     icon: ImageVector = Icons.Outlined.Memory,
-    iconTint: Color = FableSuccess,
+    iconTint: Color = FableText,
     titleMaxLines: Int = 2,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -211,4 +203,16 @@ fun DriverSummaryRow(
             Box(contentAlignment = Alignment.CenterEnd) { trailing() }
         }
     }
+}
+
+/** Trailing state of a row ("Downloaded", "42%") as quiet grey text, never a badge. */
+@Composable
+internal fun StateText(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = FableTextDim,
+        maxLines = 1,
+        modifier = modifier,
+    )
 }

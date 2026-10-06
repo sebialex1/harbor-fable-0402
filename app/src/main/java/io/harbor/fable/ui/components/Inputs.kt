@@ -67,6 +67,7 @@ import io.harbor.fable.ui.theme.FableControl
 import io.harbor.fable.ui.theme.FableGlassShadow
 import io.harbor.fable.ui.theme.FableGlassShadowSpot
 import io.harbor.fable.ui.theme.FableOutline
+import io.harbor.fable.ui.theme.FableSurface
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.GlassShadow
@@ -109,11 +110,11 @@ fun GlassTextField(
         colors = OutlinedTextFieldDefaults.colors(
             focusedTextColor = FableText,
             unfocusedTextColor = FableText,
-            focusedContainerColor = FableControl,
-            unfocusedContainerColor = FableControl,
-            focusedBorderColor = FableAccent,
-            unfocusedBorderColor = FableOutline,
-            focusedLabelColor = FableAccent,
+            focusedContainerColor = FableSurface,
+            unfocusedContainerColor = FableSurface,
+            focusedBorderColor = FableTextDim,
+            unfocusedBorderColor = Color.Transparent,
+            focusedLabelColor = FableTextDim,
             unfocusedLabelColor = FableTextDim,
             cursorColor = FableAccent,
             errorBorderColor = FableError,
@@ -155,7 +156,7 @@ fun <T> OptionSelector(
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = 46.dp)
+                .heightIn(min = 44.dp)
                 .clickable(role = Role.DropdownList) { expanded = !expanded }
                 .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
             verticalAlignment = Alignment.CenterVertically,
@@ -168,7 +169,8 @@ fun <T> OptionSelector(
             Spacer(Modifier.width(Spacing.md))
             Text(
                 text = selectedLabel,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyLarge,
+                color = FableTextDim,
                 textAlign = TextAlign.End,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -234,15 +236,14 @@ private fun <T> OptionRow(option: SelectOption<T>, selected: Boolean, onClick: (
             }
         }
         if (selected) {
-            Icon(Icons.Outlined.Check, contentDescription = "Selected", tint = FableAccent, modifier = Modifier.size(20.dp))
+            Icon(Icons.Outlined.Check, contentDescription = "Selected", tint = FableText, modifier = Modifier.size(18.dp))
         }
     }
 }
 
 /**
- * Modal sheet with the Fable look: a [GlassLevel.Sheet] pane (translucent charcoal over the
- * dimmed screen, a sheen across its top and a rim of light instead of a border), a title, optional
- * subtitle and scrollable content. The sheet slides up with the system animation while its content
+ * Modal sheet in the iOS manner: a grey [GlassLevel.Sheet] pane over the dimmed screen with a
+ * hairline top edge, a title, optional subtitle and scrollable content. The sheet slides up with the system animation while its content
  * fades and rises into place a beat later, so the pane arrives first and its contents settle onto it.
  *
  * [content] receives `close`, which animates the sheet away and then runs its callback.
@@ -262,9 +263,9 @@ fun FableSheet(
     }
     val shape = RoundedCornerShape(topStart = SheetRadius, topEnd = SheetRadius)
     val appear = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { appear.animateTo(1f, Motion.enter(Motion.Entrance, delay = 90)) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, Motion.enter(Motion.Standard, delay = 60)) }
 
-    // The sheet's light (sheen + rim) is drawn on the content that fills the pane, not through the
+    // The sheet's edge is drawn on the content that fills the pane, not through the
     // sheet modifier: Material offsets the sheet inside the node that modifier wraps, so anything
     // drawn there would land at the top of the screen. The drag handle moves inside for the same
     // reason, so the rim starts at the very top edge.
@@ -290,15 +291,15 @@ fun FableSheet(
                     .fillMaxWidth()
                     .graphicsLayer {
                         alpha = appear.value
-                        translationY = (1f - appear.value) * 24.dp.toPx()
+                        translationY = (1f - appear.value) * 8.dp.toPx()
                     }
                     .verticalScroll(rememberScrollState())
                     .imePadding()
-                    .padding(start = Spacing.xl, end = Spacing.xl, bottom = Spacing.xl),
+                    .padding(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.xl),
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
                 Column {
-                    Text(title, style = MaterialTheme.typography.headlineMedium)
+                    Text(title, style = MaterialTheme.typography.titleLarge)
                     if (!subtitle.isNullOrBlank()) {
                         Text(subtitle, style = MaterialTheme.typography.bodyMedium)
                     }
@@ -341,7 +342,7 @@ fun ConfirmDialog(
                 Text(
                     text = confirmLabel,
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (destructive) FableError else FableAccent,
+                    color = if (destructive) FableError else FableText,
                 )
             }
         },
