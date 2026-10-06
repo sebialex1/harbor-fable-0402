@@ -1,11 +1,5 @@
 package io.harbor.fable.ui.screens
 
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.provider.OpenableColumns
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,7 +8,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,7 +16,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.models.ContainerDefaults
@@ -63,15 +55,7 @@ fun ContainerDetailScreen(
                 contentDescription = "Launch",
                 onClick = {
                     scope.launch {
-                        val result = repository.launch(containerId)
-                        when (result) {
-                            is io.harbor.fable.data.LaunchResult.Started ->
-                                fableUi.showMessage("Launched (pid ${result.pid})")
-                            is io.harbor.fable.data.LaunchResult.Unavailable ->
-                                fableUi.showMessage(result.reason, long = true)
-                            is io.harbor.fable.data.LaunchResult.Failed ->
-                                fableUi.showMessage(result.reason, long = true)
-                        }
+                        fableUi.showMessage(repository.launch(containerId).message(), long = true)
                     }
                 },
             )
@@ -141,14 +125,14 @@ fun ContainerDetailScreen(
             }
         }
 
-        // Executables section
-        item { SectionLabel("Executables") }
+        // Apps assigned to this container
+        item { SectionLabel("Apps") }
         item {
             GlassCard {
                 if (containerExes.isEmpty()) {
                     ListRow(
-                        title = "No executables",
-                        subtitle = "Add an .exe to launch in this container",
+                        title = "No apps assigned",
+                        subtitle = "Add an app or game to run it in this container",
                         icon = Icons.Outlined.FileOpen,
                         showChevron = false,
                     )
@@ -156,13 +140,24 @@ fun ContainerDetailScreen(
                     containerExes.forEach { exe ->
                         ListRow(
                             title = exe.name,
-                            subtitle = exe.path,
-                            icon = Icons.Outlined.PlayCircle,
+                            subtitle = if (container.exePath == exe.path) "Primary app" else "Tap to make primary",
+                            icon = Icons.Outlined.SportsEsports,
                             showChevron = false,
                             trailing = {
-                                if (container.exePath == exe.path) {
-                                    Pill(text = "primary", color = FableSuccess)
-                                }
+                                GlassButton(
+                                    text = "Launch",
+                                    icon = Icons.Outlined.PlayArrow,
+                                    primary = true,
+                                    compact = true,
+                                    onClick = {
+                                        scope.launch {
+                                            fableUi.showMessage(
+                                                repository.launch(containerId, exe.id).message(),
+                                                long = true,
+                                            )
+                                        }
+                                    },
+                                )
                             },
                             onClick = {
                                 scope.launch {
@@ -171,15 +166,12 @@ fun ContainerDetailScreen(
                                 }
                             },
                         )
-                        if (exe != containerExes.last()) {
-                            CardDivider()
-                        }
+                        CardDivider()
                     }
                 }
-                CardDivider()
                 ListRow(
                     title = "Add executable",
-                    subtitle = "Register an .exe file",
+                    subtitle = "Pick an app or game file",
                     icon = Icons.Outlined.Add,
                     showChevron = true,
                     onClick = { showAddExe = true },
@@ -236,15 +228,9 @@ fun ContainerDetailScreen(
     }
 
     if (showAddExe) {
-        AddExeSheet(
+        AddAppSheet(
             onDismiss = { showAddExe = false },
-            onAdd = { name, path ->
-                scope.launch {
-                    repository.addExe(containerId, name, path)
-                    fableUi.showMessage("$name added")
-                }
-                showAddExe = false
-            },
+            preselectedContainerId = containerId,
         )
     }
 
@@ -264,83 +250,4 @@ fun ContainerDetailScreen(
             onDismiss = { showDeleteConfirm = false },
         )
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AddExeSheet(
-    onDismiss: () -> Unit,
-    onAdd: (name: String, path: String) -> Unit,
-) {
-    val context = LocalContext.current
-    var name by remember { mutableStateOf("") }
-    var pickedUri by remember { mutableStateOf<Uri?>(null) }
-    var pickedFileName by remember { mutableStateOf("") }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            // Keep read access across restarts; not every provider supports persisting.
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            val fileName = resolveFileName(context, uri)
-            pickedUri = uri
-            pickedFileName = fileName
-            if (name.isBlank()) name = fileName.substringBeforeLast('.', fileName)
-        }
-    }
-
-    FableSheet(
-        title = "Add Executable",
-        subtitle = "Pick an .exe for this container",
-        onDismiss = onDismiss,
-    ) { close ->
-        GlassButton(
-            text = if (pickedUri == null) "Pick File" else "Change File",
-            icon = Icons.Outlined.FileOpen,
-            modifier = Modifier.fillMaxWidth(),
-            onClick = { picker.launch(arrayOf("*/*")) },
-        )
-        if (pickedUri != null) {
-            GlassCard {
-                InfoRow(
-                    label = "File",
-                    value = pickedFileName,
-                    icon = Icons.Outlined.Description,
-                    stacked = true,
-                )
-            }
-        }
-        GlassTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = "Executable name",
-            placeholder = "e.g. Hollow Knight",
-        )
-        GlassButton(
-            text = "Add",
-            primary = true,
-            icon = Icons.Outlined.Add,
-            enabled = pickedUri != null && name.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                val uri = pickedUri
-                if (uri != null && name.isNotBlank()) {
-                    close { onAdd(name.trim(), uri.toString()) }
-                }
-            },
-        )
-    }
-}
-
-/** Display name of a document [uri], falling back to its last path segment. */
-internal fun resolveFileName(context: Context, uri: Uri): String {
-    val documentName = runCatching { DocumentFile.fromSingleUri(context, uri)?.name }.getOrNull()
-    if (!documentName.isNullOrBlank()) return documentName
-    val queried = runCatching {
-        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-    }.getOrNull()
-    if (!queried.isNullOrBlank()) return queried
-    return uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "app.exe"
 }

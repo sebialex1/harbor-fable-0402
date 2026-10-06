@@ -70,6 +70,8 @@ fun FableRoot() {
         }
     }
 
+    var showAddApp by remember { mutableStateOf(false) }
+
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val isTopLevel = currentRoute in Routes.topLevel
@@ -110,7 +112,7 @@ fun FableRoot() {
                 composable(Routes.HOME) {
                     HomeScreen(
                         onNavigateToContainers = { navController.navigate(Routes.CONTAINERS) },
-                        onAddApp = { /* wired in Task 5 */ },
+                        onAddApp = { showAddApp = true },
                         onContainerClick = { id -> navController.navigate("container/$id") },
                     )
                 }
@@ -134,6 +136,10 @@ fun FableRoot() {
                 composable(Routes.DRIVERS) { DriversScreen() }
                 composable(Routes.ASSETS) { AssetsScreen() }
                 composable(Routes.SETTINGS) { SettingsScreen() }
+            }
+
+            if (showAddApp) {
+                AddAppSheet(onDismiss = { showAddApp = false })
             }
 
             SnackbarHost(
