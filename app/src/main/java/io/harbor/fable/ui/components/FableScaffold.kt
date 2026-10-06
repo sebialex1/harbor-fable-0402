@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -32,11 +33,14 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -47,6 +51,7 @@ import io.harbor.fable.ui.theme.FableDivider
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.ScreenPadding
 import io.harbor.fable.ui.theme.Spacing
+import kotlinx.coroutines.flow.filter
 
 /**
  * iOS-style navigation bar used by every screen.
@@ -63,10 +68,17 @@ fun FableTopBar(
     onBack: (() -> Unit)? = null,
     showDivider: Boolean = false,
     showInlineTitle: Boolean = true,
+    collapseFraction: (() -> Float)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    val dividerAlpha by animateFloatAsState(if (showDivider) 1f else 0f, Motion.inPlace(), label = "topBarDivider")
-    val titleAlpha by animateFloatAsState(if (showInlineTitle) 1f else 0f, Motion.inPlace(Motion.Fast), label = "topBarTitle")
+    val animatedDivider by animateFloatAsState(if (showDivider) 1f else 0f, Motion.inPlace(), label = "topBarDivider")
+    val animatedTitle by animateFloatAsState(if (showInlineTitle) 1f else 0f, Motion.inPlace(Motion.Fast), label = "topBarTitle")
+    // With a collapse fraction the inline title, divider and actions follow the scroll position
+    // frame by frame (read in the draw phase only); without one they animate on their flags.
+    val titleAlpha: () -> Float = collapseFraction?.let { f -> { inlineTitleAlpha(f()) } } ?: { animatedTitle }
+    val dividerAlpha: () -> Float = collapseFraction?.let { f -> { f() } } ?: { animatedDivider }
+    val actionsAlpha: () -> Float = collapseFraction?.let { f -> { barActionsAlpha(f()) } } ?: { 1f }
+    val titleShiftPx = with(LocalDensity.current) { InlineTitleShift.toPx() }
     Column(
         modifier
             .fillMaxWidth()
@@ -88,7 +100,12 @@ fun FableTopBar(
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .padding(horizontal = 96.dp)
-                    .graphicsLayer { alpha = titleAlpha },
+                    .graphicsLayer {
+                        val a = titleAlpha()
+                        alpha = a
+                        // Rises into place as it fades in, like the iOS hand-over.
+                        translationY = (1f - a) * titleShiftPx
+                    },
             )
             Row(
                 Modifier.fillMaxWidth(),
@@ -103,6 +120,7 @@ fun FableTopBar(
                 }
                 Spacer(Modifier.weight(1f))
                 Row(
+                    modifier = Modifier.graphicsLayer { alpha = actionsAlpha() },
                     horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                     verticalAlignment = Alignment.CenterVertically,
                     content = actions,
@@ -113,7 +131,7 @@ fun FableTopBar(
             Modifier
                 .fillMaxWidth()
                 .height(0.5.dp)
-                .graphicsLayer { alpha = dividerAlpha }
+                .graphicsLayer { alpha = dividerAlpha() }
                 .background(FableDivider),
         )
     }
@@ -145,12 +163,47 @@ fun FableScreen(
     val bottomPadding = LocalTabBarClearance.current + navigationBottom + Spacing.lg
     val largeTitle = onBack == null
     val density = LocalDensity.current
-    val largeTitleGone = with(density) { LargeTitleCollapse.toPx() }
+    val collapsePx = with(density) { LargeTitleCollapse.toPx() }
     val scrolled by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
     }
-    val pastLargeTitle by remember(listState, largeTitleGone) {
-        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > largeTitleGone }
+    // 0 with the large title fully shown, 1 once it has scrolled under the bar. Read only inside
+    // graphicsLayer blocks, so scrolling redraws without recomposing the screen.
+    val collapse: () -> Float = remember(listState, collapsePx) {
+        {
+            if (listState.firstVisibleItemIndex > 0) {
+                1f
+            } else {
+                (listState.firstVisibleItemScrollOffset / collapsePx).coerceIn(0f, 1f)
+            }
+        }
+    }
+    // The actions hop between the large-title row and the bar halfway through, where both
+    // copies are fully transparent, so the move is invisible.
+    val pastLargeTitle by remember(listState, collapsePx) {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset >= collapsePx * ActionsHandOver
+        }
+    }
+
+    // Like iOS, a scroll that stops part-way through the collapse settles to whichever end is
+    // closer, so the screen never rests with a half-faded title.
+    if (largeTitle) {
+        LaunchedEffect(listState, collapsePx) {
+            // Where our own settle ended; a short list may not be able to scroll all the way, and
+            // must not be nudged again every time that settle finishes.
+            var settledAt = -1
+            snapshotFlow { listState.isScrollInProgress }
+                .filter { inProgress -> !inProgress }
+                .collect {
+                    val offset = listState.firstVisibleItemScrollOffset
+                    if (listState.firstVisibleItemIndex == 0 && offset > 0 && offset < collapsePx && offset != settledAt) {
+                        val target = if (offset < collapsePx / 2f) -offset.toFloat() else collapsePx - offset
+                        listState.animateScrollBy(target, Motion.inPlace(Motion.Quick))
+                        settledAt = listState.firstVisibleItemScrollOffset
+                    }
+                }
+        }
     }
 
     Box(
@@ -172,6 +225,7 @@ fun FableScreen(
                 onBack = onBack,
                 showDivider = scrolled,
                 showInlineTitle = actionsInBar,
+                collapseFraction = if (largeTitle) collapse else null,
                 actions = if (actionsInBar) actions else ({}),
             )
             LazyColumn(
@@ -203,10 +257,24 @@ fun FableScreen(
                                         style = MaterialTheme.typography.headlineLarge,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .graphicsLayer {
+                                                val f = collapse()
+                                                // Shrinks from its leading edge, trails the scroll
+                                                // a little (parallax) and fades out as the inline
+                                                // title fades in.
+                                                transformOrigin = LargeTitleOrigin
+                                                val scale = 1f - LargeTitleShrink * f
+                                                scaleX = scale
+                                                scaleY = scale
+                                                translationY = f * collapsePx * LargeTitleParallax
+                                                alpha = largeTitleAlpha(f)
+                                            },
                                     )
                                     if (!pastLargeTitle) {
                                         Row(
+                                            modifier = Modifier.graphicsLayer { alpha = rowActionsAlpha(collapse()) },
                                             horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                                             verticalAlignment = Alignment.CenterVertically,
                                             content = actions,
@@ -215,7 +283,16 @@ fun FableScreen(
                                 }
                             }
                             if (!subtitle.isNullOrBlank()) {
-                                Text(subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                Text(
+                                    subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    modifier = if (largeTitle) {
+                                        Modifier.graphicsLayer { alpha = largeTitleAlpha(collapse()) }
+                                    } else {
+                                        Modifier
+                                    },
+                                )
                             }
                         }
                     }
@@ -229,7 +306,32 @@ fun FableScreen(
 /** Minimum height of the large-title row, so title and icon buttons share one centre line. */
 private val LargeTitleRowHeight = 44.dp
 
-/** How far the large title scrolls before the inline title takes over. */
-private val LargeTitleCollapse = 30.dp
+/** Scroll distance over which the large title hands over to the inline one (its row height). */
+private val LargeTitleCollapse = LargeTitleRowHeight
+
+/** Collapse fraction at which the actions move from the large-title row into the bar. */
+private const val ActionsHandOver = 0.5f
+
+/** The large title ends 12% smaller, scaled about its leading edge like iOS. */
+private const val LargeTitleShrink = 0.12f
+private val LargeTitleOrigin = TransformOrigin(0f, 0.5f)
+
+/** Share of the scroll the large title gives back, so it lags the list slightly. */
+private const val LargeTitleParallax = 0.35f
+
+/** How far the inline title rises while it fades in. */
+private val InlineTitleShift = 6.dp
+
+/** Large title: gone by 70% of the collapse so it never overlaps the incoming inline title. */
+private fun largeTitleAlpha(f: Float): Float = (1f - f / 0.7f).coerceIn(0f, 1f)
+
+/** Inline title: starts at 40% and is fully in once the large title has gone under the bar. */
+private fun inlineTitleAlpha(f: Float): Float = ((f - 0.4f) / 0.6f).coerceIn(0f, 1f)
+
+/** Actions on the large-title row fade out over the first half of the collapse… */
+private fun rowActionsAlpha(f: Float): Float = (1f - f / ActionsHandOver).coerceIn(0f, 1f)
+
+/** …and the bar copy fades in over the second half. */
+private fun barActionsAlpha(f: Float): Float = ((f - ActionsHandOver) / (1f - ActionsHandOver)).coerceIn(0f, 1f)
 
 private const val LargeTitleKey = "fable-large-title"
