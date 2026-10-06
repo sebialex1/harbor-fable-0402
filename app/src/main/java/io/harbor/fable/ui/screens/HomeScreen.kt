@@ -96,16 +96,8 @@ internal fun HomeContent(
                     }
                 }
             }
-        } else {
-            item(key = "empty") {
-                // Adding an app lives in the top bar only; the empty list does not repeat it.
-                EmptyState(
-                    icon = Icons.Outlined.SportsEsports,
-                    title = "No apps",
-                    modifier = Modifier.animateItem().entrance(appear, 0),
-                )
-            }
         }
+        // No apps: nothing but the + in the top bar; the list does not repeat it.
 
         if (containers.isNotEmpty()) {
             item(key = "containers-label") {

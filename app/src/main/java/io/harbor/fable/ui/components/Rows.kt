@@ -350,15 +350,20 @@ internal fun containerStatusColor(status: ContainerStatus): Color = when (status
     else -> FableTextDim
 }
 
-/** Container state as quiet grey text. A change of state crossfades instead of snapping. */
+/**
+ * Container state, shown only when it needs attention (an error). A healthy container shows
+ * nothing; a change of state crossfades instead of snapping.
+ */
 @Composable
 fun StatusPill(status: ContainerStatus, modifier: Modifier = Modifier) {
     Crossfade(targetState = status, label = "containerStatus", modifier = modifier) { current ->
-        Text(
-            text = containerStatusLabel(current).replaceFirstChar { it.uppercase() },
-            style = MaterialTheme.typography.bodyMedium,
-            color = containerStatusColor(current),
-            maxLines = 1,
-        )
+        if (current == ContainerStatus.ERROR) {
+            Text(
+                text = containerStatusLabel(current).replaceFirstChar { it.uppercase() },
+                style = MaterialTheme.typography.bodyMedium,
+                color = containerStatusColor(current),
+                maxLines = 1,
+            )
+        }
     }
 }

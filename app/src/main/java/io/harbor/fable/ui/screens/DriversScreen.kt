@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -382,7 +383,7 @@ internal fun ActiveDriverCard(
 }
 
 /**
- * The installed face of [ActiveDriverCard]: summary, then the update prompt (or "Up to date")
+ * The installed face of [ActiveDriverCard]: summary, then the update prompt (when there is one)
  * beside the uninstall action. While the update is downloading the prompt turns into progress.
  */
 @Composable
@@ -418,7 +419,7 @@ private fun InstalledDriverFace(
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // "Up to date", the update button and the download progress swap in place.
+            // The update button and its download progress swap in place; nothing when current.
             AnimatedContent(
                 targetState = updateAvailable to transferring,
                 transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) },
@@ -446,11 +447,7 @@ private fun InstalledDriverFace(
                         onClick = onInstallUpdate,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    else -> Text(
-                        text = "Up to date",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    else -> Spacer(Modifier.fillMaxWidth())
                 }
             }
             FableButton(

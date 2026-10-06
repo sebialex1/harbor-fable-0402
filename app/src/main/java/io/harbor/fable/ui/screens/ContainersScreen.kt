@@ -24,7 +24,6 @@ import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.ui.components.*
-import io.harbor.fable.ui.theme.FableText
 import kotlinx.coroutines.launch
 
 /** Selectable x86 translation layers. Values match [Container.translator]. */
@@ -43,18 +42,11 @@ fun ContainersScreen(
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
 
-    var showAddApp by remember { mutableStateOf(false) }
-
     ContainersContent(
         containers = containers,
         onContainerClick = onContainerClick,
         onCreateClick = { showCreate = true },
-        onAddApp = { showAddApp = true },
     )
-
-    if (showAddApp) {
-        AddAppSheet(onDismiss = { showAddApp = false })
-    }
 
     if (showCreate) {
         CreateContainerSheet(
@@ -87,7 +79,6 @@ internal fun ContainersContent(
     containers: List<Container>,
     onContainerClick: (String) -> Unit,
     onCreateClick: () -> Unit,
-    onAddApp: () -> Unit = {},
 ) {
     val appear = rememberEntrance()
 
@@ -102,15 +93,7 @@ internal fun ContainersContent(
             )
         },
     ) {
-        if (containers.isEmpty()) {
-            item(key = "empty") {
-                EmptyState(
-                    icon = Icons.Outlined.Inventory2,
-                    title = "No containers",
-                    modifier = Modifier.animateItem().entrance(appear, 0),
-                )
-            }
-        } else {
+        if (containers.isNotEmpty()) {
             item(key = "list") {
                 FableCard(Modifier.fillMaxWidth().animateItem().entrance(appear, 0)) {
                     containers.forEachIndexed { index, container ->
@@ -121,21 +104,6 @@ internal fun ContainersContent(
                             icon = Icons.Outlined.Inventory2,
                             trailing = { StatusPill(container.status) },
                             onClick = { onContainerClick(container.id) },
-                        )
-                    }
-                }
-            }
-
-            // A short list gets one quick action that the top bar does not already offer.
-            if (containers.size < 3) {
-                item(key = "quick-actions") {
-                    FableCard(Modifier.fillMaxWidth().animateItem().entrance(appear, 1)) {
-                        ListRow(
-                            title = "Add App",
-                            titleColor = FableText,
-                            icon = Icons.Outlined.Add,
-                            showChevron = false,
-                            onClick = onAddApp,
                         )
                     }
                 }

@@ -73,8 +73,6 @@ import io.harbor.fable.data.RecommendedKind
 import io.harbor.fable.data.RecommendedStatus
 import io.harbor.fable.data.SetupState
 import io.harbor.fable.data.formatBytes
-import io.harbor.fable.nativebridge.DeviceGpuInfo
-import io.harbor.fable.nativebridge.DeviceProbe
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableAccentLight
@@ -95,7 +93,7 @@ import kotlinx.coroutines.launch
 private enum class SetupStep { WELCOME, DOWNLOAD, READY }
 
 /**
- * First-open setup. Three steps on a plain black canvas: a welcome that names the device,
+ * First-open setup. Three steps on a plain black canvas: a welcome,
  * a download step that shows the real progress of the recommended Wine, Box64, RADV Xclipse and
  * DXVK packages (through [io.harbor.fable.data.SetupManager]), and a ready step that hands over
  * to the app. [onFinished] is called when the user continues or skips; the caller persists it.
@@ -108,7 +106,6 @@ fun SetupScreen(onFinished: () -> Unit) {
     val setup by setupManager.state.collectAsStateWithLifecycle()
     val preparing by setupManager.installing.collectAsStateWithLifecycle()
     val fableUi = LocalFableUi.current
-    val deviceInfo = remember { DeviceProbe.read() }
 
     var step by rememberSaveable { mutableStateOf(SetupStep.WELCOME) }
     var lastMessage by remember { mutableStateOf<String?>(null) }
@@ -132,7 +129,6 @@ fun SetupScreen(onFinished: () -> Unit) {
         setup = setup,
         preparing = preparing,
         message = lastMessage,
-        deviceInfo = deviceInfo,
         onStart = {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -156,7 +152,6 @@ private fun SetupContent(
     setup: SetupState,
     preparing: Boolean,
     message: String?,
-    deviceInfo: DeviceGpuInfo,
     onStart: () -> Unit,
     onRetry: () -> Unit,
     onContinue: () -> Unit,
@@ -185,7 +180,7 @@ private fun SetupContent(
             modifier = Modifier.fillMaxSize(),
         ) { current ->
             when (current) {
-                SetupStep.WELCOME -> WelcomeStep(deviceInfo = deviceInfo, onStart = onStart, onSkip = onSkip)
+                SetupStep.WELCOME -> WelcomeStep(onStart = onStart, onSkip = onSkip)
                 SetupStep.DOWNLOAD -> DownloadStep(
                     setup = setup,
                     preparing = preparing,
@@ -203,7 +198,7 @@ private fun SetupContent(
 // --- Step 1: welcome --------------------------------------------------------------------------
 
 @Composable
-private fun WelcomeStep(deviceInfo: DeviceGpuInfo, onStart: () -> Unit, onSkip: () -> Unit) {
+private fun WelcomeStep(onStart: () -> Unit, onSkip: () -> Unit) {
     SetupColumn {
         Spacer(Modifier.weight(1f))
         Staggered(index = 0) { AppMark() }
@@ -231,8 +226,6 @@ private fun WelcomeStep(deviceInfo: DeviceGpuInfo, onStart: () -> Unit, onSkip: 
                 modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),
             )
         }
-        Spacer(Modifier.height(Spacing.xxl))
-        Staggered(index = 3) { DeviceChip(deviceInfo) }
         Spacer(Modifier.weight(1.2f))
         Staggered(index = 4) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -263,25 +256,6 @@ private fun AppMark(size: androidx.compose.ui.unit.Dp = 120.dp) {
             .size(size)
             .graphicsLayer { scaleX = appear.value; scaleY = appear.value },
     )
-}
-
-/** The device and GPU on one quiet line; the only status the welcome step shows. */
-@Composable
-private fun DeviceChip(deviceInfo: DeviceGpuInfo) {
-    val gpu = deviceInfo.gpu.takeIf { it.isNotBlank() && !it.equals("unknown", ignoreCase = true) }
-    val label = listOfNotNull(deviceInfo.device.ifBlank { null }, gpu?.let { formatGpu(it) }).joinToString(" · ")
-    Text(
-        text = label.ifBlank { "Unknown device" },
-        style = MaterialTheme.typography.bodySmall,
-        color = FableTextFaint,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-private fun formatGpu(raw: String): String = when {
-    raw.contains("xclipse", ignoreCase = true) -> "Xclipse ${raw.filter { it.isDigit() }}".trim()
-    else -> raw
 }
 
 // --- Step 2: download -------------------------------------------------------------------------
@@ -408,7 +382,7 @@ private fun SetupItemRow(kind: RecommendedKind, item: RecommendedItem?, preparin
     val progress = item?.progress ?: 0f
     val sizeBytes = item?.sizeBytes ?: 0L
     val statusText = when {
-        installed -> "Done"
+        installed -> ""
         downloading && progress >= 1f && kind == RecommendedKind.DRIVER -> "Installing"
         downloading -> "${(progress * 100).toInt()}%"
         preparing -> "Preparing"
@@ -519,7 +493,7 @@ private fun ReadyStep(setup: SetupState, onFinish: () -> Unit) {
         Spacer(Modifier.height(Spacing.xxxl))
         Staggered(index = 1) {
             Text(
-                text = if (missing.isEmpty()) "You're All Set" else "Ready",
+                text = "Ready",
                 style = MaterialTheme.typography.headlineLarge,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),

@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
+import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.ControlHeight
@@ -125,6 +126,15 @@ internal fun ContainerDetailContent(
     FableScreen(
         title = container?.name ?: "Container",
         onBack = onBack,
+        actions = {
+            if (container != null) {
+                FableIconButton(
+                    icon = Icons.Outlined.Add,
+                    contentDescription = "Add app",
+                    onClick = onAddExe,
+                )
+            }
+        },
     ) {
         if (container == null) {
             item(key = "missing") {
@@ -166,12 +176,14 @@ internal fun ContainerDetailContent(
         // Everything about the container itself is one section: what it runs, then how.
         item(key = "settings") {
             FableCard(Modifier.animateItem().entrance(appear, 1)) {
-                InfoRow(
-                    label = "Status",
-                    value = container.status.name.lowercase(),
-                    valueContent = { StatusPill(container.status) },
-                )
-                CardDivider()
+                if (container.status == ContainerStatus.ERROR) {
+                    InfoRow(
+                        label = "Status",
+                        value = container.status.name.lowercase(),
+                        valueContent = { StatusPill(container.status) },
+                    )
+                    CardDivider()
+                }
                 InfoRow(label = "Wine", value = container.wineVersion)
                 CardDivider()
                 InfoRow(label = "Driver", value = container.graphicsDriver)
@@ -225,11 +237,6 @@ internal fun ContainerDetailContent(
                     )
                     CardDivider()
                 }
-                ListRow(
-                    title = "Add App",
-                    showChevron = false,
-                    onClick = onAddExe,
-                )
             }
         }
 
