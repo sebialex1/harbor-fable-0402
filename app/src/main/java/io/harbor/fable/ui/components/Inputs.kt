@@ -148,7 +148,7 @@ fun <T> OptionSelector(
     hint: String? = null,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
-    val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, label = "selectorChevron")
+    val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, Motion.inPlace(), label = "selectorChevron")
     val selectedLabel = options.firstOrNull { it.value == selected }?.label ?: selected?.toString() ?: "None"
 
     Column(modifier.fillMaxWidth()) {

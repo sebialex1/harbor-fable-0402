@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.FableWarn
+import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
@@ -132,7 +133,7 @@ fun ThinProgressBar(
             gapSize = 0.dp,
         )
     } else {
-        val animated by animateFloatAsState(progress.coerceIn(0f, 1f), label = "thinProgress")
+        val animated by animateFloatAsState(progress.coerceIn(0f, 1f), Motion.settle(), label = "thinProgress")
         LinearProgressIndicator(
             progress = { animated },
             modifier = modifier

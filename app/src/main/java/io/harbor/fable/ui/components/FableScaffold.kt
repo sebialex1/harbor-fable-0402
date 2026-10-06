@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableBg
 import io.harbor.fable.ui.theme.FableDivider
+import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.ScreenPadding
 import io.harbor.fable.ui.theme.Spacing
 
@@ -63,7 +64,7 @@ fun FableTopBar(
     showDivider: Boolean = false,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    val dividerAlpha by animateFloatAsState(if (showDivider) 1f else 0f, label = "topBarDivider")
+    val dividerAlpha by animateFloatAsState(if (showDivider) 1f else 0f, Motion.inPlace(), label = "topBarDivider")
     Column(
         modifier
             .fillMaxWidth()

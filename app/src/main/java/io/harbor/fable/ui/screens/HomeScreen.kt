@@ -8,13 +8,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.LaunchResult
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.ui.components.*
+import io.harbor.fable.ui.theme.ControlHeight
 import io.harbor.fable.ui.theme.FableAccent
 import kotlinx.coroutines.launch
 
@@ -87,7 +87,7 @@ internal fun HomeContent(
                                     tint = Color.White,
                                     containerColor = FableAccent,
                                     bordered = false,
-                                    size = 34.dp,
+                                    size = ControlHeight.Compact,
                                     onClick = { onLaunch(exe) },
                                 )
                             },

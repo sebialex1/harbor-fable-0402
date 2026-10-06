@@ -2,7 +2,6 @@ package io.harbor.fable.ui.components
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -22,6 +21,7 @@ import io.harbor.fable.data.DownloadTask
 import io.harbor.fable.data.formatBytes
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableSuccess
+import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 
 private enum class DownloadUi { AVAILABLE, QUEUED, DOWNLOADING, VERIFYING, DONE }
@@ -90,7 +90,8 @@ fun DownloadRow(
                 AnimatedContent(
                     targetState = ui,
                     transitionSpec = {
-                        (fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.8f)) togetherWith fadeOut(tween(120))
+                        (fadeIn(Motion.enter(Motion.Quick)) + scaleIn(Motion.pop(), initialScale = 0.8f)) togetherWith
+                            fadeOut(Motion.exit(Motion.Fast))
                     },
                     label = "downloadState",
                 ) { current ->
@@ -111,8 +112,8 @@ fun DownloadRow(
         )
         AnimatedVisibility(
             visible = active,
-            enter = fadeIn(tween(200)),
-            exit = fadeOut(tween(300)),
+            enter = fadeIn(Motion.enter(Motion.Quick)),
+            exit = fadeOut(Motion.exit(Motion.Standard)),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = RowPaddingHorizontal),

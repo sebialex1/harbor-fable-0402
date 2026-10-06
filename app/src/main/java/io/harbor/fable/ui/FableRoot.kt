@@ -59,6 +59,8 @@ import io.harbor.fable.ui.theme.FableGlassShadowSpot
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.GlassShadow
 import io.harbor.fable.ui.theme.Motion
+import io.harbor.fable.ui.theme.ScreenPadding
+import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -316,7 +318,7 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = snackbarBottom + 8.dp, start = 12.dp, end = 12.dp),
+                .padding(bottom = snackbarBottom + Spacing.sm, start = ScreenPadding, end = ScreenPadding),
         ) { data ->
             val shape = RoundedCornerShape(ControlRadius + 2.dp)
             Snackbar(

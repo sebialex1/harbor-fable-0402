@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableDivider
 import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.Spacing
 
@@ -116,7 +117,7 @@ fun CollapsibleSection(
     badge: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, label = "sectionChevron")
+    val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, Motion.inPlace(), label = "sectionChevron")
     Column(modifier.fillMaxWidth()) {
         Row(
             Modifier
