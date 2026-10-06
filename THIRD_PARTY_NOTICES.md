@@ -100,3 +100,11 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ```
+
+## Haze
+
+The floating tab bar blurs the content behind it with Haze
+(https://github.com/chrisbanes/haze), `dev.chrisbanes.haze:haze`, used under the
+Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+
+Copyright 2023 Chris Banes

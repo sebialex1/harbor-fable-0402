@@ -61,6 +61,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
 
+    // Real backdrop blur for the floating tab bar (RenderEffect on API 31+, a scrim below).
+    implementation("dev.chrisbanes.haze:haze:1.1.1")
+
     // Archive extraction for downloaded Wine / Box64 packages (.tar.xz, .tar.gz).
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("org.tukaani:xz:1.10")

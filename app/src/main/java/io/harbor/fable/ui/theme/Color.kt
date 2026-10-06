@@ -24,8 +24,8 @@ val FableGlass = FableSurface
 /** Controls on a surface (secondary buttons, chips, icon buttons): a neutral lift of white. */
 val FableGlassRaised = Color(0x24FFFFFF)
 
-/** Chrome over scrolling content (tab bar). Dark, mostly opaque material; blur fills the rest. */
-val FableGlassDeep = Color(0xC7161618)
+/** Tint of the tab bar material over its blurred backdrop (see GlassDock). */
+val FableGlassDeep = Color(0xB8141416)
 
 /** Sheets, dialogs and snackbars. */
 val FableGlassSheet = Color(0xFF1C1C1E)

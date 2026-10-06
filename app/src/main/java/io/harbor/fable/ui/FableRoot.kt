@@ -46,6 +46,8 @@ import androidx.navigation.navArgument
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.ui.components.DockTab
 import io.harbor.fable.ui.components.FableUi
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.haze
 import io.harbor.fable.ui.components.GlassDock
 import io.harbor.fable.ui.components.GlassLevel
 import io.harbor.fable.ui.components.LocalDockClearance
@@ -205,6 +207,7 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
     }
 
     var showAddApp by remember { mutableStateOf(false) }
+    val hazeState = remember { HazeState() }
 
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
@@ -230,7 +233,8 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
         NavHost(
             navController = navController,
             startDestination = Routes.HOME,
-            modifier = Modifier.fillMaxSize(),
+            // The screens are the backdrop the tab bar blurs.
+            modifier = Modifier.fillMaxSize().haze(hazeState),
         ) {
             composable(
                 Routes.HOME,
@@ -354,6 +358,7 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             GlassDock(
+                hazeState = hazeState,
                 items = tabs,
                 activeIndex = activeTab,
                 onTabSelected = { index ->

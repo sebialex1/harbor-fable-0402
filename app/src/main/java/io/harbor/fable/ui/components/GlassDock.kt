@@ -12,6 +12,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeChild
+import io.harbor.fable.ui.theme.FableBg
+import io.harbor.fable.ui.theme.FableGlassDeep
+import io.harbor.fable.ui.theme.FableGlassShadow
+import io.harbor.fable.ui.theme.FableGlassShadowSpot
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.DockMetrics
@@ -21,13 +31,14 @@ import io.harbor.fable.ui.theme.DockRadius
  * The floating glass dock that holds the primary tabs.
  *
  * It sits above the system navigation bar (gesture handle or 3-button bar) and items share
- * the width equally, so it never clips on narrow screens. It is a [GlassLevel.Floating] pane:
- * a deep, long shadow lifts it off the content scrolling underneath and the rim light marks its
- * edge without a border. Screens reserve [DockMetrics.Clearance] plus the navigation-bar inset
+ * the width equally, so it never clips on narrow screens. It is the one real piece of glass in
+ * the app: the content scrolling underneath is blurred through it (see [DockMaterial]), a soft
+ * shadow lifts it and a hairline marks its edge. Screens reserve [DockMetrics.Clearance] plus the navigation-bar inset
  * so their last item stays visible.
  */
 @Composable
 fun GlassDock(
+    hazeState: HazeState,
     items: List<DockTab>,
     activeIndex: Int,
     onTabSelected: (Int) -> Unit,
@@ -46,7 +57,17 @@ fun GlassDock(
                 .widthIn(max = 520.dp)
                 .fillMaxWidth()
                 .height(DockMetrics.Height)
-                .glassSurface(shape = shape, level = GlassLevel.Floating)
+                // A real material: the screen behind is blurred and darkened, not just tinted.
+                .shadow(
+                    elevation = GlassLevel.Floating.shadow,
+                    shape = shape,
+                    clip = false,
+                    ambientColor = FableGlassShadow,
+                    spotColor = FableGlassShadowSpot,
+                )
+                .clip(shape)
+                .hazeChild(state = hazeState, style = DockMaterial)
+                .glassRim(shape, GlassLevel.Floating)
                 .padding(horizontal = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -63,6 +84,19 @@ fun GlassDock(
         }
     }
 }
+
+/**
+ * The tab bar material, after the iOS dark "regular" material: content behind it blurred by
+ * 24dp under a neutral dark tint. Where blur is unavailable (below API 31) Haze draws the opaque
+ * fallback tint instead, so the bar never shows unblurred content through it.
+ */
+private val DockMaterial = HazeStyle(
+    backgroundColor = FableBg,
+    tints = listOf(HazeTint(FableGlassDeep)),
+    blurRadius = 24.dp,
+    noiseFactor = 0f,
+    fallbackTint = HazeTint(FableGlassDeep.copy(alpha = 0.96f)),
+)
 
 data class DockTab(
     val label: String,
