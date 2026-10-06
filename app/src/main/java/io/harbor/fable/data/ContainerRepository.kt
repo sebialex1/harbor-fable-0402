@@ -3,6 +3,7 @@ package io.harbor.fable.data
 import android.content.Context
 import android.util.Log
 import io.harbor.fable.data.models.Container
+import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
 import kotlinx.coroutines.Dispatchers
@@ -68,9 +69,9 @@ class ContainerRepository internal constructor(
 
     suspend fun create(
         name: String,
-        wineVersion: String = "wine-9.0",
-        screenResolution: String = "1280x720",
-        graphicsDriver: String = "Turnip (default)",
+        wineVersion: String = ContainerDefaults.WINE_VERSION,
+        screenResolution: String = ContainerDefaults.SCREEN_RESOLUTION,
+        graphicsDriver: String = ContainerDefaults.GRAPHICS_DRIVER,
         isFullscreen: Boolean = false,
         envVars: Map<String, String> = emptyMap(),
         dxvkVersion: String? = null,
@@ -194,6 +195,37 @@ class ContainerRepository internal constructor(
         }
     }
 
+    /** Makes [exeId] the container's primary executable (the one "Launch" starts). */
+    suspend fun setPrimaryExe(exeId: String): Boolean = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val exe = exesById[exeId] ?: return@withContext false
+            val container = containersById[exe.containerId] ?: return@withContext false
+            containersById[container.id] = container.copy(exePath = exe.path, exeName = exe.name)
+            persistLocked()
+            true
+        }
+    }
+
+    /**
+     * Launches [exeId] — or the container's primary executable when null — inside the
+     * container's Wine prefix.
+     *
+     * Stub: the Wine runtime is not bundled with the app yet, so this only validates the
+     * request and reports [LaunchResult.Unavailable]. Once a runtime ships, this is where
+     * `NativeLoader.launchWineContainer` gets called, the container moves to
+     * [ContainerStatus.RUNNING], and the exe's play stats are updated.
+     */
+    suspend fun launch(containerId: String, exeId: String? = null): LaunchResult = mutex.withLock {
+        val container = containersById[containerId]
+            ?: return@withLock LaunchResult.Failed("Container not found")
+        val candidates = exesById.values.filter { it.containerId == containerId }
+        val exe = when {
+            exeId != null -> candidates.firstOrNull { it.id == exeId }
+            else -> candidates.firstOrNull { it.path == container.exePath } ?: candidates.firstOrNull()
+        } ?: return@withLock LaunchResult.Failed("Add an executable to launch ${container.name}")
+        LaunchResult.Unavailable("Wine runtime isn't bundled yet, so ${exe.name} can't start in this build")
+    }
+
     private fun persistLocked() {
         publish()
         runCatching { dao.write(ContainerSnapshot(containersById.values.toList(), exesById.values.toList())) }
@@ -261,6 +293,18 @@ class ContainerRepository internal constructor(
             return created
         }
     }
+}
+
+/** Outcome of [ContainerRepository.launch]. */
+sealed interface LaunchResult {
+    /** Wine started; [pid] is the launcher process id. */
+    data class Started(val pid: Int) : LaunchResult
+
+    /** Launching is not possible in this build (e.g. no Wine runtime bundled). */
+    data class Unavailable(val reason: String) : LaunchResult
+
+    /** The request was invalid (unknown container, no executable, …). */
+    data class Failed(val reason: String) : LaunchResult
 }
 
 /** Snapshot written by [ContainerDao]. Mirrors the two Room tables. */
@@ -346,15 +390,15 @@ class FileContainerStore(private val file: File) : ContainerDao {
         name = getString("name"),
         exePath = stringOrNull("exePath"),
         exeName = stringOrNull("exeName"),
-        wineVersion = optString("wineVersion", "wine-9.0"),
+        wineVersion = optString("wineVersion", ContainerDefaults.WINE_VERSION),
         dxvkVersion = stringOrNull("dxvkVersion"),
         driverId = stringOrNull("driverId"),
         status = runCatching { ContainerStatus.valueOf(optString("status")) }
             .getOrDefault(ContainerStatus.CREATED),
         createdAt = optLong("createdAt", System.currentTimeMillis()),
-        graphicsDriver = optString("graphicsDriver", "Turnip (default)"),
+        graphicsDriver = optString("graphicsDriver", ContainerDefaults.GRAPHICS_DRIVER),
         envVars = optJSONObject("envVars")?.toStringMap() ?: emptyMap(),
-        screenResolution = optString("screenResolution", "1280x720"),
+        screenResolution = optString("screenResolution", ContainerDefaults.SCREEN_RESOLUTION),
         isFullscreen = optBoolean("isFullscreen", false),
     )
 

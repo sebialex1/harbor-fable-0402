@@ -1,23 +1,33 @@
 package io.harbor.fable.ui.components
 
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import io.harbor.fable.ui.theme.*
+import io.harbor.fable.ui.theme.DockBg
+import io.harbor.fable.ui.theme.DockMetrics
+import io.harbor.fable.ui.theme.DockRadius
+import io.harbor.fable.ui.theme.FableGlassBorder
 
 /**
- * The bottom glass dock — a floating frosted bar that holds tab navigation.
- * Manages tabs: Home, Containers, Drivers, Assets, Settings.
+ * The floating glass dock that holds the primary tabs.
+ *
+ * It sits above the system navigation bar (gesture handle or 3-button bar) and items share
+ * the width equally, so it never clips on narrow screens. Screens reserve
+ * [DockMetrics.Clearance] plus the navigation-bar inset so their last item stays visible.
  */
 @Composable
 fun GlassDock(
@@ -26,54 +36,25 @@ fun GlassDock(
     onTabSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val shape = RoundedCornerShape(DockRadius)
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 12.dp),
-        contentAlignment = Alignment.BottomCenter,
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = DockMetrics.Margin),
+        contentAlignment = Alignment.Center,
     ) {
-        // Dock background — frosted glass bar
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(80.dp)
-                .clip(RoundedCornerShape(DockRadius))
-                .background(DockBg)
-                .blur(32.dp)
-        )
-        // Specular gradient on dock surface
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(80.dp)
-                .clip(RoundedCornerShape(DockRadius))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.06f),
-                            Color.Transparent,
-                            Color.White.copy(alpha = 0.02f),
-                        )
-                    )
-                )
-        )
-        // Border
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(80.dp)
-                .clip(RoundedCornerShape(DockRadius))
-                .shadow(0.dp, RoundedCornerShape(DockRadius))
-                .background(Color.Transparent)
-        )
-        // Items row
         Row(
             Modifier
+                .widthIn(max = 520.dp)
                 .fillMaxWidth()
-                .height(80.dp)
-                .clip(RoundedCornerShape(DockRadius))
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+                .height(DockMetrics.Height)
+                .clip(shape)
+                .background(DockBg)
+                .background(GlassSpecular)
+                .border(1.dp, FableGlassBorder, shape)
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             items.forEachIndexed { index, tab ->
@@ -82,6 +63,7 @@ fun GlassDock(
                     label = tab.label,
                     active = index == activeIndex,
                     onClick = { onTabSelected(index) },
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -90,5 +72,5 @@ fun GlassDock(
 
 data class DockTab(
     val label: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val icon: ImageVector,
 )

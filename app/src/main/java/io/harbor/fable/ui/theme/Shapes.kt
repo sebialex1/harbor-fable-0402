@@ -11,6 +11,12 @@ val FableShapes = Shapes(
     extraLarge = RoundedCornerShape(36.dp),
 )
 
-// Glass card corner radius — large rounded for frosted look
-val GlassRadius = 24.dp
-val DockRadius = 32.dp
+// Glass card corner radius — rounded for the frosted look, tight enough for dense lists.
+val GlassRadius = 20.dp
+val DockRadius = 28.dp
+
+// Buttons, text fields and selectable controls.
+val ControlRadius = 14.dp
+
+// Chips, pills and icon tiles.
+val ChipRadius = 10.dp

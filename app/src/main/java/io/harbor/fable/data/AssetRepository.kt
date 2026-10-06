@@ -174,6 +174,10 @@ class AssetRepository internal constructor(
                         }
                     }
                 } catch (error: Exception) {
+                    // A cancelled refresh (e.g. the screen that started it left composition)
+                    // must abort as a whole instead of publishing a partial catalog with a
+                    // "cancelled" error for every remaining source.
+                    if (error is kotlinx.coroutines.CancellationException) throw error
                     val message = when (error) {
                         is GitHubFetchException -> "HTTP ${error.httpCode}: ${error.message}"
                         is IOException -> error.message ?: "Network error"
@@ -359,11 +363,16 @@ class AssetRepository internal constructor(
         runCatching {
             val root = JSONObject(text)
             val array = root.optJSONArray("sources") ?: JSONArray()
+            val persisted = ArrayList<CatalogSource>(array.length())
             for (i in 0 until array.length()) {
                 val item = array.optJSONObject(i) ?: continue
                 val source = runCatching { catalogSourceFromJson(item) }.getOrNull() ?: continue
-                catalogSources[source.slug] = source
+                persisted += source
             }
+            // The file is only written by add/remove, so once it exists it is the full
+            // source list. Replacing the seeded defaults keeps removals across restarts.
+            catalogSources.clear()
+            persisted.forEach { catalogSources[it.slug] = it }
             _catalog.value = catalogSources.values.toList()
         }.onFailure { error ->
             Log.e(TAG, "Catalog unreadable, using defaults", error)

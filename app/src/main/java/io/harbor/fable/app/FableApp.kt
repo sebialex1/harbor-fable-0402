@@ -6,6 +6,7 @@ import io.harbor.fable.data.AssetRepository
 import io.harbor.fable.data.ContainerRepository
 import io.harbor.fable.data.DownloadManager
 import io.harbor.fable.data.GitHubReleaseFetcher
+import io.harbor.fable.data.SettingsRepository
 
 /**
  * Application entry point. Wires the data layer singletons and exposes them
@@ -29,6 +30,10 @@ class FableApp : Application() {
 
     val downloadManager: DownloadManager
         get() = DownloadManager.get(this)
+
+    /** App-wide settings, including the defaults used for new containers. */
+    val settingsRepository: SettingsRepository
+        get() = SettingsRepository.get(this)
 
     override fun onCreate() {
         super.onCreate()
