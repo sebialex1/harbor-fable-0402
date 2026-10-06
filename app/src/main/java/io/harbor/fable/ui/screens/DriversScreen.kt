@@ -2,7 +2,6 @@ package io.harbor.fable.ui.screens
 
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -10,6 +9,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -37,6 +37,7 @@ fun DriversScreen() {
     val isRefreshing by repository.isRefreshing.collectAsStateWithLifecycle()
     val downloadSnapshot by downloadManager.snapshot.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val expansion = rememberExpansionState()
 
     val deviceInfo = remember { DeviceProbe.read() }
 
@@ -103,9 +104,6 @@ fun DriversScreen() {
                 )
             }
         } else {
-            // Expand/collapse state for driver groups
-            val expansion = rememberExpansionState()
-
             item { SectionLabel("Available Packages") }
             items(grouped.keys.toList()) { groupName ->
                 val groupDrivers = grouped[groupName].orEmpty()

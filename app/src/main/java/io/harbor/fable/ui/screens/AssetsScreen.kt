@@ -2,13 +2,13 @@ package io.harbor.fable.ui.screens
 
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -35,6 +35,7 @@ fun AssetsScreen() {
     val isRefreshing by repository.isRefreshing.collectAsStateWithLifecycle()
     val downloadSnapshot by downloadManager.snapshot.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val expansion = rememberExpansionState()
 
     val grouped = remember(assets) {
         assets.groupBy { it.type }
@@ -67,8 +68,6 @@ fun AssetsScreen() {
                 )
             }
         } else {
-            val expansion = rememberExpansionState()
-
             orderedTypes.forEach { type ->
                 val typeAssets = grouped[type].orEmpty()
                 if (typeAssets.isNotEmpty()) {
@@ -175,7 +174,7 @@ private fun typeDisplayName(type: AssetType): String = when (type) {
 
 private fun assetTypeIcon(type: AssetType) = when (type) {
     AssetType.WINE -> Icons.Outlined.WineBar
-    AssetType.DXVK -> Icons.Outlined.Layer
+    AssetType.DXVK -> Icons.Outlined.Layers
     AssetType.VULKAN_DRIVER -> Icons.Outlined.Memory
     AssetType.PROTON -> Icons.Outlined.RocketLaunch
     AssetType.RUNTIME -> Icons.Outlined.SettingsInputComponent

@@ -18,7 +18,6 @@ import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.nativebridge.DeviceProbe
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableError
-import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen() {
@@ -26,7 +25,6 @@ fun SettingsScreen() {
     val app = remember(context) { FableApp.from(context) }
     val settingsRepo = app.settingsRepository
     val settings by settingsRepo.settings.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
     val deviceInfo = remember { DeviceProbe.read() }
     var showResetConfirm by remember { mutableStateOf(false) }
 

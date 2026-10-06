@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
@@ -110,7 +111,7 @@ fun ContainerDetailScreen(
                     InfoRow(
                         label = "DXVK",
                         value = container.dxvkVersion,
-                        icon = Icons.Outlined.Layer,
+                        icon = Icons.Outlined.Layers,
                     )
                 }
                 CardDivider()
