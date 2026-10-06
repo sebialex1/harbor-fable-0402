@@ -338,7 +338,7 @@ internal class WineRuntime(
         private val WINE_BINARIES = listOf("bin/wine", "bin/wine64")
         private const val FEX_ROOTFS_SEARCH_DEPTH = 3
 
-        /** Name of the file the native launcher writes Wine/Box64/FEX output to. */
+        /** Name of the file in the container directory that Wine/Box64/FEX output goes to. */
         const val LAUNCH_LOG = "fable-launch.log"
 
         /** `wine-9.20.wcp` -> `wine-9.20`, `Proton.9.0-x86_64.wcp` -> `Proton.9.0-x86_64`. */

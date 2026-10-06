@@ -373,11 +373,11 @@ class ContainerRepository internal constructor(
     private suspend fun startLocked(container: Container, exe: ExeEntry?, log: LaunchLog): LaunchResult {
         val runtime = runtime
             ?: return LaunchResult.Unavailable("Wine runtime isn't available in this build")
-        if (!NativeLoader.isLoaded) {
-            return LaunchResult.Unavailable("The native runtime couldn't load on this device")
-        }
         val dir = directory(container.id).also { it.mkdirs() }
         log.section("Pre-flight")
+        // Wine is started with ProcessBuilder now; libfable_native is only needed for the opt-in
+        // native launcher ($LAUNCHER_ENV=$LAUNCHER_NATIVE) and the driver tools.
+        log.line("native runtime loaded: ${NativeLoader.isLoaded}")
         log.line("container dir: ${dir.absolutePath} (exists=${dir.isDirectory}, writable=${dir.canWrite()})")
         log.line("wine version requested: ${container.wineVersion.ifBlank { "(newest bionic)" }}")
         log.line("downloaded bionic Wine packages: ${runtime.wineArchives().joinToString { it.name }.ifEmpty { "none" }}")
@@ -468,14 +468,94 @@ class ContainerRepository internal constructor(
                 add("LD_LIBRARY_PATH=${screen.x11LibDir}:/system/lib64")
             }
             // The container's own variables come last so they can override anything above.
-            current.envVars.forEach { (key, value) -> add("$key=$value") }
+            current.envVars.forEach { (key, value) -> if (key != LAUNCHER_ENV) add("$key=$value") }
         }
         val driver = runtime.activeDriverLibrary()
+        val useNative = current.envVars[LAUNCHER_ENV]?.trim().equals(LAUNCHER_NATIVE, ignoreCase = true)
         log.section("Command")
         log.line("${translator.executable.absolutePath} ${wineBinary.absolutePath} $program ${arguments.joinToString(" ")}".trim())
         log.line("driver: ${driver ?: "none (system Vulkan)"}")
-        log.section("Environment (Fable additions; the native launcher also sets WINEPREFIX, HOME, TMPDIR, PATH, BOX64_*)")
+        log.line("launcher: ${if (useNative) "native JNI fork/execve ($LAUNCHER_ENV=$LAUNCHER_NATIVE)" else "ProcessBuilder"}")
+        log.section("Environment (Fable additions; the launcher also sets WINEPREFIX, HOME, TMPDIR, PATH, BOX64_*)")
         environment.forEach { log.line(it) }
+        log.section("Launch")
+        val processLog = File(dir, WineRuntime.LAUNCH_LOG)
+        val started: WineProcess = if (useNative) {
+            launchNative(dir, program, arguments, environment, driver, translator, log, processLog)
+                ?: return nativeFailure(label)
+        } else {
+            val outcome = withContext(Dispatchers.IO) {
+                WineProcessLauncher.launch(
+                    WineProcessLauncher.Request(
+                        containerDir = dir,
+                        wine = wineBinary,
+                        translatorName = translator.name,
+                        translator = translator.executable,
+                        program = program,
+                        args = arguments,
+                        env = environment,
+                        driverPath = driver,
+                    ),
+                    log,
+                )
+            }
+            when (outcome) {
+                is WineProcessLauncher.Outcome.Started -> outcome.process
+                is WineProcessLauncher.Outcome.Failed -> {
+                    log.attachTail(processLog, "Process output (${processLog.name})")
+                    return LaunchResult.Failed("Couldn't start $label: ${outcome.reason}")
+                }
+            }
+        }
+        val pid = started.pid
+        log.line("spawned pid $pid")
+
+        // 6. A process that dies straight away has a reason worth showing (missing libraries, …).
+        delay(EARLY_EXIT_WINDOW_MS)
+        val earlyExit = started.exitCodeOrNull()
+        val diedEarly = if (started.process != null) {
+            earlyExit != null && earlyExit != 0
+        } else {
+            !started.isAlive() && !WineRuntime.exitedCleanly(dir)
+        }
+        if (diedEarly) {
+            log.error("process $pid exited within ${EARLY_EXIT_WINDOW_MS}ms${earlyExit?.let { " (exit status $it)" }.orEmpty()}")
+            // Give the reaper a moment to append the exit line before the tail is copied.
+            delay(REAPER_GRACE_MS)
+            log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
+            setStatus(container.id, ContainerStatus.READY)
+            val reason = WineRuntime.lastLogLine(dir)
+            val hint = translator.earlyExitHint
+                ?.takeIf { current.envVars.keys.none { key -> key == FEX_ROOTFS_ENV } }
+                ?.let { " ($it)" }
+                .orEmpty()
+            return LaunchResult.Failed(
+                (if (reason != null) "$label stopped right away: $reason" else "$label stopped right away") + hint
+            )
+        }
+        markStarted(container.id, exe?.id, started, log, processLog)
+        return LaunchResult.Started(pid)
+    }
+
+    /**
+     * The old JNI fork/execve launcher, kept only as an opt-in diagnostic path
+     * ([LAUNCHER_ENV]=[LAUNCHER_NATIVE] in the container's environment). It crashed the app with
+     * a native signal on Android 16, so it is never used automatically. Null on failure.
+     */
+    private suspend fun launchNative(
+        dir: File,
+        program: String,
+        arguments: List<String>,
+        environment: List<String>,
+        driver: String?,
+        translator: ResolvedTranslator,
+        log: LaunchLog,
+        processLog: File,
+    ): WineProcess? {
+        if (!NativeLoader.isLoaded) {
+            log.error("native launcher requested but libfable_native didn't load")
+            return null
+        }
         val pid = try {
             withContext(Dispatchers.IO) {
                 NativeLoader.launchWineContainer(
@@ -490,34 +570,21 @@ class ContainerRepository internal constructor(
             }
         } catch (error: UnsatisfiedLinkError) {
             log.error("native launcher missing", error)
-            return LaunchResult.Unavailable("The native runtime couldn't load on this device")
+            return null
         }
-        val processLog = File(dir, WineRuntime.LAUNCH_LOG)
         if (pid <= 0) {
             val reason = runCatching { NativeLoader.lastLaunchError() }.getOrNull()
             log.error("native launcher returned $pid: ${reason ?: "no reason"}")
             log.attachTail(processLog, "Process output (${processLog.name})")
-            return LaunchResult.Failed(reason?.let { "Couldn't start $label: $it" } ?: "Couldn't start $label")
+            return null
         }
-        log.line("spawned pid $pid")
+        return WineProcess(pid, null)
+    }
 
-        // 6. A process that dies straight away has a reason worth showing (missing libraries, …).
-        delay(EARLY_EXIT_WINDOW_MS)
-        if (!WineRuntime.isAlive(pid) && !WineRuntime.exitedCleanly(dir)) {
-            log.error("process $pid exited within ${EARLY_EXIT_WINDOW_MS}ms")
-            log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
-            setStatus(container.id, ContainerStatus.READY)
-            val reason = WineRuntime.lastLogLine(dir)
-            val hint = translator.earlyExitHint
-                ?.takeIf { current.envVars.keys.none { key -> key == FEX_ROOTFS_ENV } }
-                ?.let { " ($it)" }
-                .orEmpty()
-            return LaunchResult.Failed(
-                (if (reason != null) "$label stopped right away: $reason" else "$label stopped right away") + hint
-            )
-        }
-        markStarted(container.id, exe?.id, pid, log, processLog)
-        return LaunchResult.Started(pid)
+    private fun nativeFailure(label: String): LaunchResult {
+        if (!NativeLoader.isLoaded) return LaunchResult.Unavailable("The native runtime couldn't load on this device")
+        val reason = runCatching { NativeLoader.lastLaunchError() }.getOrNull()
+        return LaunchResult.Failed(reason?.let { "Couldn't start $label: $it" } ?: "Couldn't start $label")
     }
 
     /**
@@ -608,7 +675,8 @@ class ContainerRepository internal constructor(
     }
 
     /** Records a started process: container RUNNING, exe play stats, and a watcher that flips back on exit. */
-    private suspend fun markStarted(containerId: String, exeId: String?, pid: Int, log: LaunchLog, processLog: File) {
+    private suspend fun markStarted(containerId: String, exeId: String?, started: WineProcess, log: LaunchLog, processLog: File) {
+        val pid = started.pid
         mutex.withLock {
             containersById[containerId]?.let { containersById[containerId] = it.copy(status = ContainerStatus.RUNNING) }
             exeId?.let { id ->
@@ -618,8 +686,8 @@ class ContainerRepository internal constructor(
         }
         runningPids.getOrPut(containerId) { ConcurrentHashMap.newKeySet() }.add(pid)
         scope.launch {
-            while (WineRuntime.isAlive(pid)) delay(PROCESS_POLL_MS)
-            // The native reaper appends "[fable] exit code N" / "killed by signal N"; give it a beat.
+            while (started.isAlive()) delay(PROCESS_POLL_MS)
+            // The reaper thread appends "[fable] exit code N" / "killed by signal N"; give it a beat.
             delay(PROCESS_POLL_MS)
             log.section("Process $pid ended")
             log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
@@ -667,6 +735,14 @@ class ContainerRepository internal constructor(
         /** How long a freshly started process is watched for an immediate crash. */
         private const val EARLY_EXIT_WINDOW_MS = 1_200L
         private const val PROCESS_POLL_MS = 1_500L
+        private const val REAPER_GRACE_MS = 200L
+
+        /**
+         * Container environment switch for the launcher: `FABLE_LAUNCHER=native` selects the old
+         * JNI fork/execve path (diagnostics only). Never passed on to Wine.
+         */
+        private const val LAUNCHER_ENV = "FABLE_LAUNCHER"
+        private const val LAUNCHER_NATIVE = "native"
 
         /**
          * Room schema the file store stands in for. Not executed.
