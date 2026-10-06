@@ -13,6 +13,7 @@ object ContainerDefaults {
     const val WINE_VERSION = "wine-9.0"
     const val GRAPHICS_DRIVER = "RADV Xclipse"
     const val SCREEN_RESOLUTION = "1280x720"
+    const val TRANSLATOR = "box64"
 
     val RESOLUTION_PRESETS: List<String> = listOf(
         "800x600",
@@ -38,6 +39,8 @@ data class Container(
     val envVars: Map<String, String> = emptyMap(),
     val screenResolution: String = ContainerDefaults.SCREEN_RESOLUTION,
     val isFullscreen: Boolean = false,
+    /** x86 translation layer: "box64" or "fex". */
+    val translator: String = ContainerDefaults.TRANSLATOR,
 )
 
 data class ExeEntry(

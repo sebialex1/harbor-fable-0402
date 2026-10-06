@@ -98,6 +98,7 @@ internal fun AssetsContent(
         listOf(
             AssetType.WINE,
             AssetType.BOX64,
+            AssetType.FEX,
             AssetType.DXVK,
             AssetType.VULKAN_DRIVER,
             AssetType.PROTON,
@@ -274,6 +275,7 @@ internal fun SetupBanner(
 private fun typeDisplayName(type: AssetType): String = when (type) {
     AssetType.WINE -> "Wine Builds"
     AssetType.BOX64 -> "Box64"
+    AssetType.FEX -> "FEX"
     AssetType.DXVK -> "DXVK"
     AssetType.VULKAN_DRIVER -> "Vulkan Drivers"
     AssetType.PROTON -> "Proton"
@@ -284,6 +286,7 @@ private fun typeDisplayName(type: AssetType): String = when (type) {
 private fun assetTypeIcon(type: AssetType) = when (type) {
     AssetType.WINE -> Icons.Outlined.WineBar
     AssetType.BOX64 -> Icons.Outlined.Terminal
+    AssetType.FEX -> Icons.Outlined.DeveloperBoard
     AssetType.DXVK -> Icons.Outlined.Layers
     AssetType.VULKAN_DRIVER -> Icons.Outlined.Memory
     AssetType.PROTON -> Icons.Outlined.RocketLaunch

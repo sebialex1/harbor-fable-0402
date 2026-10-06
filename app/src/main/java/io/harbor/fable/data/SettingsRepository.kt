@@ -29,6 +29,7 @@ data class AppSettings(
     val defaultDxvkVersion: String? = null,
     val defaultResolution: String = ContainerDefaults.SCREEN_RESOLUTION,
     val defaultFullscreen: Boolean = false,
+    val defaultTranslator: String = ContainerDefaults.TRANSLATOR,
     val vsync: Boolean = true,
     val framePacing: FramePacing = FramePacing.ADAPTIVE,
     val refreshCatalogOnLaunch: Boolean = true,
@@ -73,6 +74,7 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
             defaultDxvkVersion = prefs.getString(KEY_DXVK, null),
             defaultResolution = prefs.getString(KEY_RESOLUTION, null) ?: defaults.defaultResolution,
             defaultFullscreen = prefs.getBoolean(KEY_FULLSCREEN, defaults.defaultFullscreen),
+            defaultTranslator = prefs.getString(KEY_TRANSLATOR, null) ?: defaults.defaultTranslator,
             vsync = prefs.getBoolean(KEY_VSYNC, defaults.vsync),
             framePacing = prefs.getString(KEY_FRAME_PACING, null)
                 ?.let { name -> FramePacing.entries.firstOrNull { it.name == name } }
@@ -90,6 +92,7 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
             .putString(KEY_DXVK, settings.defaultDxvkVersion)
             .putString(KEY_RESOLUTION, settings.defaultResolution)
             .putBoolean(KEY_FULLSCREEN, settings.defaultFullscreen)
+            .putString(KEY_TRANSLATOR, settings.defaultTranslator)
             .putBoolean(KEY_VSYNC, settings.vsync)
             .putString(KEY_FRAME_PACING, settings.framePacing.name)
             .putBoolean(KEY_REFRESH_ON_LAUNCH, settings.refreshCatalogOnLaunch)
@@ -105,6 +108,7 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
         private const val KEY_DXVK = "default_dxvk_version"
         private const val KEY_RESOLUTION = "default_resolution"
         private const val KEY_FULLSCREEN = "default_fullscreen"
+        private const val KEY_TRANSLATOR = "default_translator"
         private const val KEY_VSYNC = "vsync"
         private const val KEY_FRAME_PACING = "frame_pacing"
         private const val KEY_REFRESH_ON_LAUNCH = "refresh_catalog_on_launch"

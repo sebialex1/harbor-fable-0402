@@ -25,6 +25,17 @@ internal sealed interface Box64Status {
     data class NoExecutable(val packageName: String) : Box64Status
 }
 
+/** Result of looking for a usable `FEXInterpreter` executable. */
+internal sealed interface FexStatus {
+    data class Ready(val executable: File) : FexStatus
+
+    /** No FEX package has been downloaded yet. */
+    data object NotDownloaded : FexStatus
+
+    /** A package is on disk but nothing inside it is a `FEXInterpreter` executable. */
+    data class NoExecutable(val packageName: String) : FexStatus
+}
+
 /** A Wine tree extracted into a container directory. */
 internal data class InstalledWine(val build: String, val binary: File)
 
@@ -43,6 +54,7 @@ internal class WineRuntime(
     private val runtimeRoot: File,
 ) {
     private val box64Lock = Mutex()
+    private val fexLock = Mutex()
 
     // --- Wine -----------------------------------------------------------------------------
 
@@ -142,6 +154,51 @@ internal class WineRuntime(
                 }
             }
             Box64Status.NoExecutable(packages.first().name)
+        }
+    }
+
+    // --- FEX (optional alternative to Box64) -----------------------------------------------
+
+    fun hasFexDownload(): Boolean = assets.downloadedFiles(AssetType.FEX).isNotEmpty()
+
+    /**
+     * Returns the `FEXInterpreter` executable from the newest downloaded FEX package, unpacking
+     * it into app storage the first time. Mirrors [ensureBox64].
+     */
+    suspend fun ensureFex(): FexStatus = fexLock.withLock {
+        withContext(Dispatchers.IO) {
+            val packages = assets.downloadedFiles(AssetType.FEX)
+            if (packages.isEmpty()) return@withContext FexStatus.NotDownloaded
+            for (pkg in packages) {
+                val dir = File(runtimeRoot, "fex/${sanitizeFileName(pkg.name)}")
+                val done = File(dir, COMPLETE_MARKER)
+                if (!done.isFile) {
+                    dir.deleteRecursively()
+                    dir.mkdirs()
+                    try {
+                        if (ArchiveExtractor.detectFormat(pkg) == ArchiveFormat.ELF) {
+                            pkg.copyTo(File(dir, "FEXInterpreter"), overwrite = true)
+                        } else {
+                            ArchiveExtractor.extract(pkg, dir, context = coroutineContext)
+                        }
+                        done.writeText(pkg.name)
+                    } catch (error: CancellationException) {
+                        dir.deleteRecursively()
+                        throw error
+                    } catch (error: Exception) {
+                        Log.w(TAG, "Could not unpack ${pkg.name}", error)
+                        dir.deleteRecursively()
+                        continue
+                    }
+                }
+                val executable = ArchiveExtractor.findFile(dir, "FEXInterpreter")
+                if (executable != null) {
+                    executable.setReadable(true, false)
+                    executable.setExecutable(true, false)
+                    return@withContext FexStatus.Ready(executable)
+                }
+            }
+            FexStatus.NoExecutable(packages.first().name)
         }
     }
 

@@ -109,6 +109,7 @@ class ContainerRepository internal constructor(
         envVars: Map<String, String> = emptyMap(),
         dxvkVersion: String? = null,
         driverId: String? = null,
+        translator: String = ContainerDefaults.TRANSLATOR,
     ): Container {
         val trimmed = name.trim()
         require(trimmed.isNotEmpty()) { "Container name is required" }
@@ -122,6 +123,7 @@ class ContainerRepository internal constructor(
                 envVars = envVars,
                 dxvkVersion = dxvkVersion,
                 driverId = driverId,
+                translator = translator,
                 status = ContainerStatus.CREATED,
             )
         )
@@ -487,7 +489,8 @@ class ContainerRepository internal constructor(
                 graphicsDriver TEXT NOT NULL,
                 envVars TEXT NOT NULL,
                 screenResolution TEXT NOT NULL,
-                isFullscreen INTEGER NOT NULL
+                isFullscreen INTEGER NOT NULL,
+                translator TEXT NOT NULL DEFAULT 'box64'
             );
             CREATE TABLE exes (
                 id TEXT NOT NULL PRIMARY KEY,
@@ -606,6 +609,7 @@ class FileContainerStore(private val file: File) : ContainerDao {
         put("envVars", JSONObject(envVars))
         put("screenResolution", screenResolution)
         put("isFullscreen", isFullscreen)
+        put("translator", translator)
     }
 
     private fun JSONObject.toContainer(): Container = Container(
@@ -623,6 +627,7 @@ class FileContainerStore(private val file: File) : ContainerDao {
         envVars = optJSONObject("envVars")?.toStringMap() ?: emptyMap(),
         screenResolution = optString("screenResolution", ContainerDefaults.SCREEN_RESOLUTION),
         isFullscreen = optBoolean("isFullscreen", false),
+        translator = optString("translator", ContainerDefaults.TRANSLATOR).ifBlank { ContainerDefaults.TRANSLATOR },
     )
 
     private fun ExeEntry.toJson(): JSONObject = JSONObject().apply {

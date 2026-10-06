@@ -3,7 +3,7 @@ package io.harbor.fable.data.models
 import java.util.UUID
 
 enum class AssetType {
-    WINE, BOX64, DXVK, VULKAN_DRIVER, PROTON, RUNTIME, OTHER
+    WINE, BOX64, FEX, DXVK, VULKAN_DRIVER, PROTON, RUNTIME, OTHER
 }
 
 enum class AssetSource {

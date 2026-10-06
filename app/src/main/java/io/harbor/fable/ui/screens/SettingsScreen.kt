@@ -61,6 +61,7 @@ internal fun SettingsContent(
     onResetClick: () -> Unit,
 ) {
     val resolutionOptions = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) }
+    val translatorOptions = TRANSLATOR_OPTIONS
     val framePacingOptions = FramePacing.entries.map { SelectOption(it, it.label) }
     val appear = rememberLiquidAppear()
 
@@ -80,6 +81,14 @@ internal fun SettingsContent(
                     selected = settings.defaultResolution,
                     onSelect = { res -> onUpdate { it.copy(defaultResolution = res) } },
                     icon = Icons.Outlined.AspectRatio,
+                )
+                CardDivider()
+                OptionSelector(
+                    label = "Translation layer",
+                    options = translatorOptions,
+                    selected = settings.defaultTranslator,
+                    onSelect = { t -> onUpdate { it.copy(defaultTranslator = t) } },
+                    icon = Icons.Outlined.DeveloperBoard,
                 )
                 CardDivider()
                 ToggleRow(

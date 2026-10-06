@@ -69,6 +69,9 @@ fun ContainerDetailScreen(
         onSelectResolution = { res ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(screenResolution = res)) } }
         },
+        onSelectTranslator = { translator ->
+            container?.let { fableUi.scope.launch { repository.update(it.copy(translator = translator)) } }
+        },
         onFullscreenChange = { fullscreen ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(isFullscreen = fullscreen)) } }
         },
@@ -109,6 +112,7 @@ internal fun ContainerDetailContent(
     onLaunchExe: (ExeEntry) -> Unit,
     onSetPrimary: (ExeEntry) -> Unit,
     onSelectResolution: (String) -> Unit,
+    onSelectTranslator: (String) -> Unit,
     onFullscreenChange: (Boolean) -> Unit,
     onAddExe: () -> Unit,
     onDelete: () -> Unit,
@@ -188,6 +192,14 @@ internal fun ContainerDetailContent(
                     selected = container.screenResolution,
                     onSelect = onSelectResolution,
                     icon = Icons.Outlined.AspectRatio,
+                )
+                CardDivider()
+                OptionSelector(
+                    label = "Translation layer",
+                    options = TRANSLATOR_OPTIONS,
+                    selected = container.translator,
+                    onSelect = onSelectTranslator,
+                    icon = Icons.Outlined.DeveloperBoard,
                 )
                 CardDivider()
                 ToggleRow(

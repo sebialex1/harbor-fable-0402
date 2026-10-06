@@ -29,6 +29,9 @@ import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
+/** Selectable x86 translation layers. Values match [Container.translator]. */
+internal val TRANSLATOR_OPTIONS = listOf(SelectOption("box64", "Box64"), SelectOption("fex", "FEX"))
+
 @Composable
 fun ContainersScreen(
     onContainerClick: (String) -> Unit,
@@ -53,8 +56,9 @@ fun ContainersScreen(
             defaultResolution = appSettings.defaultResolution,
             defaultWineVersion = appSettings.defaultWineVersion,
             defaultFullscreen = appSettings.defaultFullscreen,
+            defaultTranslator = appSettings.defaultTranslator,
             onDismiss = { showCreate = false },
-            onCreate = { name, resolution, wineVersion, fullscreen ->
+            onCreate = { name, resolution, wineVersion, fullscreen, translator ->
                 scope.launch {
                     repository.create(
                         name = name,
@@ -64,6 +68,7 @@ fun ContainersScreen(
                         graphicsDriver = appSettings.defaultGraphicsDriver,
                         dxvkVersion = appSettings.defaultDxvkVersion,
                         driverId = appSettings.defaultDriverId,
+                        translator = translator,
                     )
                 }
                 showCreate = false
@@ -149,12 +154,14 @@ private fun CreateContainerSheet(
     defaultResolution: String,
     defaultWineVersion: String,
     defaultFullscreen: Boolean,
+    defaultTranslator: String,
     onDismiss: () -> Unit,
-    onCreate: (name: String, resolution: String, wineVersion: String, fullscreen: Boolean) -> Unit,
+    onCreate: (name: String, resolution: String, wineVersion: String, fullscreen: Boolean, translator: String) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var resolution by remember { mutableStateOf(defaultResolution) }
     var fullscreen by remember { mutableStateOf(defaultFullscreen) }
+    var translator by remember { mutableStateOf(defaultTranslator) }
     val wineVersion = defaultWineVersion
 
     FableSheet(
@@ -177,6 +184,14 @@ private fun CreateContainerSheet(
                 icon = Icons.Outlined.AspectRatio,
             )
             CardDivider()
+            OptionSelector(
+                label = "Translation layer",
+                options = TRANSLATOR_OPTIONS,
+                selected = translator,
+                onSelect = { translator = it },
+                icon = Icons.Outlined.DeveloperBoard,
+            )
+            CardDivider()
             ToggleRow(
                 title = "Fullscreen",
                 checked = fullscreen,
@@ -192,7 +207,7 @@ private fun CreateContainerSheet(
             modifier = Modifier.fillMaxWidth(),
             onClick = {
                 if (name.isNotBlank()) {
-                    close { onCreate(name.trim(), resolution, wineVersion, fullscreen) }
+                    close { onCreate(name.trim(), resolution, wineVersion, fullscreen, translator) }
                 }
             },
         )
