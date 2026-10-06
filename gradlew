@@ -86,7 +86,7 @@ location of your Java installation."
 fi
 
 # Increase the maximum file descriptors if we can.
-if [ "$cygwin" -o "$darwin" -o "$nonstop" = false ] ; then
+if [ "$cygwin" = false -a "$darwin" = false -a "$nonstop" = false ] ; then
     MAX_FD_LIMIT=`ulimit -H -n`
     if [ $? -eq 0 ] ; then
         if [ "$MAX_FD" = "maximum" -o "$MAX_FD" = "max" ] ; then
@@ -97,7 +97,7 @@ if [ "$cygwin" -o "$darwin" -o "$nonstop" = false ] ; then
 fi
 
 # Collect all arguments in a way that the Cygwin/MSYS path mangling can handle.
-if [ "$cygwin" -o "$msys" = true ] ; then
+if [ "$cygwin" = true -o "$msys" = true ] ; then
     APP_HOME=`cygpath --path --mixed "$APP_HOME"`
     CLASSPATH=`cygpath --path --mixed "$CLASSPATH"`
 
