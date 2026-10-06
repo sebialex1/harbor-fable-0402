@@ -21,13 +21,18 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableAccentLight
+import io.harbor.fable.ui.theme.FableLiquidBlue
+import io.harbor.fable.ui.theme.FableLiquidMagenta
+import io.harbor.fable.ui.theme.FableLiquidTeal
 import io.harbor.fable.ui.theme.Motion
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 
 /** True when RenderEffect blur is available (API 31+); below that [Modifier.blur] is a no-op. */
@@ -38,98 +43,140 @@ fun Modifier.softBlur(radius: Dp): Modifier =
     if (supportsBlur) blur(radius, BlurredEdgeTreatment.Unbounded) else this
 
 /**
- * Slowly drifting colour blobs behind glass. Three radial gradients orbit the canvas on
- * incommensurate periods so the pattern never visibly repeats; on API 31+ the whole layer is
- * blurred into liquid light, elsewhere the gradients are soft enough on their own.
+ * The liquid light behind the glass: five large colour fields that overlap and drift on
+ * incommensurate periods, so the pattern never visibly repeats, under a soft vignette that keeps
+ * the corners dark. Each field is a multi-stop radial gradient, which is smooth on its own; with
+ * [blurred] (API 31+) the whole layer is additionally blurred into one continuous wash.
  *
  * [intensity] scales the alpha so the same backdrop works behind a full setup screen (1f) and
- * faintly behind lists (0.35f).
+ * faintly behind lists (0.4f). [animated] moves the fields; a static backdrop costs nothing per
+ * frame, which is what the main shell uses. The blur is only worth its per-frame cost while the
+ * fields move, hence the default.
  */
 @Composable
 fun LiquidBackdrop(
     modifier: Modifier = Modifier,
     intensity: Float = 1f,
     animated: Boolean = true,
+    blurred: Boolean = animated,
 ) {
-    val transition = rememberInfiniteTransition(label = "liquid")
-    val phaseA by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(26_000, easing = LinearEasing), RepeatMode.Restart),
-        label = "phaseA",
-    )
-    val phaseB by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(37_000, easing = LinearEasing), RepeatMode.Restart),
-        label = "phaseB",
-    )
-    val breathe by transition.animateFloat(
-        initialValue = 0.92f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(tween(9_000, easing = Motion.EaseInOut), RepeatMode.Reverse),
-        label = "breathe",
-    )
-    val a = if (animated) phaseA else 0.2f
-    val b = if (animated) phaseB else 0.6f
-    val scale = if (animated) breathe else 1f
+    val a: Float
+    val b: Float
+    val c: Float
+    val scale: Float
+    if (animated) {
+        val transition = rememberInfiniteTransition(label = "liquid")
+        val phaseA by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(32_000, easing = LinearEasing), RepeatMode.Restart),
+            label = "phaseA",
+        )
+        val phaseB by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(47_000, easing = LinearEasing), RepeatMode.Restart),
+            label = "phaseB",
+        )
+        val phaseC by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(61_000, easing = LinearEasing), RepeatMode.Restart),
+            label = "phaseC",
+        )
+        val breathe by transition.animateFloat(
+            initialValue = 0.94f,
+            targetValue = 1.06f,
+            animationSpec = infiniteRepeatable(tween(11_000, easing = Motion.EaseInOut), RepeatMode.Reverse),
+            label = "breathe",
+        )
+        a = phaseA
+        b = phaseB
+        c = phaseC
+        scale = breathe
+    } else {
+        a = 0.18f
+        b = 0.62f
+        c = 0.37f
+        scale = 1f
+    }
 
     Box(modifier.fillMaxSize()) {
         Canvas(
             Modifier
                 .fillMaxSize()
-                .softBlur(72.dp),
+                .then(if (blurred) Modifier.softBlur(80.dp) else Modifier),
         ) {
             val w = size.width
             val h = size.height
             val tau = (Math.PI * 2).toFloat()
+            val span = max(w, h)
 
-            fun blob(color: Color, cx: Float, cy: Float, radius: Float, alpha: Float) {
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(color.copy(alpha = alpha * intensity), color.copy(alpha = 0f)),
-                        center = Offset(cx, cy),
-                        radius = radius,
-                    ),
-                    radius = radius,
-                    center = Offset(cx, cy),
-                )
-            }
-
-            // Violet: the brand colour, top-left orbit.
-            blob(
+            // Violet: the brand colour, high and to the left.
+            liquidField(
                 color = FableAccent,
-                cx = w * (0.30f + 0.14f * cos(a * tau)),
-                cy = h * (0.22f + 0.10f * sin(a * tau)),
-                radius = w * 0.62f * scale,
-                alpha = 0.55f,
+                center = Offset(w * (0.28f + 0.14f * cos(a * tau)), h * (0.20f + 0.10f * sin(a * tau))),
+                radius = span * 0.46f * scale,
+                alpha = 0.58f * intensity,
             )
-            // Cool blue: lower-right, slower.
-            blob(
-                color = Color(0xFF3B82F6),
-                cx = w * (0.76f + 0.12f * cos(b * tau + 1.3f)),
-                cy = h * (0.70f + 0.12f * sin(b * tau + 1.3f)),
-                radius = w * 0.58f * scale,
-                alpha = 0.40f,
+            // Cool blue: low and to the right, slower.
+            liquidField(
+                color = FableLiquidBlue,
+                center = Offset(w * (0.78f + 0.12f * cos(b * tau + 1.3f)), h * (0.72f + 0.12f * sin(b * tau + 1.3f))),
+                radius = span * 0.42f * scale,
+                alpha = 0.42f * intensity,
             )
-            // Warm magenta highlight that crosses the middle.
-            blob(
-                color = Color(0xFFE879F9),
-                cx = w * (0.55f + 0.26f * sin(a * tau * 0.5f + 0.4f)),
-                cy = h * (0.48f + 0.16f * cos(b * tau * 0.8f)),
-                radius = w * 0.40f * scale,
-                alpha = 0.26f,
+            // Magenta: crosses the middle, where glass panes pick it up as warmth.
+            liquidField(
+                color = FableLiquidMagenta,
+                center = Offset(w * (0.56f + 0.26f * sin(a * tau * 0.5f + 0.4f)), h * (0.46f + 0.16f * cos(b * tau * 0.8f))),
+                radius = span * 0.30f * scale,
+                alpha = 0.24f * intensity,
             )
-            // Light accent that keeps the glass sheen alive.
-            blob(
+            // Teal: a small cool note top-right that keeps the palette from going flat.
+            liquidField(
+                color = FableLiquidTeal,
+                center = Offset(w * (0.86f + 0.08f * sin(c * tau)), h * (0.14f + 0.08f * cos(c * tau + 0.9f))),
+                radius = span * 0.22f * scale,
+                alpha = 0.14f * intensity,
+            )
+            // Light violet: bottom-left, keeps the sheen alive on the lower cards.
+            liquidField(
                 color = FableAccentLight,
-                cx = w * (0.18f + 0.10f * sin(b * tau)),
-                cy = h * (0.82f + 0.06f * cos(a * tau)),
-                radius = w * 0.34f * scale,
-                alpha = 0.22f,
+                center = Offset(w * (0.16f + 0.10f * sin(b * tau)), h * (0.86f + 0.06f * cos(a * tau))),
+                radius = span * 0.26f * scale,
+                alpha = 0.22f * intensity,
+            )
+            // Vignette: the corners fall back into the canvas so the light reads as depth.
+            drawRect(
+                brush = Brush.radialGradient(
+                    0f to Color.Transparent,
+                    0.6f to Color.Transparent,
+                    1f to Color.Black.copy(alpha = 0.42f),
+                    center = Offset(w * 0.5f, h * 0.45f),
+                    radius = span * 0.75f,
+                ),
             )
         }
     }
+}
+
+/** One soft field of light: a radial gradient with enough stops to fade out without banding. */
+private fun DrawScope.liquidField(color: Color, center: Offset, radius: Float, alpha: Float) {
+    if (radius <= 0f || alpha <= 0f) return
+    drawCircle(
+        brush = Brush.radialGradient(
+            0f to color.copy(alpha = alpha),
+            0.28f to color.copy(alpha = alpha * 0.62f),
+            0.58f to color.copy(alpha = alpha * 0.22f),
+            0.82f to color.copy(alpha = alpha * 0.05f),
+            1f to color.copy(alpha = 0f),
+            center = center,
+            radius = radius,
+        ),
+        radius = radius,
+        center = center,
+    )
 }
 
 /**

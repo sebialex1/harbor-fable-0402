@@ -1,7 +1,5 @@
 package io.harbor.fable.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -14,14 +12,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import io.harbor.fable.ui.theme.DockBg
-import io.harbor.fable.ui.theme.DockBorder
 import io.harbor.fable.ui.theme.DockMetrics
 import io.harbor.fable.ui.theme.DockRadius
 
@@ -29,9 +21,10 @@ import io.harbor.fable.ui.theme.DockRadius
  * The floating glass dock that holds the primary tabs.
  *
  * It sits above the system navigation bar (gesture handle or 3-button bar) and items share
- * the width equally, so it never clips on narrow screens. A soft dark shadow lifts it off the
- * content scrolling underneath. Screens reserve [DockMetrics.Clearance] plus the navigation-bar
- * inset so their last item stays visible.
+ * the width equally, so it never clips on narrow screens. It is a [GlassLevel.Floating] pane:
+ * a deep, long shadow lifts it off the content scrolling underneath and the rim light marks its
+ * edge without a border. Screens reserve [DockMetrics.Clearance] plus the navigation-bar inset
+ * so their last item stays visible.
  */
 @Composable
 fun GlassDock(
@@ -53,16 +46,7 @@ fun GlassDock(
                 .widthIn(max = 520.dp)
                 .fillMaxWidth()
                 .height(DockMetrics.Height)
-                .shadow(
-                    elevation = 18.dp,
-                    shape = shape,
-                    ambientColor = Color.Black.copy(alpha = 0.5f),
-                    spotColor = Color.Black.copy(alpha = 0.9f),
-                )
-                .clip(shape)
-                .background(DockBg)
-                .background(GlassSheen)
-                .border(Dp.Hairline, DockBorder, shape)
+                .glassSurface(shape = shape, level = GlassLevel.Floating)
                 .padding(horizontal = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,

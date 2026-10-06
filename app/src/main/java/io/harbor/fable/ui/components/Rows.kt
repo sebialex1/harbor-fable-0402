@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -34,15 +35,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.runtime.getValue
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.ChipRadius
 import io.harbor.fable.ui.theme.FableAccent
+import io.harbor.fable.ui.theme.FableAccentLight
 import io.harbor.fable.ui.theme.FableControl
 import io.harbor.fable.ui.theme.FableControlBorder
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.Motion
+import io.harbor.fable.ui.theme.PillRadius
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
@@ -55,11 +61,16 @@ fun IconTile(
     tint: Color = FableAccent,
     size: Dp = 34.dp,
 ) {
+    val shape = RoundedCornerShape(ChipRadius + 2.dp)
     Box(
         modifier
             .size(size)
-            .clip(RoundedCornerShape(ChipRadius + 2.dp))
-            .background(tint.copy(alpha = 0.14f)),
+            .clip(shape)
+            .background(tint.copy(alpha = 0.14f))
+            .background(
+                Brush.verticalGradient(listOf(tint.copy(alpha = 0.10f), Color.Transparent)),
+            )
+            .glassRim(shape, GlassLevel.Control, tint.copy(alpha = 0.7f)),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.52f))
@@ -272,7 +283,7 @@ fun Pill(
 ) {
     Row(
         modifier
-            .clip(RoundedCornerShape(ChipRadius))
+            .clip(RoundedCornerShape(PillRadius))
             .background(containerColor)
             .padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -299,10 +310,26 @@ fun GlassChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val shape = RoundedCornerShape(ChipRadius + 2.dp)
+    val fill by animateColorAsState(
+        targetValue = if (selected) FableAccent.copy(alpha = 0.26f) else GlassLevel.Control.fill,
+        animationSpec = Motion.inPlace(),
+        label = "chipFill",
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (selected) FableText else FableTextDim,
+        animationSpec = Motion.inPlace(),
+        label = "chipText",
+    )
     Box(
         modifier
-            .clip(RoundedCornerShape(ChipRadius + 2.dp))
-            .background(if (selected) FableAccent.copy(alpha = 0.22f) else FableControl)
+            .glassSurface(
+                shape = shape,
+                level = GlassLevel.Control,
+                fill = fill,
+                sheenColor = if (selected) FableAccentLight else Color.White,
+                sheenAlpha = if (selected) 0.14f else GlassLevel.Control.sheen,
+            )
             .clickable(role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
@@ -310,7 +337,7 @@ fun GlassChip(
         Text(
             text = text,
             style = MaterialTheme.typography.labelLarge,
-            color = if (selected) FableText else FableTextDim,
+            color = textColor,
             maxLines = 1,
         )
     }

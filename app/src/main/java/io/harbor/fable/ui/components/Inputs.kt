@@ -2,16 +2,14 @@ package io.harbor.fable.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -60,20 +58,22 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.ControlRadius
+import io.harbor.fable.ui.theme.DialogRadius
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableError
 import io.harbor.fable.ui.theme.FableControl
-import io.harbor.fable.ui.theme.FableControlBorder
+import io.harbor.fable.ui.theme.FableGlassShadow
+import io.harbor.fable.ui.theme.FableGlassShadowSpot
 import io.harbor.fable.ui.theme.FableOutline
-import io.harbor.fable.ui.theme.FableSurface
-import io.harbor.fable.ui.theme.FableSurfaceRaised
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.GlassShadow
+import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
+import io.harbor.fable.ui.theme.SheetRadius
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
@@ -240,9 +240,10 @@ private fun <T> OptionRow(option: SelectOption<T>, selected: Boolean, onClick: (
 }
 
 /**
- * Modal sheet with the Fable look: a charcoal glass surface with a hairline edge and a soft
- * shadow, a title, optional subtitle and scrollable content. The sheet slides up with the
- * system animation while its content fades and rises into place.
+ * Modal sheet with the Fable look: a [GlassLevel.Sheet] pane (translucent charcoal over the
+ * dimmed screen, a sheen across its top and a rim of light instead of a border), a title, optional
+ * subtitle and scrollable content. The sheet slides up with the system animation while its content
+ * fades and rises into place a beat later, so the pane arrives first and its contents settle onto it.
  *
  * [content] receives `close`, which animates the sheet away and then runs its callback.
  */
@@ -259,46 +260,51 @@ fun FableSheet(
     val close: (() -> Unit) -> Unit = { after ->
         scope.launch { sheetState.hide() }.invokeOnCompletion { after() }
     }
-    val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    val shape = RoundedCornerShape(topStart = SheetRadius, topEnd = SheetRadius)
     val appear = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { appear.animateTo(1f, tween(durationMillis = 380, easing = FastOutSlowInEasing)) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, Motion.enter(Motion.Entrance, delay = 90)) }
 
+    // The sheet's light (sheen + rim) is drawn on the content that fills the pane, not through the
+    // sheet modifier: Material offsets the sheet inside the node that modifier wraps, so anything
+    // drawn there would land at the top of the screen. The drag handle moves inside for the same
+    // reason, so the rim starts at the very top edge.
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        modifier = Modifier
-            .shadow(
-                elevation = 24.dp,
-                shape = shape,
-                ambientColor = Color.Black,
-                spotColor = Color.Black,
-            )
-            .border(Dp.Hairline, FableControlBorder, shape),
-        containerColor = FableSurface.copy(alpha = 0.97f),
+        containerColor = GlassLevel.Sheet.fill,
         contentColor = FableText,
         shape = shape,
-        scrimColor = Color.Black.copy(alpha = 0.55f),
-        dragHandle = { BottomSheetDefaults.DragHandle(color = FableTextDim.copy(alpha = 0.35f)) },
+        scrimColor = Color.Black.copy(alpha = 0.6f),
+        dragHandle = null,
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .graphicsLayer {
-                    alpha = appear.value
-                    translationY = (1f - appear.value) * 28.dp.toPx()
-                }
-                .verticalScroll(rememberScrollState())
-                .imePadding()
-                .padding(start = Spacing.xl, end = Spacing.xl, bottom = Spacing.xl),
-            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+                .glassLight(shape, GlassLevel.Sheet),
         ) {
-            Column {
-                Text(title, style = MaterialTheme.typography.headlineMedium)
-                if (!subtitle.isNullOrBlank()) {
-                    Text(subtitle, style = MaterialTheme.typography.bodyMedium)
-                }
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                BottomSheetDefaults.DragHandle(color = FableTextDim.copy(alpha = 0.35f))
             }
-            content(close)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        alpha = appear.value
+                        translationY = (1f - appear.value) * 24.dp.toPx()
+                    }
+                    .verticalScroll(rememberScrollState())
+                    .imePadding()
+                    .padding(start = Spacing.xl, end = Spacing.xl, bottom = Spacing.xl),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            ) {
+                Column {
+                    Text(title, style = MaterialTheme.typography.headlineMedium)
+                    if (!subtitle.isNullOrBlank()) {
+                        Text(subtitle, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                content(close)
+            }
         }
     }
 }
@@ -313,13 +319,21 @@ fun ConfirmDialog(
     onDismiss: () -> Unit,
     destructive: Boolean = false,
 ) {
+    val shape = RoundedCornerShape(DialogRadius)
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.border(Dp.Hairline, FableControlBorder, RoundedCornerShape(24.dp)),
-        containerColor = FableSurfaceRaised,
+        modifier = Modifier
+            .shadow(
+                elevation = GlassShadow.Overlay,
+                shape = shape,
+                ambientColor = FableGlassShadow,
+                spotColor = FableGlassShadowSpot,
+            )
+            .glassRim(shape, GlassLevel.Overlay),
+        containerColor = GlassLevel.Overlay.fill,
         titleContentColor = FableText,
         textContentColor = FableTextDim,
-        shape = RoundedCornerShape(24.dp),
+        shape = shape,
         title = { Text(title, style = MaterialTheme.typography.titleLarge) },
         text = { Text(message, style = MaterialTheme.typography.bodyMedium) },
         confirmButton = {

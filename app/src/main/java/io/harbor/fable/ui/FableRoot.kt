@@ -18,7 +18,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -32,6 +31,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -47,15 +47,19 @@ import io.harbor.fable.app.FableApp
 import io.harbor.fable.ui.components.DockTab
 import io.harbor.fable.ui.components.FableUi
 import io.harbor.fable.ui.components.GlassDock
+import io.harbor.fable.ui.components.GlassLevel
 import io.harbor.fable.ui.components.LocalDockClearance
 import io.harbor.fable.ui.components.LocalFableUi
+import io.harbor.fable.ui.components.glassRim
 import io.harbor.fable.ui.screens.*
+import io.harbor.fable.ui.theme.ControlRadius
 import io.harbor.fable.ui.theme.DockMetrics
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableBg
-import io.harbor.fable.ui.theme.FableControlBorder
-import io.harbor.fable.ui.theme.FableSurfaceRaised
+import io.harbor.fable.ui.theme.FableGlassShadow
+import io.harbor.fable.ui.theme.FableGlassShadowSpot
 import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.GlassShadow
 import io.harbor.fable.ui.theme.Motion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -316,12 +320,19 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
                 .navigationBarsPadding()
                 .padding(bottom = snackbarBottom + 8.dp, start = 12.dp, end = 12.dp),
         ) { data ->
-            val shape = RoundedCornerShape(16.dp)
+            val shape = RoundedCornerShape(ControlRadius + 2.dp)
             Snackbar(
                 snackbarData = data,
-                modifier = Modifier.border(Dp.Hairline, FableControlBorder, shape),
+                modifier = Modifier
+                    .shadow(
+                        elevation = GlassShadow.Overlay,
+                        shape = shape,
+                        ambientColor = FableGlassShadow,
+                        spotColor = FableGlassShadowSpot,
+                    )
+                    .glassRim(shape, GlassLevel.Overlay),
                 shape = shape,
-                containerColor = FableSurfaceRaised,
+                containerColor = GlassLevel.Overlay.fill,
                 contentColor = FableText,
                 actionColor = FableAccent,
             )

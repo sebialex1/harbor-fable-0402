@@ -1,10 +1,6 @@
 package io.harbor.fable.ui.components
 
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -24,29 +20,27 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.harbor.fable.ui.theme.ControlHeight
 import io.harbor.fable.ui.theme.ControlRadius
+import io.harbor.fable.ui.theme.ControlRadiusCompact
 import io.harbor.fable.ui.theme.FableAccent
-import io.harbor.fable.ui.theme.FableAccentLight
-import io.harbor.fable.ui.theme.FableControl
-import io.harbor.fable.ui.theme.FableControlBorder
 import io.harbor.fable.ui.theme.FableError
 import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.Motion
 
 /**
- * Glass button: a quiet translucent pill that settles on press.
+ * Glass button: a quiet translucent pill that settles on press and catches a little more light
+ * while it is held, instead of a ripple.
  *
- * [primary] fills it with the accent colour (a light-to-deep gradient with a hairline of light on
- * the edge), [destructive] tints it red, and [compact] shrinks it for inline use. [icon] is drawn
- * before the label in the content colour.
+ * [primary] fills it with the accent (white light across the top makes the light-to-deep gradient),
+ * [destructive] tints it red, and [compact] shrinks it for inline use. [icon] is drawn before the
+ * label in the content colour.
  */
 @Composable
 fun GlassButton(
@@ -61,26 +55,32 @@ fun GlassButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val pressedNow = pressed && enabled
     val scale by animateFloatAsState(
-        targetValue = if (pressed && enabled) 0.97f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        targetValue = if (pressedNow) 0.965f else 1f,
+        animationSpec = Motion.press(),
         label = "glassButtonScale",
     )
-    val shape = RoundedCornerShape(if (compact) 12.dp else ControlRadius)
-    val container: Brush = when {
-        primary -> Brush.verticalGradient(listOf(FableAccentLight, FableAccent))
-        destructive -> Brush.verticalGradient(listOf(FableError.copy(alpha = 0.16f), FableError.copy(alpha = 0.16f)))
-        else -> Brush.verticalGradient(listOf(FableControl, FableControl))
+    val lift by animateFloatAsState(
+        targetValue = if (pressedNow) 1f else 0f,
+        animationSpec = Motion.inPlace(Motion.Fast),
+        label = "glassButtonLift",
+    )
+    val shape = RoundedCornerShape(if (compact) ControlRadiusCompact else ControlRadius)
+    val fill = when {
+        primary -> FableAccent
+        destructive -> FableError.copy(alpha = 0.16f)
+        else -> GlassLevel.Control.fill
     }
     val contentColor = when {
         primary -> Color.White
         destructive -> FableError
         else -> FableText
     }
-    val borderColor = when {
-        primary -> Color.White.copy(alpha = 0.16f)
-        destructive -> FableError.copy(alpha = 0.32f)
-        else -> FableControlBorder
+    val sheen = when {
+        primary -> 0.26f
+        destructive -> 0.05f
+        else -> GlassLevel.Control.sheen
     }
 
     Row(
@@ -90,10 +90,15 @@ fun GlassButton(
                 scaleY = scale
                 alpha = if (enabled) 1f else 0.45f
             }
-            .height(if (compact) 34.dp else 44.dp)
-            .clip(shape)
-            .background(container)
-            .border(Dp.Hairline, borderColor, shape)
+            .height(if (compact) ControlHeight.Compact else ControlHeight.Regular)
+            .glassSurface(
+                shape = shape,
+                level = GlassLevel.Control,
+                fill = fill,
+                sheenColor = if (destructive) FableError else Color.White,
+                sheenAlpha = sheen + 0.08f * lift,
+                rimColor = if (destructive) FableError else Color.White,
+            )
             .clickable(
                 interactionSource = interaction,
                 indication = null,

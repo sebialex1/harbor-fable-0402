@@ -84,6 +84,7 @@ import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.Motion
+import io.harbor.fable.ui.theme.PillRadius
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.delay
@@ -314,8 +315,7 @@ private fun DeviceChip(deviceInfo: DeviceGpuInfo) {
     val label = listOfNotNull(deviceInfo.device.ifBlank { null }, gpu?.let { formatGpu(it) }).joinToString(" · ")
     Row(
         Modifier
-            .clip(RoundedCornerShape(50))
-            .background(Color.White.copy(alpha = 0.07f))
+            .glassSurface(shape = RoundedCornerShape(PillRadius), level = GlassLevel.Control)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),

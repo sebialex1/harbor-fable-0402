@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,7 +50,9 @@ import io.harbor.fable.ui.theme.Spacing
  * Pinned top bar used by every screen.
  *
  * Tab screens show a large [title]; pushed screens pass [onBack] and get a back button
- * with a smaller title. [actions] render at the end (e.g. the settings gear).
+ * with a smaller title. [actions] render at the end (e.g. the settings gear). The bar is a
+ * translucent wash of the canvas colour, so the liquid backdrop glows faintly through it and
+ * content scrolling underneath dims instead of cutting off; a hairline appears once scrolled.
  */
 @Composable
 fun FableTopBar(
@@ -64,7 +67,12 @@ fun FableTopBar(
     Column(
         modifier
             .fillMaxWidth()
-            .background(FableBg)
+            .background(
+                Brush.verticalGradient(
+                    0f to FableBg.copy(alpha = 0.96f),
+                    1f to FableBg.copy(alpha = 0.88f),
+                ),
+            )
             .statusBarsPadding(),
     ) {
         Row(
@@ -125,7 +133,9 @@ fun FableTopBar(
 }
 
 /**
- * Standard screen layout: [FableTopBar] + a lazy list with consistent padding.
+ * Standard screen layout: the liquid backdrop, [FableTopBar] and a lazy list with consistent
+ * padding. Every screen carries its own (static, identical) backdrop so the glass panes have
+ * light behind them and screens stay opaque to each other during navigation transitions.
  *
  * Bottom padding always includes the navigation-bar inset plus [LocalDockClearance], so
  * the last item is never hidden behind the floating dock. Content items are spaced by
@@ -148,32 +158,41 @@ fun FableScreen(
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
     }
 
-    Column(
+    Box(
         modifier
             .fillMaxSize()
-            .background(FableBg)
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+            .background(FableBg),
     ) {
-        FableTopBar(
-            title = title,
-            subtitle = subtitle,
-            onBack = onBack,
-            showDivider = scrolled,
-            actions = actions,
-        )
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(
-                start = ScreenPadding,
-                end = ScreenPadding,
-                top = Spacing.xs,
-                bottom = bottomPadding,
-            ),
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-            content = content,
-        )
+        LiquidBackdrop(intensity = ShellBackdropIntensity, animated = false)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+        ) {
+            FableTopBar(
+                title = title,
+                subtitle = subtitle,
+                onBack = onBack,
+                showDivider = scrolled,
+                actions = actions,
+            )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    start = ScreenPadding,
+                    end = ScreenPadding,
+                    top = Spacing.xs,
+                    bottom = bottomPadding,
+                ),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                content = content,
+            )
+        }
     }
 }
+
+/** How strongly the liquid light shows behind list screens; the setup screen uses 1f. */
+const val ShellBackdropIntensity = 0.42f

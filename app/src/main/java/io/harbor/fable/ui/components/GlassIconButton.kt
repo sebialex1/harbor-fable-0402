@@ -1,10 +1,7 @@
 package io.harbor.fable.ui.components
 
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -23,14 +20,15 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import io.harbor.fable.ui.theme.FableControl
-import io.harbor.fable.ui.theme.FableControlBorder
+import io.harbor.fable.ui.theme.ControlHeight
 import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.Motion
 
 /**
  * Circular glass icon button used for top-bar actions (back, refresh, add) and compact inline
- * actions such as the download and play buttons on rows.
+ * actions such as the download and play buttons on rows. With [bordered] the button is a small
+ * pane of glass (sheen and rim light); without it, a flat disc of [containerColor] for filled
+ * accent buttons.
  */
 @Composable
 fun GlassIconButton(
@@ -38,20 +36,39 @@ fun GlassIconButton(
     contentDescription: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 36.dp,
+    size: Dp = ControlHeight.Icon,
     tint: Color = FableText,
-    containerColor: Color = FableControl,
+    containerColor: Color = GlassLevel.Control.fill,
     bordered: Boolean = true,
     enabled: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val pressedNow = pressed && enabled
     val scale by animateFloatAsState(
-        targetValue = if (pressed && enabled) 0.9f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        targetValue = if (pressedNow) 0.9f else 1f,
+        animationSpec = Motion.press(),
         label = "iconButtonScale",
     )
-    val borderModifier = if (bordered) Modifier.border(Dp.Hairline, FableControlBorder, CircleShape) else Modifier
+    val lift by animateFloatAsState(
+        targetValue = if (pressedNow) 1f else 0f,
+        animationSpec = Motion.inPlace(Motion.Fast),
+        label = "iconButtonLift",
+    )
+    val surface = if (bordered) {
+        Modifier.glassSurface(
+            shape = CircleShape,
+            level = GlassLevel.Control,
+            fill = containerColor,
+            sheenAlpha = GlassLevel.Control.sheen + 0.08f * lift,
+        )
+    } else {
+        Modifier
+            .clip(CircleShape)
+            .background(containerColor)
+            .background(GlassSheen)
+            .background(Color.White.copy(alpha = 0.14f * lift))
+    }
 
     Box(
         modifier = modifier
@@ -61,9 +78,7 @@ fun GlassIconButton(
                 scaleY = scale
                 alpha = if (enabled) 1f else 0.4f
             }
-            .clip(CircleShape)
-            .background(containerColor)
-            .then(borderModifier)
+            .then(surface)
             .clickable(
                 interactionSource = interaction,
                 indication = null,
