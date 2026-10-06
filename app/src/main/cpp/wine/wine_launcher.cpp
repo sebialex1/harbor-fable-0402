@@ -262,6 +262,9 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
 
     add_env(&env, "WINEPREFIX", request.container_path);
     add_env(&env, "HOME", request.container_path);
+    // Winlator runs Wine as "xuser"; Android has no USER, and Wine names the per-user profile
+    // (drive_c/users/<USER>) from it, which the bionic prefixPack ships as xuser.
+    add_env(&env, "USER", "xuser");
     add_env(&env, "TMPDIR", request.container_path + "/tmp");
     add_env(&env, "XDG_CACHE_HOME", request.container_path + "/cache");
     prepend_path(&env, "PATH", request.container_path + "/bin");

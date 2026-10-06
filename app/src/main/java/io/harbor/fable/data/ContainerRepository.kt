@@ -566,7 +566,7 @@ class ContainerRepository internal constructor(
                     ResolvedTranslator(
                         name = NativeLoader.TRANSLATOR_BOX64,
                         executable = status.executable,
-                        environment = listOf("BOX64_NOBANNER=1"),
+                        environment = BOX64_ENVIRONMENT,
                     )
                 )
                 Box64Status.NotDownloaded -> Result.failure(
@@ -740,6 +740,31 @@ private data class ResolvedTranslator(
     val executable: File,
     val environment: List<String>,
     val earlyExitHint: String? = null,
+)
+
+/**
+ * Box64 settings Winlator bionic launches Wine with (GuestProgramLauncherComponent's base
+ * variables plus its default "COMPATIBILITY" Box64 preset). BOX64_X11GLX makes Box64's wrapped
+ * libX11 advertise GLX; BOX64_NORCFILES stops it reading /etc/box64.box64rc-style files that
+ * don't exist on Android.
+ */
+internal val BOX64_ENVIRONMENT = listOf(
+    "BOX64_NOBANNER=1",
+    "BOX64_DYNAREC=1",
+    "BOX64_X11GLX=1",
+    "BOX64_NORCFILES=1",
+    "BOX64_MMAP32=0",
+    "BOX64_AVX=0",
+    "BOX64_UNITYPLAYER=1",
+    "BOX64_DYNAREC_SAFEFLAGS=2",
+    "BOX64_DYNAREC_FASTNAN=0",
+    "BOX64_DYNAREC_FASTROUND=0",
+    "BOX64_DYNAREC_X87DOUBLE=1",
+    "BOX64_DYNAREC_BIGBLOCK=0",
+    "BOX64_DYNAREC_STRONGMEM=1",
+    "BOX64_DYNAREC_FORWARD=128",
+    "BOX64_DYNAREC_CALLRET=0",
+    "BOX64_DYNAREC_WAIT=1",
 )
 
 /** Starts (or reuses) the X display server for a launch at the container's resolution. */

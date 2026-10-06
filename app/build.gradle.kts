@@ -10,10 +10,19 @@ android {
     // Must match the NDK installed by the CI workflow.
     ndkVersion = "27.0.12077973"
 
+    lint {
+        // targetSdk is pinned to 28 on purpose (see defaultConfig).
+        disable += "ExpiredTargetSdkVersion"
+    }
+
     defaultConfig {
         applicationId = "io.harbor.fable"
         minSdk = 28
-        targetSdk = 34
+        // Same as Winlator ("keep targetSdkVersion at 28"): from targetSdk 29 Android forbids
+        // exec() of files in the app's data directory, which is where downloaded Box64 and Wine
+        // live. The linker64 workaround only covers the first hop; box64 itself then execs
+        // wineserver/wine-preloader, which fails under targetSdk >= 29. Sideload-only app.
+        targetSdk = 28
         versionCode = 5
         versionName = "0.4.1"
         ndk { abiFilters += listOf("arm64-v8a") }
