@@ -140,21 +140,22 @@ class AssetRepository internal constructor(
 
             for (source in catalogSources.values) {
                 try {
-                    val (release, filtered) = resolveRelease(source, forceRefresh)
-
-                    for (asset in filtered) {
-                        val entry = AssetEntry(
-                            id = "${source.slug}/${asset.name}",
-                            name = asset.name,
-                            version = release.tagName,
-                            type = source.type,
-                            downloadUrl = asset.downloadUrl,
-                            source = AssetSource.GITHUB_RELEASE,
-                            sourceRepo = source.slug,
-                            fileSizeBytes = asset.sizeBytes,
-                            sha256 = asset.sha256,
-                        ).let { reconcileDownloadStatus(it) }
-                        newEntries[entry.id] = entry
+                    // Newest release first, so "first match" consumers (setup picks) see the latest build.
+                    for ((release, filtered) in resolveReleases(source, forceRefresh)) {
+                        for (asset in filtered) {
+                            val entry = AssetEntry(
+                                id = "${source.slug}/${asset.name}",
+                                name = asset.name,
+                                version = release.tagName,
+                                type = source.type,
+                                downloadUrl = asset.downloadUrl,
+                                source = AssetSource.GITHUB_RELEASE,
+                                sourceRepo = source.slug,
+                                fileSizeBytes = asset.sizeBytes,
+                                sha256 = asset.sha256,
+                            ).let { reconcileDownloadStatus(it) }
+                            newEntries[entry.id] = entry
+                        }
                     }
                 } catch (error: Exception) {
                     // A cancelled refresh (e.g. the screen that started it left composition)
@@ -181,6 +182,35 @@ class AssetRepository internal constructor(
         } finally {
             _isRefreshing.value = false
         }
+    }
+
+    /**
+     * The releases whose assets a source lists, newest first, each with the assets that match
+     * its globs: up to [MAX_RELEASES_PER_SOURCE] of them, so the catalog offers a few recent
+     * versions (DXVK publishes one tarball per release, so listing only the latest release is
+     * what left it with a single version). Pre-releases only count when no stable release
+     * matches. When the release list is unavailable this falls back to [resolveRelease].
+     */
+    private suspend fun resolveReleases(
+        source: CatalogSource,
+        forceRefresh: Boolean,
+    ): List<Pair<GitHubRelease, List<GitHubAsset>>> {
+        val releases = try {
+            fetcher.fetchReleasesOrCached(source.owner, source.repo, forceRefresh).releases
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            Log.w(TAG, "Release list unavailable for ${source.slug}; using the latest release", error)
+            null
+        }
+        if (releases != null) {
+            val matching = releases
+                .map { release -> release to fetcher.filterAssets(release, source.assetGlobs) }
+                .filter { (_, assets) -> assets.isNotEmpty() }
+            val stable = matching.filter { (release, _) -> !release.prerelease }
+            val picked = (stable.ifEmpty { matching }).take(MAX_RELEASES_PER_SOURCE)
+            if (picked.isNotEmpty()) return picked
+        }
+        return listOf(resolveRelease(source, forceRefresh))
     }
 
     /**
@@ -439,6 +469,9 @@ class AssetRepository internal constructor(
     }
 
     companion object {
+        /** How many recent releases of each source the catalog lists (see [resolveReleases]). */
+        const val MAX_RELEASES_PER_SOURCE = 5
+
         private const val TAG = "AssetRepository"
 
         private const val DEFAULTS_VERSION_KEY = "defaultsVersion"
