@@ -21,11 +21,32 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.TabItemActive
 import io.harbor.fable.ui.theme.TabItemIdle
+
+private val TabIconSize = 22.dp
+private val TabIconLabelGap = 3.dp
+
+/**
+ * The iOS tab-bar caption: 10sp Medium. The pill has a fixed height and five ~60dp slots, so the
+ * caption ignores font scales above 1x (it would otherwise ellipsize "Containers" and push the
+ * icon off centre); smaller scales still apply.
+ */
+@Composable
+private fun tabLabelStyle(): TextStyle {
+    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    return MaterialTheme.typography.labelSmall.copy(
+        fontSize = (10f / fontScale).sp,
+        lineHeight = (12f / fontScale).sp,
+        letterSpacing = 0.sp,
+    )
+}
 
 /**
  * Tab bar item: icon over a small label, white when active and gray otherwise. The pill bar
@@ -63,14 +84,15 @@ fun FableTabBarItem(
             imageVector = icon,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(TabIconSize),
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(TabIconLabelGap))
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = tabLabelStyle(),
             color = tint,
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
         )
     }
