@@ -76,10 +76,12 @@ client error (404) for repos with no releases; this is recorded in
 - `download_channel_description` — (channel description text)
 - `plurals:download_notification_queued` — "%d download queued" / "%d downloads queued"
 
-## Not compiled here
-No Android SDK in this environment. The code is statically verified against
-the existing data layer API surface (method signatures, field names, import
-paths) but was not Gradle-compiled.
+## Build verification
+The data layer, launch flow, native code and UI build with
+`./gradlew assembleDebug --no-daemon` (SDK 34, NDK 27.0.12077973, CMake 3.22.1), the same
+command the CI workflow runs. Nothing has been run on a device yet, so the launch flow, the
+catalog refresh and the animations are verified by compilation, host-side tests of the
+archive extractor and native launcher, and rendered previews only.
 
 ## Launch flow (Box64 + Wine)
 
