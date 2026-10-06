@@ -40,7 +40,7 @@ fun HomeScreen(
         // Launching can take a while on first use, so it runs on the app-level scope.
         onLaunch = { exe ->
             fableUi.scope.launch {
-                fableUi.showMessage(repository.launch(exe.containerId, exe.id).message(), long = true)
+                fableUi.showMessage(repository.launch(exe.containerId, exe.id).also { it.openDisplay(context) }.message(), long = true)
             }
         },
     )
@@ -123,6 +123,11 @@ internal fun HomeContent(
             }
         }
     }
+}
+
+/** Brings up Wine's screen once a launch has started. */
+internal fun LaunchResult.openDisplay(context: android.content.Context) {
+    if (this is LaunchResult.Started) runCatching { io.harbor.fable.display.DisplayActivity.open(context) }
 }
 
 /** Human-readable text for a launch outcome, shown in the snackbar. */

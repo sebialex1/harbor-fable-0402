@@ -296,7 +296,14 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         for (unsigned char c : key) {
             if (!(std::isalnum(c) || c == '_')) return fail("Illegal environment variable name: " + key);
         }
-        env[key] = item.substr(eq + 1);
+        const std::string value = item.substr(eq + 1);
+        if (key == "LD_LIBRARY_PATH" || key == "PATH") {
+            // Search paths from the caller (the X11 client libraries) go in front of what the
+            // launcher already set (the driver directory), instead of replacing it.
+            prepend_path(&env, key.c_str(), value);
+        } else {
+            env[key] = value;
+        }
     }
 
     if (use_box64) {
@@ -383,6 +390,10 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         return fail(message);
     }
 
+    long open_max = sysconf(_SC_OPEN_MAX);
+    if (open_max <= 0 || open_max > 65536) open_max = 4096;
+    const int max_fd = static_cast<int>(open_max);
+
     const pid_t pid = fork();
     if (pid < 0) {
         const std::string message = std::string("fork failed: ") + std::strerror(errno);
@@ -398,6 +409,12 @@ int launch_wine_container(const WineLaunchRequest& request, std::string* error) 
         if (log_fd >= 0) {
             dup2(log_fd, STDOUT_FILENO);
             dup2(log_fd, STDERR_FILENO);
+        }
+        // Don't leak the app's descriptors (the X server's listening socket, binder, ...) into
+        // Wine, as Runtime.exec/ProcessBuilder (what Winlator uses) doesn't either. The status
+        // pipe is O_CLOEXEC and must stay open until exec.
+        for (int fd = 3; fd < max_fd; ++fd) {
+            if (fd != status_pipe[1]) close(fd);
         }
         execve(program.c_str(), argv.data(), envp.data());
         const int exec_errno = errno;

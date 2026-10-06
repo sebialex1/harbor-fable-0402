@@ -49,3 +49,30 @@ set_target_properties(fable_native PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )
+
+# Winlator's X server natives (MIT, vendored from Winlator 7.1 by brunodev85 via the
+# Pipetto-crypto/winlator fork; see THIRD_PARTY_NOTICES.md): the epoll socket connector the
+# Java X server (com.winlator.xconnector / com.winlator.xserver) listens with, the drawable
+# blitters, and the SysV shared-memory helper. JNI names are com_winlator_*, so the library
+# keeps Winlator's name: System.loadLibrary("winlator").
+add_library(winlator SHARED
+    winlator/drawable.c
+    winlator/xconnector_epoll.c
+    winlator/sysvshared_memory.c
+)
+
+target_compile_options(winlator PRIVATE
+    -O2
+    -Wno-unused-function
+    -Wno-unused-parameter
+    -Wno-sign-compare
+)
+
+find_library(jnigraphics-lib jnigraphics)
+find_library(android-lib android)
+
+target_link_libraries(winlator
+    ${log-lib}
+    ${jnigraphics-lib}
+    ${android-lib}
+)

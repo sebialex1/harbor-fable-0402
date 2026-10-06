@@ -6,6 +6,8 @@ import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
+import io.harbor.fable.display.DisplayServer
+import io.harbor.fable.display.X11ClientLibs
 import io.harbor.fable.nativebridge.NativeLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +45,8 @@ class ContainerRepository internal constructor(
     private val runtime: WineRuntime? = null,
     /** Where [LaunchLog] files go (`filesDir/logs`); null disables persisted launch logs. */
     private val logsRoot: File? = null,
+    /** Starts the X display server Wine draws to; null launches without a display (tests). */
+    private val display: DisplayProvider? = null,
 ) {
     private val mutex = Mutex()
     private val containersById = LinkedHashMap<String, Container>()
@@ -414,29 +418,55 @@ class ContainerRepository internal constructor(
         }
         describeBinary(log, "wine", wineBinary)
 
-        // 3. Resolve what to run.
+        // 3. The display server has to be listening before Wine starts (Winlator's XEnvironment
+        //    starts XServerComponent before GuestProgramLauncherComponent the same way).
         val current = mutex.withLock { containersById[container.id] } ?: container
-        val program: String
+        log.section("Display")
+        val screen: DisplayEnv? = display?.let { provider ->
+            runCatching { provider.prepare(current.screenResolution) }.getOrElse { error ->
+                log.error("display server failed to start", error)
+                return LaunchResult.Failed("Display couldn't start: ${error.message?.take(80) ?: error.javaClass.simpleName}")
+            }
+        }
+        if (screen != null) {
+            log.line("X server: DISPLAY=${screen.display}, socket ${screen.socketPath}, screen ${screen.resolution}")
+            log.line("X11 client libraries: ${screen.x11LibDir}")
+        } else {
+            log.line("no display server in this build")
+        }
+        val desktopSize = screen?.resolution ?: current.screenResolution
+
+        // 4. Resolve what to run: `wine explorer /desktop=shell,WxH [start /d <dir> <exe>]`,
+        //    Winlator's guest command, so every app runs inside a virtual desktop the size of the
+        //    X screen.
+        val program = "explorer"
         val arguments: List<String>
         if (exe == null) {
-            program = "explorer"
-            arguments = listOf("/desktop=Fable,${current.screenResolution}")
+            arguments = listOf("/desktop=shell,$desktopSize")
         } else {
-            program = runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
+            val path = runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
                 ?: run {
                     log.error("executable not readable: ${exe.path}")
                     return LaunchResult.Failed("Can't open ${exe.name}. Add it again")
                 }
-            arguments = emptyList()
-            val programFile = File(program)
-            log.line("program: $program (exists=${programFile.isFile}, size=${programFile.length()})")
+            val programFile = File(path)
+            log.line("program: $path (exists=${programFile.isFile}, size=${programFile.length()})")
+            val windowsPath = toWindowsPath(path)
+            val windowsDir = windowsPath.substringBeforeLast('\\', missingDelimiterValue = "C:\\")
+            arguments = listOf("/desktop=shell,$desktopSize", "start", "/d", windowsDir, windowsPath)
         }
         val label = exe?.name ?: "${current.name} desktop"
 
-        // 4. Start the process.
+        // 5. Start the process.
         val environment = buildList {
             add("WINEDEBUG=-all")
             addAll(translator.environment)
+            if (screen != null) {
+                add("DISPLAY=${screen.display}")
+                // Native (aarch64 bionic) libX11/libxcb for Box64's wrapped libX11, then the system
+                // libraries, as Winlator's LD_LIBRARY_PATH={imagefs}/usr/lib:/system/lib64.
+                add("LD_LIBRARY_PATH=${screen.x11LibDir}:/system/lib64")
+            }
             // The container's own variables come last so they can override anything above.
             current.envVars.forEach { (key, value) -> add("$key=$value") }
         }
@@ -471,7 +501,7 @@ class ContainerRepository internal constructor(
         }
         log.line("spawned pid $pid")
 
-        // 5. A process that dies straight away has a reason worth showing (missing libraries, …).
+        // 6. A process that dies straight away has a reason worth showing (missing libraries, …).
         delay(EARLY_EXIT_WINDOW_MS)
         if (!WineRuntime.isAlive(pid) && !WineRuntime.exitedCleanly(dir)) {
             log.error("process $pid exited within ${EARLY_EXIT_WINDOW_MS}ms")
@@ -548,6 +578,10 @@ class ContainerRepository internal constructor(
             }
         }
     }
+
+    /** `/data/x/game.exe` -> `Z:\\data\\x\\game.exe` (the prefix maps Z: to /); Windows paths pass through. */
+    private fun toWindowsPath(path: String): String =
+        if (path.startsWith("/")) "Z:" + path.replace('/', '\\') else path
 
     /** Logs what [file] is: size, exec bit, ELF machine and loader (bionic vs glibc). */
     private fun describeBinary(log: LaunchLog, label: String, file: File) {
@@ -677,11 +711,17 @@ class ContainerRepository internal constructor(
             val app = context.applicationContext
             val root = File(app.filesDir, "containers")
             val runtime = WineRuntime(app, AssetRepository.get(app), DriverRepository.get(app), File(app.filesDir, "runtime"))
+            val display = DisplayProvider { resolution ->
+                val libDir = X11ClientLibs.install(app)
+                val ready = DisplayServer.ensureStarted(app, resolution).getOrThrow()
+                DisplayEnv(ready.display, ready.socketPath, ready.resolution, libDir.absolutePath)
+            }
             val created = ContainerRepository(
                 FileContainerStore(File(root, "index.json")),
                 root,
                 runtime,
                 LaunchLog.logsDir(app),
+                display,
             )
             instance = created
             return created
@@ -700,6 +740,19 @@ private data class ResolvedTranslator(
     val executable: File,
     val environment: List<String>,
     val earlyExitHint: String? = null,
+)
+
+/** Starts (or reuses) the X display server for a launch at the container's resolution. */
+internal fun interface DisplayProvider {
+    fun prepare(resolution: String): DisplayEnv
+}
+
+/** What a Wine process needs to reach the display server. */
+internal data class DisplayEnv(
+    val display: String,
+    val socketPath: String,
+    val resolution: String,
+    val x11LibDir: String,
 )
 
 /** Outcome of [ContainerRepository.launch]. */
