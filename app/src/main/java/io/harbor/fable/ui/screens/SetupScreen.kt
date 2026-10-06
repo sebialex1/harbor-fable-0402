@@ -40,6 +40,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -305,13 +307,37 @@ private fun DownloadStep(
         }
         Spacer(Modifier.height(Spacing.xxl))
         Staggered(index = 2) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                ProgressRing(
-                    progress = setup.progress,
-                    indeterminate = preparing && tracked.isEmpty(),
-                    label = "$readyCount of ${items.size.coerceAtLeast(RecommendedKind.entries.count { it.required })}",
-                    sublabel = if (setup.pendingBytes > 0) "${formatBytes(setup.pendingBytes)} left" else "",
+            val requiredCount = items.size.coerceAtLeast(RecommendedKind.entries.count { it.required })
+            val indeterminate = preparing && tracked.isEmpty()
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                // The ring scales with the screen instead of sitting as a small fixed badge.
+                BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    val ringSize = (maxWidth * 0.62f).coerceIn(RingMinSize, RingMaxSize)
+                    ProgressRing(
+                        progress = setup.progress,
+                        indeterminate = indeterminate,
+                        label = "$readyCount of $requiredCount",
+                        modifier = Modifier.size(ringSize),
+                    )
+                }
+                Spacer(Modifier.height(Spacing.xl))
+                // Overall progress across the full width of the column.
+                OverallProgressBar(
+                    progress = if (indeterminate) null else setup.progress,
+                    modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(Spacing.sm))
+                Row(Modifier.fillMaxWidth()) {
+                    Text(
+                        text = if (allDone) "Downloaded" else "Downloading",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = if (setup.pendingBytes > 0) "${formatBytes(setup.pendingBytes)} left" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
         Spacer(Modifier.height(Spacing.xxl))
@@ -385,7 +411,7 @@ private fun SetupItemRow(kind: RecommendedKind, item: RecommendedItem?, preparin
         status == RecommendedStatus.UNAVAILABLE -> "No build"
         else -> ""
     }
-    Box {
+    Box(Modifier.fillMaxWidth()) {
         ListRow(
             title = kind.label,
             icon = kindIcon(kind),
@@ -409,9 +435,13 @@ private fun SetupItemRow(kind: RecommendedKind, item: RecommendedItem?, preparin
             exit = fadeOut(Motion.exit(Motion.Standard)),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .padding(horizontal = RowPaddingHorizontal),
         ) {
-            ThinProgressBar(progress = if (downloading && progress < 1f) progress else null)
+            ThinProgressBar(
+                progress = if (downloading && progress < 1f) progress else null,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -426,7 +456,7 @@ private fun kindIcon(kind: RecommendedKind) = when (kind) {
 
 /** Overall progress as a thin white ring with the percentage in the middle. Real progress only. */
 @Composable
-private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String, sublabel: String) {
+private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String, modifier: Modifier = Modifier) {
     val animated by animateFloatAsState(progress.coerceIn(0f, 1f), Motion.settle(), label = "ringProgress")
     val spin = remember { Animatable(0f) }
     LaunchedEffect(indeterminate) {
@@ -437,9 +467,9 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
             }
         }
     }
-    Box(Modifier.size(148.dp), contentAlignment = Alignment.Center) {
+    Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
-            val stroke = 4.dp.toPx()
+            val stroke = 6.dp.toPx()
             val inset = stroke / 2 + 2.dp.toPx()
             val arcSize = androidx.compose.ui.geometry.Size(size.width - inset * 2, size.height - inset * 2)
             val topLeft = Offset(inset, inset)
@@ -472,8 +502,35 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
                 style = MaterialTheme.typography.headlineLarge,
                 color = FableText,
             )
-            Text(listOf(label, sublabel).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+            Text(label, style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+private val RingMinSize = 168.dp
+private val RingMaxSize = 240.dp
+
+/** Full-width overall progress: a 4dp white bar on the dark track. Null runs indeterminate. */
+@Composable
+private fun OverallProgressBar(progress: Float?, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(percent = 50)
+    if (progress == null) {
+        LinearProgressIndicator(
+            modifier = modifier.height(4.dp).clip(shape),
+            color = FableText,
+            trackColor = FableTrack,
+            gapSize = 0.dp,
+        )
+    } else {
+        val animated by animateFloatAsState(progress.coerceIn(0f, 1f), Motion.settle(), label = "overallProgress")
+        LinearProgressIndicator(
+            progress = { animated },
+            modifier = modifier.height(4.dp).clip(shape),
+            color = FableText,
+            trackColor = FableTrack,
+            gapSize = 0.dp,
+            drawStopIndicator = {},
+        )
     }
 }
 
@@ -525,11 +582,11 @@ private fun SetupColumn(content: @Composable androidx.compose.foundation.layout.
         Column(
             Modifier
                 .fillMaxSize()
-                .widthIn(max = 480.dp)
+                .widthIn(max = 560.dp)
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = Spacing.xxl, vertical = Spacing.xl),
+                .padding(horizontal = Spacing.lg, vertical = Spacing.xl),
             horizontalAlignment = Alignment.CenterHorizontally,
             content = content,
         )
