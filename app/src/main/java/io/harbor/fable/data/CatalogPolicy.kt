@@ -43,7 +43,8 @@ internal object CatalogPolicy {
      * the list). [builds] are the matching assets of a single release. Other types are unchanged.
      */
     fun buildsToList(type: AssetType, builds: List<AssetEntry>): List<AssetEntry> = when (type) {
-        AssetType.WINE -> listOfNotNull(
+        // Bionic .wcp packages are distinct Wine versions, often several per release: keep all.
+        AssetType.WINE -> if (builds.all { WineRuntime.isBionicWinePackageName(it.name) }) builds else listOfNotNull(
             builds.minWithOrNull(
                 compareBy<AssetEntry>({ !it.isDownloaded }, { wineRank(it.name) }, { it.name }),
             ),

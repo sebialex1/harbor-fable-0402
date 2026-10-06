@@ -44,6 +44,9 @@ internal sealed interface FexStatus {
 /** A Wine tree extracted into a container directory. */
 internal data class InstalledWine(val build: String, val binary: File)
 
+/** A downloaded bionic Wine package the create-container picker can offer. */
+data class WineBuild(val id: String, val label: String, val archive: File)
+
 /**
  * Finds, unpacks and wires together the downloaded runtime pieces: the x86_64 translator (Box64
  * or FEX, shared, extracted once under `filesDir/runtime/box64` / `filesDir/runtime/fex`), a Wine build (extracted into each container) and the
@@ -64,13 +67,25 @@ internal class WineRuntime(
     // --- Wine -----------------------------------------------------------------------------
 
     /**
-     * Downloaded Wine archives that can run under Box64, newest first. Only 64-bit (amd64)
-     * builds qualify: Box64 cannot execute the 32-bit x86 builds.
+     * Downloaded Wine packages that can actually run in Fable's runtime, newest first.
+     *
+     * Only Winlator-style **bionic** Wine packages (`.wcp`, a zstd/xz tar with `profile.json`,
+     * `bin/`, `lib/wine/` and `prefixPack.txz`) qualify. Their `bin/wine` is an x86_64 ELF whose
+     * interpreter is `/system/bin/linker64`, so a bionic Box64 can run it against Android's own
+     * libc. Generic Linux builds (Kron4ek `wine-*-amd64.tar.xz`) are linked against glibc
+     * (`/lib64/ld-linux-x86-64.so.2`) and cannot start without a glibc root file system, which
+     * Fable does not ship, so they are never offered. ARM64EC packages need FEXCore/WOWBox64
+     * DLLs that Fable does not install yet, so they are excluded too.
      */
     fun wineArchives(): List<File> = assets.downloadedFiles(AssetType.WINE)
-        .filter { it.name.contains("amd64", ignoreCase = true) && isTarArchive(it.name) }
+        .filter { isBionicWinePackageName(it.name) }
 
-    /** The downloaded archive to use: [preferred] (e.g. `wine-11.19-amd64`) when present, else the newest. */
+    /** [wineArchives] as picker entries: id is the build name stored on the container. */
+    fun wineBuilds(): List<WineBuild> = wineArchives().map { archive ->
+        WineBuild(id = buildName(archive), label = displayName(archive), archive = archive)
+    }
+
+    /** The downloaded package to use: [preferred] (e.g. `wine-9.20`) when present, else the newest. */
     fun pickWineArchive(preferred: String?): File? {
         val archives = wineArchives()
         val key = preferred?.trim()?.lowercase().orEmpty()
@@ -85,6 +100,9 @@ internal class WineRuntime(
         val marker = readTextOrNull(File(containerDir, WINE_MARKER)) ?: return null
         val build = runCatching { JSONObject(marker).optString("build") }.getOrNull()?.ifBlank { null } ?: return null
         val binary = wineBinary(containerDir) ?: return null
+        // A glibc tree left by an older Fable (Kron4ek builds) can never start: treat it as absent
+        // so the container is re-provisioned from a bionic package.
+        if (ElfInfo.interpreter(binary)?.contains("ld-linux") == true) return null
         return InstalledWine(build, binary)
     }
 
@@ -92,29 +110,61 @@ internal class WineRuntime(
         WINE_BINARIES.map { File(containerDir, it) }.firstOrNull { it.isFile }
 
     /**
-     * Extracts [archive] into [containerDir], replacing any previous Wine tree. The marker file is
-     * written last, so an interrupted extraction is redone on the next launch.
+     * Extracts the bionic Wine package [archive] into [containerDir], replacing any previous Wine
+     * tree, then unpacks its `prefixPack.txz` (a ready-made `.wine` prefix) into the same
+     * directory, which is the container's WINEPREFIX. The marker file is written last, so an
+     * interrupted extraction is redone on the next launch.
+     *
+     * Throws [IOException] with a user-facing message when the package is not a bionic Wine
+     * build (e.g. a glibc build imported by hand).
      */
     suspend fun installWine(archive: File, containerDir: File): InstalledWine = withContext(Dispatchers.IO) {
         File(containerDir, WINE_MARKER).delete()
+        val profile = readWcpProfile(archive)
+            ?: throw IOException("${archive.name} is not a Winlator Wine package (no profile.json)")
+        val type = profile.optString("type")
+        if (!type.equals("Wine", ignoreCase = true) && !type.equals("Proton", ignoreCase = true)) {
+            throw IOException("${archive.name} is a $type package, not Wine")
+        }
         ArchiveExtractor.extract(
             archive = archive,
             destDir = containerDir,
-            stripComponents = 1,
+            stripComponents = 0,
             skip = ::isDevelopmentFile,
             context = coroutineContext,
         )
         val binary = wineBinary(containerDir)
             ?: throw IOException("${archive.name} has no bin/wine")
+        val interpreter = ElfInfo.interpreter(binary)
+        if (interpreter != null && interpreter.contains("ld-linux")) {
+            throw IOException("${archive.name} is a glibc build ($interpreter); Fable needs a bionic Wine")
+        }
         binary.setExecutable(true, false)
         File(containerDir, "bin").listFiles()?.forEach { if (it.isFile) it.setExecutable(true, false) }
+        val prefixPack = profile.optJSONObject("wine")?.optString("prefixPack")?.ifBlank { null } ?: "prefixPack.txz"
+        val prefixArchive = File(containerDir, prefixPack)
+        if (prefixArchive.isFile && !File(containerDir, "system.reg").isFile) {
+            // prefixPack.txz holds `.wine/…`; strip it so drive_c and the registry land in the prefix.
+            ArchiveExtractor.extract(prefixArchive, containerDir, stripComponents = 1, context = coroutineContext)
+        }
         val build = buildName(archive)
         writeAtomic(
             File(containerDir, WINE_MARKER),
-            JSONObject().put("build", build).put("archive", archive.name).put("size", archive.length()).toString(),
+            JSONObject()
+                .put("build", build)
+                .put("archive", archive.name)
+                .put("size", archive.length())
+                .put("profileVersion", profile.optString("versionName"))
+                .put("interpreter", interpreter ?: "")
+                .toString(),
         )
         InstalledWine(build, binary)
     }
+
+    /** `profile.json` of a Winlator package, or null when [archive] has none. */
+    fun readWcpProfile(archive: File): JSONObject? = runCatching {
+        ArchiveExtractor.readTarEntry(archive, "profile.json")?.let { JSONObject(String(it, Charsets.UTF_8)) }
+    }.getOrNull()
 
     // --- Box64 ----------------------------------------------------------------------------
 
@@ -291,13 +341,27 @@ internal class WineRuntime(
         /** Name of the file the native launcher writes Wine/Box64/FEX output to. */
         const val LAUNCH_LOG = "fable-launch.log"
 
-        /** `wine-11.19-amd64.tar.xz` -> `wine-11.19-amd64`. */
+        /** `wine-9.20.wcp` -> `wine-9.20`, `Proton.9.0-x86_64.wcp` -> `Proton.9.0-x86_64`. */
         fun buildName(archive: File): String = archive.name
-            .removeSuffix(".tar.xz").removeSuffix(".tar.gz").removeSuffix(".tgz").removeSuffix(".txz")
+            .removeSuffix(".wcp.xz").removeSuffix(".wcp")
+            .removeSuffix(".tar.zst").removeSuffix(".tar.xz").removeSuffix(".tar.gz").removeSuffix(".tgz").removeSuffix(".txz")
 
-        private fun isTarArchive(name: String): Boolean {
+        /** Human label for the picker: `wine-9.20.wcp` -> `Wine 9.20 (bionic x86_64)`. */
+        fun displayName(archive: File): String {
+            val base = buildName(archive)
+            val version = Regex("""[0-9]+(\.[0-9]+)+""").find(base)?.value
+            val family = if (base.startsWith("proton", ignoreCase = true)) "Proton" else "Wine"
+            return if (version != null) "$family $version (bionic x86_64)" else base
+        }
+
+        /**
+         * Winlator bionic Wine packages: `.wcp` (zstd tar) or `.wcp.xz`. ARM64EC builds are left
+         * out (they need FEXCore / WOWBox64 DLLs Fable doesn't install); glibc tarballs never match.
+         */
+        fun isBionicWinePackageName(name: String): Boolean {
             val lower = name.lowercase()
-            return lower.endsWith(".tar.xz") || lower.endsWith(".tar.gz") || lower.endsWith(".tgz") || lower.endsWith(".txz")
+            if (!(lower.endsWith(".wcp") || lower.endsWith(".wcp.xz"))) return false
+            return !lower.contains("arm64ec")
         }
 
         /** Headers, man pages and static import libraries are only needed to build Wine programs. */

@@ -483,11 +483,13 @@ class AssetRepository internal constructor(
          * - 1: original defaults (implicit; files written before this key existed).
          * - 2: Box64 moved off `ptitSeb/box64`, whose releases carry no Android/ARM64 binaries
          *      (only x86 library bundles), to sources that ship Android bionic builds.
+         * - 3: Wine moved off `Kron4ek/Wine-Builds` (glibc builds that cannot run without a glibc
+         *      rootfs) to bionic `.wcp` packages from `StevenMXZ/Winlator-Contents`.
          */
-        internal const val DEFAULTS_VERSION = 2
+        internal const val DEFAULTS_VERSION = 3
 
         /** Former default sources that are removed from persisted catalogs on migration. */
-        internal val retiredDefaultSlugs: List<String> = listOf("ptitSeb/box64")
+        internal val retiredDefaultSlugs: List<String> = listOf("ptitSeb/box64", "Kron4ek/Wine-Builds")
 
         /**
          * The default catalog. Sourced from verified GitHub releases.
@@ -498,14 +500,22 @@ class AssetRepository internal constructor(
          * The RADV Xclipse driver is not listed here: see [DriverRepository].
          */
         val defaultCatalog: List<CatalogSource> = listOf(
+            // Wine must be a Winlator-style bionic build: x86_64 Wine linked against Android's
+            // libc (interpreter /system/bin/linker64), run by a bionic Box64. Kron4ek's generic
+            // builds are glibc-linked and cannot start without a glibc rootfs, so they were
+            // retired in defaults v3. Xnick417x/winlator-nightly-wcp publishes no Wine packages
+            // (only Box64, WOWBox64, FEXCore, DXVK, VKD3D), so Wine comes from the content
+            // repository Winlator-Ludashi itself reads (ContentsManager.REMOTE_PROFILES).
             CatalogSource(
-                owner = "Kron4ek",
-                repo = "Wine-Builds",
-                displayName = "Wine Builds",
+                owner = "StevenMXZ",
+                repo = "Winlator-Contents",
+                displayName = "Wine (Winlator bionic)",
                 type = AssetType.WINE,
-                // x86_64 builds only: they run through Box64. The 32-bit x86 builds cannot.
-                assetGlobs = listOf("*amd64*.tar.xz", "*amd64*.tar.gz"),
-                notes = "Wine x86_64 builds, run through Box64",
+                // wine-9.20.wcp: zstd tar, profile.json + bin/ + lib/wine/{x86_64,i386}-windows +
+                // x86_64-unix + prefixPack.txz. Proton.9.0-x86_64.wcp and proton-10-arm64ec are
+                // skipped exactly as Winlator-Ludashi's ContentsManager skips them.
+                assetGlobs = listOf("regex:^wine-[0-9][0-9.]*\\.wcp$"),
+                notes = "Bionic x86_64 Wine for Box64 (Winlator .wcp format)",
             ),
             // Upstream ptitSeb/box64 releases ship no Android or ARM64 binaries (only the
             // x86 library bundles), so Box64 comes from projects that publish Android NDK

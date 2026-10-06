@@ -97,6 +97,18 @@ class ContainerRepository internal constructor(
     fun listExes(containerId: String): List<ExeEntry> =
         exesById.values.filter { it.containerId == containerId }.sortedBy { it.name.lowercase() }
 
+    /**
+     * Downloaded Wine packages a new container can use, newest first: bionic Winlator `.wcp`
+     * builds only (see [WineRuntime.wineArchives]). Reads the download folders, so call it off
+     * the main thread.
+     */
+    suspend fun availableWineBuilds(): List<WineBuild> = withContext(Dispatchers.IO) {
+        runCatching { runtime?.wineBuilds().orEmpty() }.getOrElse { error ->
+            Log.w(TAG, "Could not list Wine builds", error)
+            emptyList()
+        }
+    }
+
     /** Prefix directory for [id]. Created on [create]. Safe to call before the directory exists. */
     fun directory(id: String): File = File(containersRoot, safeId(id))
 

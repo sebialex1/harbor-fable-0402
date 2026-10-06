@@ -64,4 +64,7 @@ dependencies {
     // Archive extraction for downloaded Wine / Box64 packages (.tar.xz, .tar.gz).
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("org.tukaani:xz:1.10")
+    // Winlator .wcp packages (bionic Wine, Box64) are zstd-compressed tars. Same library
+    // Winlator uses; ships prebuilt arm64 JNI libs in the AAR.
+    implementation("com.github.luben:zstd-jni:1.5.6-9@aar")
 }

@@ -6,6 +6,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
+import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -18,12 +19,12 @@ import java.util.zip.ZipInputStream
 import kotlin.coroutines.CoroutineContext
 
 /** Container formats [ArchiveExtractor] understands, detected from the file's magic bytes. */
-internal enum class ArchiveFormat { TAR_XZ, TAR_GZ, TAR, ZIP, ELF, UNKNOWN }
+internal enum class ArchiveFormat { TAR_XZ, TAR_GZ, TAR_ZST, TAR, ZIP, ELF, UNKNOWN }
 
 /**
  * Unpacks the runtime packages the app downloads (Wine builds, Box64) into app storage.
  *
- * Handles `.tar.xz`, `.tar.gz`, plain `.tar` and `.zip`. The format is read from the file
+ * Handles `.tar.xz`, `.tar.gz`, `.tar.zst` (Winlator `.wcp` packages), plain `.tar` and `.zip`. The format is read from the file
  * header, not the name. Tar extraction preserves the executable bit and symlinks, which Wine
  * builds rely on (`bin/winecfg -> wine`). Entries that would land outside [destDir] are skipped.
  */
@@ -43,6 +44,7 @@ internal object ArchiveExtractor {
             read >= 6 && at(0) == 0xFD && at(1) == 0x37 && at(2) == 0x7A && at(3) == 0x58 && at(4) == 0x5A && at(5) == 0x00 ->
                 ArchiveFormat.TAR_XZ
             at(0) == 0x1F && at(1) == 0x8B -> ArchiveFormat.TAR_GZ
+            at(0) == 0x28 && at(1) == 0xB5 && at(2) == 0x2F && at(3) == 0xFD -> ArchiveFormat.TAR_ZST
             at(0) == 'P'.code && at(1) == 'K'.code -> ArchiveFormat.ZIP
             at(0) == 0x7F && at(1) == 'E'.code && at(2) == 'L'.code && at(3) == 'F'.code -> ArchiveFormat.ELF
             read >= 262 && String(head, 257, 5, Charsets.US_ASCII) == "ustar" -> ArchiveFormat.TAR
@@ -70,9 +72,34 @@ internal object ArchiveExtractor {
         return when (val format = detectFormat(archive)) {
             ArchiveFormat.TAR_XZ -> extractTar(XZCompressorInputStream(buffered(archive)), destDir, stripComponents, skip, context)
             ArchiveFormat.TAR_GZ -> extractTar(GzipCompressorInputStream(buffered(archive)), destDir, stripComponents, skip, context)
+            ArchiveFormat.TAR_ZST -> extractTar(ZstdCompressorInputStream(buffered(archive)), destDir, stripComponents, skip, context)
             ArchiveFormat.TAR -> extractTar(buffered(archive), destDir, stripComponents, skip, context)
             ArchiveFormat.ZIP -> extractZip(archive, destDir, stripComponents, skip, context)
             else -> throw IOException("${archive.name} is not a supported archive ($format)")
+        }
+    }
+
+    /**
+     * Reads one regular file ([path], e.g. `profile.json`, with or without a leading `./`) out of
+     * a compressed tar without unpacking the rest. Stops at the first match; null when the
+     * archive is not a tar, has no such entry, or the entry is larger than [maxBytes].
+     */
+    fun readTarEntry(archive: File, path: String, maxBytes: Int = 1 shl 20): ByteArray? {
+        val wanted = path.removePrefix("./")
+        val source: InputStream = when (detectFormat(archive)) {
+            ArchiveFormat.TAR_XZ -> XZCompressorInputStream(buffered(archive))
+            ArchiveFormat.TAR_GZ -> GzipCompressorInputStream(buffered(archive))
+            ArchiveFormat.TAR_ZST -> ZstdCompressorInputStream(buffered(archive))
+            ArchiveFormat.TAR -> buffered(archive)
+            else -> return null
+        }
+        TarArchiveInputStream(source).use { tar ->
+            while (true) {
+                val entry = tar.nextEntry ?: return null
+                if (entry.name.removePrefix("./") != wanted) continue
+                if (!entry.isFile || entry.size > maxBytes) return null
+                return tar.readBytes()
+            }
         }
     }
 

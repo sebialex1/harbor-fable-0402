@@ -11,6 +11,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
+import io.harbor.fable.data.WineBuild
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.ui.components.*
@@ -41,6 +43,12 @@ fun ContainersScreen(
     val appSettings by settings.settings.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
+    // Re-read the downloaded Wine packages whenever the sheet opens or the asset list changes.
+    val assetEntries by app.assetRepository.assets.collectAsStateWithLifecycle()
+    var wineBuilds by remember { mutableStateOf<List<WineBuild>>(emptyList()) }
+    LaunchedEffect(showCreate, assetEntries) {
+        if (showCreate) wineBuilds = repository.availableWineBuilds()
+    }
 
     ContainersContent(
         containers = containers,
@@ -52,6 +60,7 @@ fun ContainersScreen(
         CreateContainerSheet(
             defaultResolution = appSettings.defaultResolution,
             defaultWineVersion = appSettings.defaultWineVersion,
+            wineBuilds = wineBuilds,
             defaultFullscreen = appSettings.defaultFullscreen,
             defaultTranslator = appSettings.defaultTranslator,
             onDismiss = { showCreate = false },
@@ -100,7 +109,7 @@ internal fun ContainersContent(
                         if (index > 0) CardDivider(afterIcon = true)
                         ListRow(
                             title = container.name,
-                            subtitle = container.wineVersion,
+                            subtitle = container.wineVersion.ifBlank { "No Wine chosen" },
                             icon = Icons.Outlined.Inventory2,
                             trailing = { StatusPill(container.status) },
                             onClick = { onContainerClick(container.id) },
@@ -116,6 +125,7 @@ internal fun ContainersContent(
 private fun CreateContainerSheet(
     defaultResolution: String,
     defaultWineVersion: String,
+    wineBuilds: List<WineBuild>,
     defaultFullscreen: Boolean,
     defaultTranslator: String,
     onDismiss: () -> Unit,
@@ -125,7 +135,12 @@ private fun CreateContainerSheet(
     var resolution by remember { mutableStateOf(defaultResolution) }
     var fullscreen by remember { mutableStateOf(defaultFullscreen) }
     var translator by remember { mutableStateOf(defaultTranslator) }
-    val wineVersion = defaultWineVersion
+    // The user's default when it is downloaded, else the newest bionic package.
+    var wineChoice by remember { mutableStateOf<String?>(null) }
+    val wineVersion = wineChoice
+        ?: wineBuilds.firstOrNull { it.id.equals(defaultWineVersion, ignoreCase = true) }?.id
+        ?: wineBuilds.firstOrNull()?.id
+        ?: ""
 
     FableSheet(
         title = "New Container",
@@ -139,6 +154,18 @@ private fun CreateContainerSheet(
 
         // All settings share one section.
         FableCard {
+            if (wineBuilds.isNotEmpty()) {
+                OptionSelector(
+                    label = "Wine",
+                    options = wineBuilds.map { SelectOption(it.id, it.label, it.archive.name) },
+                    selected = wineVersion,
+                    onSelect = { wineChoice = it },
+                )
+            } else {
+                // Only bionic (Winlator .wcp) Wine runs in Fable; glibc builds are never listed.
+                InfoRow(label = "Wine", value = "Download one in Assets")
+            }
+            CardDivider()
             OptionSelector(
                 label = "Resolution",
                 options = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) },

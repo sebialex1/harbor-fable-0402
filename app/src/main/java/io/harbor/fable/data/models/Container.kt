@@ -10,7 +10,11 @@ enum class ContainerStatus { CREATED, CONFIGURING, READY, RUNNING, ERROR }
  * persisted record is missing a field.
  */
 object ContainerDefaults {
-    const val WINE_VERSION = "wine-9.0"
+    /**
+     * Empty means "the newest downloaded bionic Wine package". New containers get an explicit
+     * build from the create-container picker; this only covers records that predate it.
+     */
+    const val WINE_VERSION = ""
     const val GRAPHICS_DRIVER = "RADV Xclipse"
     const val SCREEN_RESOLUTION = "1280x720"
     const val TRANSLATOR = "box64"
