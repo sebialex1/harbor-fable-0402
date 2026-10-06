@@ -1,9 +1,51 @@
 package io.harbor.fable.app
 
 import android.app.Application
+import android.content.Context
+import io.harbor.fable.data.AssetRepository
+import io.harbor.fable.data.ContainerRepository
+import io.harbor.fable.data.DownloadManager
+import io.harbor.fable.data.GitHubReleaseFetcher
 
+/**
+ * Application entry point. Wires the data layer singletons and exposes them
+ * to screens via [from].
+ *
+ * Repositories are lazily created on first access through their
+ * `get(context)` factory methods. The download manager is eagerly initialized
+ * from [onCreate] so it can restore its persisted queue; network refreshes stay
+ * deferred until requested. The manifest registers this class via `android:name`.
+ */
 class FableApp : Application() {
+
+    val containerRepository: ContainerRepository
+        get() = ContainerRepository.get(this)
+
+    val assetRepository: AssetRepository
+        get() = AssetRepository.get(this)
+
+    val gitHubReleaseFetcher: GitHubReleaseFetcher
+        get() = GitHubReleaseFetcher.get(this)
+
+    val downloadManager: DownloadManager
+        get() = DownloadManager.get(this)
+
     override fun onCreate() {
         super.onCreate()
+        // Eagerly create the download manager so its persisted queue is
+        // restored before the user interacts with the UI. The notification
+        // channel is created when the foreground service is first started.
+        @Suppress("UNUSED_VARIABLE")
+        val dm = downloadManager
+    }
+
+    companion object {
+        /**
+         * Returns the [FableApp] for the given context. Throws if the
+         * Application is not a [FableApp] (e.g. in a test without a custom
+         * Application class).
+         */
+        fun from(context: Context): FableApp =
+            context.applicationContext as FableApp
     }
 }

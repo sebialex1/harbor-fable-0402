@@ -7,4 +7,10 @@
     <string name="download_resume">Resume</string>
     <string name="download_cancel">Cancel</string>
     <string name="download_retry">Retry</string>
+    <string name="download_notification_title">Fable Downloads</string>
+    <string name="download_notification_preparing">Preparing download…</string>
+    <plurals name="download_notification_queued">
+        <item quantity="one">%1$d download queued</item>
+        <item quantity="other">%1$d downloads queued</item>
+    </plurals>
 </resources>

@@ -145,7 +145,7 @@ internal fun JSONObject.longOrNull(key: String): Long? {
 }
 
 internal fun JSONObject.putNullable(key: String, value: String?) {
-    if (value == null) put(key, NULL) else put(key, value)
+    if (value == null) put(key, JSONObject.NULL) else put(key, value)
 }
 
 internal fun JSONObject.toStringMap(): Map<String, String> {

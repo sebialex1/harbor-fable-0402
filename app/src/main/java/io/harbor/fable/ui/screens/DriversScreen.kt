@@ -1,29 +1,68 @@
 package io.harbor.fable.ui.screens
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.harbor.fable.app.FableApp
+import io.harbor.fable.data.DownloadStatus
+import io.harbor.fable.data.DownloadTask
+import io.harbor.fable.data.formatBytes
+import io.harbor.fable.data.models.DriverPackage
 import io.harbor.fable.ui.components.GlassButton
 import io.harbor.fable.ui.components.GlassCard
-import io.harbor.fable.ui.theme.*
+import io.harbor.fable.ui.theme.FableAccent
+import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.FableTextDim
+import kotlinx.coroutines.launch
 
 @Composable
 fun DriversScreen() {
+    val context = LocalContext.current
+    val repository = remember(context) { FableApp.from(context).assetRepository }
+    val downloadManager = remember(context) { FableApp.from(context).downloadManager }
+    val drivers by repository.drivers.collectAsStateWithLifecycle()
+    val isRefreshing by repository.isRefreshing.collectAsStateWithLifecycle()
+    val downloadSnapshot by downloadManager.snapshot.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
-    var showImport by remember { mutableStateOf(false) }
+
+    LaunchedEffect(repository) {
+        repository.refresh()
+    }
+
+    val orderedDrivers = drivers.sortedBy { driver ->
+        when {
+            driver.sourceRepo.orEmpty().contains("AdrenoToolsDrivers", ignoreCase = true) -> 0
+            driver.sourceRepo.orEmpty().contains("radv-xclipse", ignoreCase = true) -> 1
+            else -> 2
+        }
+    }
 
     Column(
         Modifier
@@ -32,130 +71,149 @@ fun DriversScreen() {
             .padding(horizontal = 20.dp)
             .padding(top = 48.dp, bottom = 120.dp),
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text("Drivers", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = FableText)
-                Text("Adrenotools Vulkan driver packages", fontSize = 13.sp, color = FableTextDim)
+        Text("Drivers", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = FableText)
+        Text("Adrenotools Vulkan driver packages", fontSize = 13.sp, color = FableTextDim)
+
+        Spacer(Modifier.height(24.dp))
+
+        Text("Available Packages", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = FableTextDim)
+        Spacer(Modifier.height(12.dp))
+
+        if (isRefreshing) {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        color = FableAccent,
+                        strokeWidth = 2.dp,
+                    )
+                    Text("Refreshing driver catalog…", fontSize = 13.sp, color = FableTextDim)
+                }
             }
-            GlassButton(
-                text = "Import",
-                primary = true,
-                icon = { Icon(Icons.Outlined.FileUpload, contentDescription = "Import", tint = Color.White, modifier = Modifier.size(18.dp)) },
-                onClick = { showImport = true },
-            )
+            Spacer(Modifier.height(12.dp))
         }
 
-        Spacer(Modifier.height(24.dp))
-
-        // Available driver sources
-        Text("Available Sources", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = FableTextDim)
-        Spacer(Modifier.height(12.dp))
-
-        // JimVulkan Xclipse driver card
-        DriverSourceCard(
-            name = "RADV Xclipse (JimVulkan)",
-            version = "Mesa 26.3.0-devel",
-            description = "Custom RADV driver for Samsung Xclipse 920/530 (RDNA2)",
-            vulkanVersion = "Vulkan 1.4.358",
-            fileSize = "18.9 MB",
-            isDownloaded = false,
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        // Turnip driver card
-        DriverSourceCard(
-            name = "Turnip (Mesa)",
-            version = "Latest",
-            description = "Open-source Adreno driver for Snapdragon GPUs",
-            vulkanVersion = "Vulkan 1.3+",
-            fileSize = "Varies",
-            isDownloaded = false,
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        // Installed drivers section
-        Text("Installed", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = FableTextDim)
-        Spacer(Modifier.height(12.dp))
-
-        GlassCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(Icons.Outlined.Memory, contentDescription = null, tint = FableTextDim, modifier = Modifier.size(40.dp))
-                Spacer(Modifier.height(8.dp))
-                Text("No drivers installed", fontSize = 14.sp, color = FableText)
-                Text("Import a .zip adrenotools driver package to begin", fontSize = 12.sp, color = FableTextDim, modifier = Modifier.padding(top = 4.dp))
+        if (orderedDrivers.isEmpty() && !isRefreshing) {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "No driver packages found in the catalog",
+                    modifier = Modifier.padding(20.dp),
+                    fontSize = 14.sp,
+                    color = FableTextDim,
+                )
+            }
+        } else {
+            orderedDrivers.forEachIndexed { index, driver ->
+                val task = downloadSnapshot.tasks
+                    .filter { it.assetId == driver.id }
+                    .maxByOrNull { it.updatedAt }
+                DriverCard(
+                    driver = driver,
+                    task = task,
+                    onDownload = {
+                        scope.launch { repository.downloadDriver(driver.id) }
+                    },
+                )
+                if (index != orderedDrivers.lastIndex) Spacer(Modifier.height(12.dp))
             }
         }
     }
 }
 
 @Composable
-private fun DriverSourceCard(
-    name: String,
-    version: String,
-    description: String,
-    vulkanVersion: String,
-    fileSize: String,
-    isDownloaded: Boolean,
+private fun DriverCard(
+    driver: DriverPackage,
+    task: DownloadTask?,
+    onDownload: () -> Unit,
 ) {
+    val title = driverTitle(driver)
+    val isDownloaded = driver.isDownloaded || task?.status == DownloadStatus.COMPLETED
+    val isActive = task?.status == DownloadStatus.QUEUED ||
+        task?.status == DownloadStatus.DOWNLOADING ||
+        task?.status == DownloadStatus.VERIFYING
+    val status = when {
+        isDownloaded -> "Downloaded"
+        task?.status == DownloadStatus.QUEUED -> "Queued"
+        task?.status == DownloadStatus.DOWNLOADING -> {
+            val percent = (task.progressFraction * 100).toInt()
+            if (task.totalBytes > 0) "Downloading · $percent%" else "Downloading"
+        }
+        task?.status == DownloadStatus.PAUSED -> "Paused"
+        task?.status == DownloadStatus.VERIFYING -> "Verifying"
+        task?.status == DownloadStatus.COMPLETED -> "Downloaded"
+        task?.status == DownloadStatus.FAILED -> "Failed"
+        task?.status == DownloadStatus.CANCELLED -> "Cancelled"
+        else -> "Available"
+    }
+    val buttonText = when {
+        isDownloaded -> "Downloaded"
+        isActive -> "In progress"
+        else -> "Download"
+    }
+
     GlassCard(modifier = Modifier.fillMaxWidth()) {
-        Row(
+        Column(
             Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Driver icon
-            Box(
-                Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(FableAccent.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Outlined.Memory, contentDescription = null, tint = FableAccent, modifier = Modifier.size(24.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.Memory,
+                    contentDescription = null,
+                    tint = FableAccent,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .padding(end = 10.dp),
+                )
+                Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = FableText)
             }
-            Spacer(Modifier.width(16.dp))
-            // Info
-            Column(Modifier.weight(1f)) {
-                Text(name, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = FableText)
-                Text(description, fontSize = 12.sp, color = FableTextDim, modifier = Modifier.padding(top = 2.dp))
-                Row(
-                    Modifier.padding(top = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    TagChip(version)
-                    TagChip(vulkanVersion)
-                    TagChip(fileSize)
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            // Action
+            Text(
+                text = driver.name,
+                fontSize = 12.sp,
+                color = FableTextDim,
+                modifier = Modifier.padding(top = 5.dp),
+            )
+            Text(
+                text = "Version ${driver.version}  ·  ${formatBytes(driver.fileSizeBytes)}  ·  $status",
+                fontSize = 12.sp,
+                color = FableTextDim,
+                modifier = Modifier.padding(top = 8.dp),
+            )
             GlassButton(
-                text = if (isDownloaded) "Installed" else "Get",
+                text = buttonText,
                 primary = !isDownloaded,
-                onClick = {},
+                icon = if (!isDownloaded) {
+                    {
+                        Icon(
+                            Icons.Outlined.Download,
+                            contentDescription = null,
+                            tint = FableText,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                } else {
+                    null
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                onClick = {
+                    if (!isDownloaded && !isActive) onDownload()
+                },
             )
         }
     }
 }
 
-@Composable
-private fun TagChip(text: String) {
-    Box(
-        Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(FableGlass)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    ) {
-        Text(text, fontSize = 10.sp, color = FableTextDim)
-    }
+private fun driverTitle(driver: DriverPackage): String = when {
+    driver.sourceRepo.orEmpty().contains("AdrenoToolsDrivers", ignoreCase = true) -> "Turnip (Adreno)"
+    driver.sourceRepo.orEmpty().contains("radv-xclipse", ignoreCase = true) -> "RADV Xclipse"
+    else -> driver.sourceRepo ?: driver.name
 }
