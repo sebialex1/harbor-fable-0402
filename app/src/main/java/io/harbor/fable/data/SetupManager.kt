@@ -294,11 +294,23 @@ class SetupManager internal constructor(
             else -> 3
         }
 
-        /** Also used for FEX packages: an Android build first, then any ARM64 one. */
-        internal fun box64Rank(name: String): Int = when {
-            name.contains("android", ignoreCase = true) -> 0
-            name.contains("aarch64", ignoreCase = true) || name.contains("arm64", ignoreCase = true) -> 1
-            else -> 2
+        private val NIGHTLY_MARKER = Regex("""(?i)nightly|-[0-9a-f]{7,}(?=[.-])""")
+        private val VERSION_NUMBER = Regex("""(\d+)\.(\d+)(?:\.(\d+))?""")
+
+        /**
+         * Lower is better. Also used for FEX packages.
+         *
+         * Tagged releases beat nightlies (a `-<git hash>` or "nightly" in the name), and within
+         * a tier the highest version number wins, so a source that lists every version it ever
+         * published (`box64-0.3.2-…` through `box64-0.4.2-…`) recommends the newest one.
+         */
+        internal fun box64Rank(name: String): Long {
+            val tier = if (NIGHTLY_MARKER.containsMatchIn(name)) 1L else 0L
+            val version = VERSION_NUMBER.find(name)?.let { match ->
+                val (major, minor, patch) = match.destructured
+                major.toLong() * 1_000_000L + minor.toLong() * 1_000L + (patch.toLongOrNull() ?: 0L)
+            } ?: 0L
+            return tier * 10_000_000_000L + (9_999_999_999L - version.coerceAtMost(9_999_999_999L))
         }
 
         @Volatile

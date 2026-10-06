@@ -89,13 +89,24 @@ Wired up as the application entry point.
 | Owner | Repo | Type | Globs |
 |---|---|---|---|
 | Kron4ek | Wine-Builds | WINE | `*amd64*.tar.xz`, `*amd64*.tar.gz` |
-| ptitSeb | box64 | BOX64 | `*aarch64*.tar.gz`, `*android*.tar.gz` |
+| KreitinnSoftware | MiceWine-Repository | BOX64 | `box64-*-aarch64.rat` (tar.xz, `usr/bin/box64`; Android NDK build) |
+| Xnick417x | winlator-nightly-wcp | BOX64 | `Box64-*.wcp` (tar.xz, `box64` at the root; nightly Android NDK build) |
+| FEX-Emu | FEX | FEX | ARM64 binary globs; upstream ships none, so this lists nothing |
 | doitsujin | dxvk | DXVK | `regex:^dxvk-[0-9][0-9.]*\.tar\.(gz\|zst)$` (not the `dxvk-native-*` Linux builds) |
 | GGlessT | modern-treex | OTHER | `*.zip`, `*.tar.gz` |
 
 The RADV Xclipse driver has its own feed (`RadvReleaseProvider`); a persisted
 catalog from an older build that still lists a `VULKAN_DRIVER` source is
 migrated on load.
+
+`catalog.json` records `defaultsVersion` (`AssetRepository.DEFAULTS_VERSION`). A file written
+by an older build is reconciled on load: retired defaults (`ptitSeb/box64`) are dropped and
+missing defaults appended, user-added sources untouched. Bump the constant whenever the
+defaults change in a way existing installs must pick up.
+
+Refresh asks `releases/latest` first; when nothing there matches a source's globs it scans the
+release list (newest first) for the first release that does. The Box64 sources need this: they
+publish several components (DXVK, VKD3D, WoW64 DLLs) under separate tags.
 
 `GGlessT/modern-treex` is included as requested. The GitHub API may return a
 client error (404) for repos with no releases; this is recorded in
@@ -132,8 +143,10 @@ Windows programs are x86_64, so on an ARM64 device Wine runs through Box64:
    `explorer /desktop=Fable,<resolution>`. Output goes to `<container>/fable-launch.log`.
 
 `ptitSeb/box64` does not publish a ready-made ARM64 binary in its GitHub releases (only
-x86 library bundles), so the Box64 entry stays empty until a release that matches its globs
-appears or the globs are pointed at another source.
+x86 library bundles), so Box64 comes from third-party Android NDK (bionic) builds of upstream:
+MiceWine's `.rat` packages (stable tags) and the Winlator nightly `.wcp` packages. Both are
+`.tar.xz` archives (detected by header, not extension) with a `box64` ELF aarch64 executable
+linked against `libc.so`/`libm.so`/`libdl.so` only, so they run from app storage.
 
 ## First-run setup (`SetupManager`, `SetupScreen`)
 

@@ -26,7 +26,7 @@ import io.harbor.fable.ui.theme.RowPaddingHorizontal
 
 private enum class DownloadUi { AVAILABLE, QUEUED, DOWNLOADING, VERIFYING, DONE }
 
-private val ArchiveSuffixes = listOf(".tar.xz", ".tar.gz", ".tar.bz2", ".tar.zst", ".tgz", ".txz", ".zip", ".7z")
+private val ArchiveSuffixes = listOf(".tar.xz", ".tar.gz", ".tar.bz2", ".tar.zst", ".tgz", ".txz", ".zip", ".7z", ".wcp", ".rat")
 
 /** Catalog file name without its archive extension, which only adds noise in a list. */
 internal fun displayAssetName(fileName: String): String {

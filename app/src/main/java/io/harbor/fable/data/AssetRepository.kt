@@ -67,6 +67,8 @@ class AssetRepository internal constructor(
 ) {
     private val mutex = Mutex()
 
+    private val initialDefaults: List<CatalogSource> = initialCatalog
+
     private val catalogSources = LinkedHashMap<String, CatalogSource>().apply {
         initialCatalog.forEach { put(it.slug, it) }
     }
@@ -138,9 +140,7 @@ class AssetRepository internal constructor(
 
             for (source in catalogSources.values) {
                 try {
-                    val cached = fetcher.fetchLatestOrCached(source.owner, source.repo, forceRefresh)
-                    val release = cached.release
-                    val filtered = fetcher.filterAssets(release, source.assetGlobs)
+                    val (release, filtered) = resolveRelease(source, forceRefresh)
 
                     for (asset in filtered) {
                         val entry = AssetEntry(
@@ -181,6 +181,46 @@ class AssetRepository internal constructor(
         } finally {
             _isRefreshing.value = false
         }
+    }
+
+    /**
+     * The release whose assets a source lists, with the assets that match its globs.
+     *
+     * `releases/latest` is tried first. When it carries nothing that matches — which is the
+     * normal case for repositories that publish several components under separate tags (the
+     * Box64 sources also release DXVK, VKD3D or app builds, so "latest" is often one of those) —
+     * the newest release in the full list that does match wins. Nothing matching anywhere
+     * yields the latest release with an empty asset list.
+     */
+    private suspend fun resolveRelease(
+        source: CatalogSource,
+        forceRefresh: Boolean,
+    ): Pair<GitHubRelease, List<GitHubAsset>> {
+        val latest = try {
+            fetcher.fetchLatestOrCached(source.owner, source.repo, forceRefresh).release
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            // `releases/latest` is a 404 for repositories whose releases are all pre-releases.
+            return scanReleases(source, forceRefresh) ?: throw error
+        }
+        val filtered = fetcher.filterAssets(latest, source.assetGlobs)
+        if (filtered.isNotEmpty()) return latest to filtered
+        return scanReleases(source, forceRefresh) ?: (latest to filtered)
+    }
+
+    private suspend fun scanReleases(source: CatalogSource, forceRefresh: Boolean): Pair<GitHubRelease, List<GitHubAsset>>? {
+        val releases = try {
+            fetcher.fetchReleasesOrCached(source.owner, source.repo, forceRefresh).releases
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            Log.w(TAG, "Release list unavailable for ${source.slug}", error)
+            return null
+        }
+        for (release in releases) {
+            val filtered = fetcher.filterAssets(release, source.assetGlobs)
+            if (filtered.isNotEmpty()) return release to filtered
+        }
+        return null
     }
 
     // --- Search and filter --------------------------------------------------
@@ -330,16 +370,46 @@ class AssetRepository internal constructor(
             // Driver sources moved to DriverRepository; drop any that an older build persisted.
             catalogSources.clear()
             persisted.filter { it.type != AssetType.VULKAN_DRIVER }.forEach { catalogSources[it.slug] = it }
+            val persistedDefaults = root.optInt(DEFAULTS_VERSION_KEY, 1)
+            if (persistedDefaults < DEFAULTS_VERSION && migrateDefaults(persistedDefaults)) {
+                persistCatalog()
+            }
             _catalog.value = catalogSources.values.toList()
         }.onFailure { error ->
             Log.e(TAG, "Catalog unreadable, using defaults", error)
         }
     }
 
+    /**
+     * Brings a catalog persisted by an older build up to the current [defaultCatalog] without
+     * touching sources the user added. Retired defaults (listed in [retiredDefaultSlugs]) are
+     * dropped and defaults missing from the file are appended. Returns true when anything changed.
+     */
+    private fun migrateDefaults(fromVersion: Int): Boolean {
+        var changed = false
+        for (slug in retiredDefaultSlugs) {
+            if (catalogSources.remove(slug) != null) {
+                Log.i(TAG, "Dropped retired default source $slug (catalog defaults v$fromVersion -> v$DEFAULTS_VERSION)")
+                changed = true
+            }
+        }
+        for (source in initialDefaults) {
+            if (!catalogSources.containsKey(source.slug)) {
+                catalogSources[source.slug] = source
+                Log.i(TAG, "Added default source ${source.slug} (catalog defaults v$fromVersion -> v$DEFAULTS_VERSION)")
+                changed = true
+            }
+        }
+        return changed
+    }
+
     private fun persistCatalog() {
         val array = JSONArray()
         catalogSources.values.forEach { array.put(catalogSourceToJson(it)) }
-        val root = JSONObject().put("version", 1).put("sources", array)
+        val root = JSONObject()
+            .put("version", 1)
+            .put(DEFAULTS_VERSION_KEY, DEFAULTS_VERSION)
+            .put("sources", array)
         writeAtomic(catalogFile, root.toString(2))
     }
 
@@ -371,6 +441,22 @@ class AssetRepository internal constructor(
     companion object {
         private const val TAG = "AssetRepository"
 
+        private const val DEFAULTS_VERSION_KEY = "defaultsVersion"
+
+        /**
+         * Bump whenever [defaultCatalog] changes in a way existing installs must pick up. The
+         * persisted catalog records the version it was last reconciled with; older files get
+         * [retiredDefaultSlugs] removed and new defaults appended on load.
+         *
+         * - 1: original defaults (implicit; files written before this key existed).
+         * - 2: Box64 moved off `ptitSeb/box64`, whose releases carry no Android/ARM64 binaries
+         *      (only x86 library bundles), to sources that ship Android bionic builds.
+         */
+        internal const val DEFAULTS_VERSION = 2
+
+        /** Former default sources that are removed from persisted catalogs on migration. */
+        internal val retiredDefaultSlugs: List<String> = listOf("ptitSeb/box64")
+
         /**
          * The default catalog. Sourced from verified GitHub releases.
          * `GGlessT/modern-treex` is included as requested; the GitHub API may
@@ -389,23 +475,41 @@ class AssetRepository internal constructor(
                 assetGlobs = listOf("*amd64*.tar.xz", "*amd64*.tar.gz"),
                 notes = "Wine x86_64 builds, run through Box64",
             ),
+            // Upstream ptitSeb/box64 releases ship no Android or ARM64 binaries (only the
+            // x86 library bundles), so Box64 comes from projects that publish Android NDK
+            // (bionic) builds of it. Both are plain aarch64 executables linked against
+            // libc/libm/libdl only — they run from app storage without Termux or a rootfs.
             CatalogSource(
-                owner = "ptitSeb",
-                repo = "box64",
+                owner = "KreitinnSoftware",
+                repo = "MiceWine-Repository",
                 displayName = "Box64 (x86_64 Emulator)",
                 type = AssetType.BOX64,
-                assetGlobs = listOf("*aarch64*.tar.gz", "*android*.tar.gz"),
-                notes = "ARM64 x86_64 translator — required to run Wine",
+                // One rolling release carries every tagged version: box64-0.4.2-0.4.2-aarch64.rat
+                // is a .tar.xz with usr/bin/box64 inside. DXVK and driver packages are skipped.
+                assetGlobs = listOf("box64-*-aarch64.rat"),
+                notes = "ARM64 x86_64 translator — required to run Wine. Stable releases, built for Android with the NDK",
+            ),
+            CatalogSource(
+                owner = "Xnick417x",
+                repo = "winlator-nightly-wcp",
+                displayName = "Box64 nightly (Winlator bionic)",
+                type = AssetType.BOX64,
+                // Box64-0.4.5-<hash>.wcp is a .tar.xz with box64 at the root. Anchored so the
+                // WOWBox64-*.wcp (Wine WoW64 DLL) and FEXCore-*.wcp assets are not picked up.
+                assetGlobs = listOf("Box64-*.wcp"),
+                notes = "Daily builds of upstream Box64 for Android (bionic). Newer, less tested",
             ),
             CatalogSource(
                 owner = "FEX-Emu",
                 repo = "FEX",
                 displayName = "FEX (x86_64 Emulator)",
                 type = AssetType.FEX,
-                // Upstream releases ship source archives only; these globs pick up ARM64 binary
+                // Upstream releases ship source archives only, and no third party publishes a
+                // standalone FEXInterpreter for Android (the Winlator "FEXCore" packages are
+                // Wine arm64ec DLLs, not an interpreter). These globs pick up ARM64 binary
                 // packages when a release carries them, and match nothing otherwise.
                 assetGlobs = listOf("*aarch64*.tar.*", "*arm64*.tar.*", "*android*.tar.*", "*aarch64*.zip", "*arm64*.zip"),
-                notes = "Optional alternative to Box64 for containers that opt in",
+                notes = "Optional alternative to Box64. No Android binaries are published yet",
             ),
             CatalogSource(
                 owner = "doitsujin",
