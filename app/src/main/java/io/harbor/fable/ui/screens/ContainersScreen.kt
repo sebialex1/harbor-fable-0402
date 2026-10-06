@@ -1,14 +1,22 @@
 package io.harbor.fable.ui.screens
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -16,6 +24,9 @@ import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.ui.components.*
+import io.harbor.fable.ui.theme.FableAccent
+import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
 @Composable
@@ -106,6 +117,25 @@ internal fun ContainersContent(
                             iconTint = containerStatusColor(container.status),
                             trailing = { StatusPill(container.status) },
                             onClick = { onContainerClick(container.id) },
+                        )
+                    }
+                }
+            }
+
+            // When the list is short, fill the space with quick actions instead of void.
+            if (containers.size < 3) {
+                item(key = "quick-actions-label") {
+                    SectionLabel("Quick Actions", Modifier.animateItem().liquidAppear(appear, containers.size + 1))
+                }
+                item(key = "quick-actions") {
+                    GlassCard(Modifier.fillMaxWidth().animateItem().liquidAppear(appear, containers.size + 2)) {
+                        ListRow(
+                            title = "Create Container",
+                            subtitle = "Set up a new Wine environment",
+                            icon = Icons.Outlined.Add,
+                            iconTint = FableAccent,
+                            showChevron = false,
+                            onClick = onCreateClick,
                         )
                     }
                 }

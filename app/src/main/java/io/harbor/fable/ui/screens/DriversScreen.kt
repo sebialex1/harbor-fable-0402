@@ -231,14 +231,18 @@ internal fun DriversContent(
             }
         }
 
-        if (latest != null) {
+        // Only show the Latest Release section when no driver is installed (it's the install
+        // target). When a driver is active, the Active Driver card already covers the latest
+        // release — either as "Up to date" or with an inline "Update to X" button — so a
+        // separate card would duplicate the same information.
+        if (latest != null && installed == null) {
             item(key = "latest-label") { SectionLabel("Latest Release", Modifier.animateItem().liquidAppear(appear, 3)) }
             item(key = "latest") {
                 GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
                     DriverReleaseRow(
                         release = latest,
                         task = tasks.taskFor(latest),
-                        installed = installed?.tag == latest.tag,
+                        installed = false,
                         installing = installing == latest.tag,
                         onDownload = { onDownload(latest) },
                         onInstall = { onInstall(latest) },
