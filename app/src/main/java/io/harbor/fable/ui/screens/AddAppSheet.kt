@@ -7,6 +7,9 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
@@ -20,6 +23,9 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.ui.components.*
+import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
 
 /**
@@ -62,45 +68,39 @@ fun AddAppSheet(
         title = "Add App",
         onDismiss = onDismiss,
     ) { close ->
-        GlassButton(
-            text = if (pickedUri == null) "Pick File" else "Change File",
-            icon = Icons.Outlined.FileOpen,
-            modifier = Modifier.fillMaxWidth(),
-            onClick = { picker.launch(arrayOf("*/*")) },
-        )
-        GlassTextField(
-            value = pickedFileName,
-            onValueChange = {},
-            label = "File",
-            placeholder = "No file selected",
-            readOnly = true,
-        )
-        GlassTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = "App name",
-        )
-        if (containers.isEmpty()) {
-            NoticeCard(
-                icon = Icons.Outlined.Info,
-                title = "Create a container first.",
-                lines = emptyList(),
+        // File and container share one section; the name is the only thing typed.
+        GlassCard {
+            InfoRow(
+                label = "File",
+                value = pickedFileName.ifBlank { "Choose" },
+                valueColor = if (pickedFileName.isBlank()) FableText else FableTextDim,
+                onClick = { picker.launch(arrayOf("*/*")) },
             )
-        } else {
-            GlassCard {
+            if (containers.isNotEmpty()) {
+                CardDivider()
                 OptionSelector(
                     label = "Container",
                     options = containers.map { SelectOption(it.id, it.name) },
                     selected = containerId.orEmpty(),
                     onSelect = { chosenContainerId = it },
-                    icon = Icons.Outlined.Apps,
                 )
             }
         }
+        GlassTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = "Name",
+        )
+        if (containers.isEmpty()) {
+            Text(
+                text = "Create a container first.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = Spacing.lg),
+            )
+        }
         GlassButton(
-            text = "Add App",
+            text = "Add",
             primary = true,
-            icon = Icons.Outlined.Add,
             enabled = pickedUri != null && name.isNotBlank() && containerId != null,
             modifier = Modifier.fillMaxWidth(),
             onClick = {

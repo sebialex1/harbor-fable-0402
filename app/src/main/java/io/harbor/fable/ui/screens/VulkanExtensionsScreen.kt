@@ -12,11 +12,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.FactCheck
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,7 +46,7 @@ import io.harbor.fable.nativebridge.VulkanProbe
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableError
-import io.harbor.fable.ui.theme.FableSuccess
+import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.Motion
@@ -111,10 +113,6 @@ internal fun VulkanExtensionsContent(
 
     FableScreen(
         title = "Vulkan Extensions",
-        subtitle = when (source) {
-            VulkanSource.INSTALLED_DRIVER -> installed?.let { "RADV Xclipse ${it.tag}" } ?: "No driver installed"
-            VulkanSource.SYSTEM -> "System driver"
-        },
         onBack = onBack,
         actions = {
             GlassIconButton(
@@ -158,7 +156,7 @@ internal fun VulkanExtensionsContent(
             item(key = "error") {
                 NoticeCard(
                     icon = Icons.Outlined.ErrorOutline,
-                    title = if (source == VulkanSource.INSTALLED_DRIVER) "Couldn't read the installed driver" else "Couldn't read the system driver",
+                    title = if (source == VulkanSource.INSTALLED_DRIVER) "Couldn't read the driver" else "Couldn't read the system driver",
                     lines = listOfNotNull(result.error),
                     tint = FableError,
                     modifier = Modifier.animateItem(),
@@ -181,8 +179,7 @@ internal fun VulkanExtensionsContent(
                     GlassTextField(
                         value = query,
                         onValueChange = { query = it },
-                        label = "Search extensions",
-                        placeholder = "swapchain, dynamic_state, …",
+                        label = "Search",
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     )
                     Row(
@@ -205,7 +202,7 @@ internal fun VulkanExtensionsContent(
 
             if (device != null) {
                 item(key = "device-extensions") {
-                    val label = if (device.apiGeneration != "0.0") "Vulkan ${device.apiGeneration} Device Extensions" else "Device Extensions"
+                    val label = if (device.apiGeneration != "0.0") "Device · Vulkan ${device.apiGeneration}" else "Device"
                     ExtensionSection(
                         title = label,
                         extensions = deviceExtensions,
@@ -218,8 +215,8 @@ internal fun VulkanExtensionsContent(
                 }
             }
             item(key = "instance-extensions") {
-                val label = result.instanceVersion?.let { "Vulkan ${it.split('.').take(2).joinToString(".")} Instance Extensions" }
-                    ?: "Instance Extensions"
+                val label = result.instanceVersion?.let { "Instance · Vulkan ${it.split('.').take(2).joinToString(".")}" }
+                    ?: "Instance"
                 ExtensionSection(
                     title = label,
                     extensions = instanceExtensions,
@@ -235,7 +232,6 @@ internal fun VulkanExtensionsContent(
                 EmptyState(
                     icon = Icons.Outlined.Extension,
                     title = "No extensions reported",
-                    message = "The driver advertised no extensions",
                     modifier = Modifier.animateItem(),
                 )
             }
@@ -269,17 +265,12 @@ private fun VulkanSummaryCard(
                         .padding(horizontal = RowPaddingHorizontal, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconTile(icon = Icons.Outlined.Extension, tint = FableAccent)
-                    Column(Modifier.weight(1f).padding(start = Spacing.md)) {
-                        Text(
-                            text = if (source == VulkanSource.INSTALLED_DRIVER) "Loading the installed driver…" else "Opening the system Vulkan…",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            text = "Enumerating devices",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = FableTextDim, strokeWidth = 2.dp)
+                    Text(
+                        text = "Reading driver…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(start = Spacing.md),
+                    )
                 }
                 result == null || ok != true -> {
                     val title = when {
@@ -288,9 +279,9 @@ private fun VulkanSummaryCard(
                         else -> "System Vulkan"
                     }
                     val subtitle = when {
-                        source == VulkanSource.INSTALLED_DRIVER && installed == null -> "Install a driver or switch to the system driver"
-                        source == VulkanSource.INSTALLED_DRIVER -> "The driver could not be opened"
-                        else -> "libvulkan.so could not be opened"
+                        source == VulkanSource.INSTALLED_DRIVER && installed == null -> "Switch to System to read the built-in driver"
+                        source == VulkanSource.INSTALLED_DRIVER -> "Couldn't open the driver"
+                        else -> "Couldn't open libvulkan.so"
                     }
                     Column(
                         Modifier
@@ -303,33 +294,18 @@ private fun VulkanSummaryCard(
                 }
                 else -> Column(Modifier.fillMaxWidth()) {
                     val device = result.primaryDevice
-                    val sourceLine = when (source) {
-                        VulkanSource.INSTALLED_DRIVER -> "Installed driver · adrenotools loader"
-                        VulkanSource.SYSTEM -> "System driver · libvulkan.so"
-                    }
-                    DriverSummaryRow(
-                        title = device?.name ?: "No physical device",
-                        lines = listOf(sourceLine),
-                        icon = Icons.Outlined.Extension,
-                        iconTint = if (device != null) FableSuccess else FableWarn,
-                        titleMaxLines = 1,
-                        trailing = {
-                            Pill(
-                                text = "${result.totalCount} ext",
-                                color = if (device != null) FableSuccess else FableWarn,
-                                icon = Icons.Outlined.Extension,
-                            )
-                        },
+                    InfoRow(
+                        label = device?.name ?: "No physical device",
+                        value = "${result.totalCount} extensions",
                     )
                     CardDivider()
                     if (device != null) {
-                        InfoRow(label = "Vulkan API", value = device.apiVersion, icon = Icons.Outlined.Verified)
+                        InfoRow(label = "Vulkan API", value = device.apiVersion)
                         CardDivider()
                         InfoRow(
                             label = "Driver",
                             value = listOfNotNull(device.driverName, device.driverInfo).joinToString(" · ")
                                 .ifBlank { device.driverVersion },
-                            icon = Icons.Outlined.Memory,
                             // Driver info strings carry the full Mesa version and commit; too long for one line.
                             stacked = true,
                         )
@@ -337,21 +313,19 @@ private fun VulkanSummaryCard(
                         InfoRow(
                             label = "Vendor",
                             value = "${device.vendorName} · ${device.deviceType}",
-                            icon = Icons.Outlined.Business,
                         )
                         if (device.conformanceVersion != null && device.conformanceVersion != "0.0.0.0") {
                             CardDivider()
-                            InfoRow(label = "Conformance", value = device.conformanceVersion, icon = Icons.AutoMirrored.Outlined.FactCheck)
+                            InfoRow(label = "Conformance", value = device.conformanceVersion)
                         }
                         CardDivider()
                     } else if (result.instanceVersion != null) {
-                        InfoRow(label = "Instance version", value = result.instanceVersion, icon = Icons.Outlined.Verified)
+                        InfoRow(label = "Instance version", value = result.instanceVersion)
                         CardDivider()
                     }
                     InfoRow(
                         label = "Library",
                         value = result.library ?: "libvulkan.so",
-                        icon = Icons.Outlined.Code,
                         stacked = true,
                     )
                 }
@@ -384,9 +358,9 @@ private fun ExtensionSection(
         onToggle = onToggle,
         modifier = modifier,
         badge = {
-            Pill(
-                text = if (filtering) "${extensions.size}/$total" else "$total",
-                color = if (extensions.isNotEmpty()) FableAccent else FableTextDim,
+            Text(
+                text = if (filtering) "${extensions.size} of $total" else "$total",
+                style = MaterialTheme.typography.bodyMedium,
             )
         },
     ) {
@@ -422,7 +396,7 @@ private fun ExtensionSection(
 /** How many extension rows a group composes before asking the user to show the rest. */
 private const val EXTENSION_PAGE = 50
 
-/** One extension: the name with its vendor tag coloured, and the revision as a pill. */
+/** One extension: the vendor tag in a grey column, the name, and the revision. */
 @Composable
 private fun ExtensionRow(extension: VulkanExtension, modifier: Modifier = Modifier) {
     Row(
@@ -432,18 +406,15 @@ private fun ExtensionRow(extension: VulkanExtension, modifier: Modifier = Modifi
             .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Pill(
+        Text(
             text = extension.vendorTag,
-            color = when (extension.family) {
-                VulkanExtensionFamily.KHR -> FableAccent
-                VulkanExtensionFamily.EXT -> FableSuccess
-                VulkanExtensionFamily.VENDOR -> FableWarn
-            },
+            style = MaterialTheme.typography.bodySmall,
+            color = FableTextDim,
+            modifier = Modifier.width(44.dp),
         )
-        Spacer(Modifier.width(Spacing.sm))
         Text(
             text = extension.shortName.substringAfter('_'),
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium.copy(color = FableText),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),

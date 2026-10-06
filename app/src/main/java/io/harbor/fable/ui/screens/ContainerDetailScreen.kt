@@ -3,8 +3,8 @@ package io.harbor.fable.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
@@ -19,6 +20,8 @@ import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.ui.components.*
+import io.harbor.fable.ui.theme.ControlHeight
+import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableError
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
@@ -89,7 +92,7 @@ fun ContainerDetailScreen(
     if (showDeleteConfirm) {
         ConfirmDialog(
             title = "Delete container?",
-            message = "This will permanently delete \"${container?.name}\" and all its files. This cannot be undone.",
+            message = "\"${container?.name}\" and all its files will be deleted.",
             confirmLabel = "Delete",
             destructive = true,
             onConfirm = {
@@ -128,9 +131,6 @@ internal fun ContainerDetailContent(
                 EmptyState(
                     icon = Icons.Outlined.ErrorOutline,
                     title = "Container not found",
-                    actionLabel = "Go Back",
-                    actionIcon = Icons.AutoMirrored.Outlined.ArrowBack,
-                    onAction = onBack,
                     modifier = Modifier.animateItem().liquidAppear(appear, 0),
                 )
             }
@@ -163,101 +163,81 @@ internal fun ContainerDetailContent(
             }
         }
 
-        item(key = "overview-label") { SectionLabel("Overview", Modifier.animateItem().liquidAppear(appear, 1)) }
-        item(key = "overview") {
+        // Everything about the container itself is one section: what it runs, then how.
+        item(key = "settings") {
             GlassCard(Modifier.animateItem().liquidAppear(appear, 1)) {
                 InfoRow(
                     label = "Status",
                     value = container.status.name.lowercase(),
-                    icon = Icons.Outlined.Info,
                     valueContent = { StatusPill(container.status) },
                 )
                 CardDivider()
-                InfoRow(label = "Wine", value = container.wineVersion, icon = Icons.Outlined.WineBar)
+                InfoRow(label = "Wine", value = container.wineVersion)
                 CardDivider()
-                InfoRow(label = "Driver", value = container.graphicsDriver, icon = Icons.Outlined.Memory)
+                InfoRow(label = "Driver", value = container.graphicsDriver)
                 if (container.dxvkVersion != null) {
                     CardDivider()
-                    InfoRow(label = "DXVK", value = container.dxvkVersion, icon = Icons.Outlined.Layers)
+                    InfoRow(label = "DXVK", value = container.dxvkVersion)
                 }
-            }
-        }
-
-        item(key = "settings-label") { SectionLabel("Display", Modifier.animateItem().liquidAppear(appear, 2)) }
-        item(key = "settings") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 2)) {
+                CardDivider()
                 OptionSelector(
                     label = "Resolution",
                     options = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) },
                     selected = container.screenResolution,
                     onSelect = onSelectResolution,
-                    icon = Icons.Outlined.AspectRatio,
                 )
                 CardDivider()
                 OptionSelector(
-                    label = "Translation layer",
+                    label = "Translator",
                     options = TRANSLATOR_OPTIONS,
                     selected = container.translator,
                     onSelect = onSelectTranslator,
-                    icon = Icons.Outlined.DeveloperBoard,
                 )
                 CardDivider()
                 ToggleRow(
                     title = "Fullscreen",
                     checked = container.isFullscreen,
                     onCheckedChange = onFullscreenChange,
-                    icon = Icons.Outlined.Fullscreen,
                 )
             }
         }
 
-        item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().liquidAppear(appear, 3)) }
+        item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().liquidAppear(appear, 2)) }
         item(key = "apps") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
-                if (exes.isEmpty()) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 2)) {
+                exes.forEach { exe ->
                     ListRow(
-                        title = "No apps",
-                        icon = Icons.Outlined.FileOpen,
+                        title = exe.name,
+                        subtitle = if (container.exePath == exe.path) "Primary" else null,
                         showChevron = false,
+                        trailing = {
+                            GlassIconButton(
+                                icon = Icons.Outlined.PlayArrow,
+                                contentDescription = "Launch ${exe.name}",
+                                tint = Color.Black,
+                                containerColor = FableAccent,
+                                bordered = false,
+                                size = ControlHeight.Compact,
+                                onClick = { onLaunchExe(exe) },
+                            )
+                        },
+                        onClick = { onSetPrimary(exe) },
                     )
                     CardDivider()
-                } else {
-                    exes.forEach { exe ->
-                        ListRow(
-                            title = exe.name,
-                            subtitle = if (container.exePath == exe.path) "Primary" else null,
-                            icon = Icons.Outlined.SportsEsports,
-                            showChevron = false,
-                            trailing = {
-                                GlassButton(
-                                    text = "Launch",
-                                    icon = Icons.Outlined.PlayArrow,
-                                    primary = true,
-                                    compact = true,
-                                    onClick = { onLaunchExe(exe) },
-                                )
-                            },
-                            onClick = { onSetPrimary(exe) },
-                        )
-                        CardDivider()
-                    }
                 }
                 ListRow(
-                    title = "Add executable",
-                    icon = Icons.Outlined.Add,
-                    showChevron = true,
+                    title = "Add App",
+                    showChevron = false,
                     onClick = onAddExe,
                 )
             }
         }
 
         item(key = "delete") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 4)) {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 3).padding(top = Spacing.xl)) {
                 ListRow(
-                    title = "Delete container",
+                    title = "Delete Container",
                     titleColor = FableError,
-                    icon = Icons.Outlined.Delete,
-                    iconTint = FableError,
                     showChevron = false,
                     onClick = onDelete,
                 )

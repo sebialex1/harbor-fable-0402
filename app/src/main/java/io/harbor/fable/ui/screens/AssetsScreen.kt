@@ -39,7 +39,6 @@ import io.harbor.fable.data.models.AssetEntry
 import io.harbor.fable.data.models.AssetType
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
-import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
@@ -122,12 +121,7 @@ internal fun AssetsContent(
     FableScreen(
         title = "Assets",
         actions = {
-            GlassIconButton(
-                icon = Icons.Outlined.CloudDownload,
-                contentDescription = "Download recommended",
-                enabled = setup.needsSetup && !setup.isDownloading && !installing,
-                onClick = onDownloadRecommended,
-            )
+            // "Download recommended" lives in the setup row below, which only shows when needed.
             GlassIconButton(
                 icon = Icons.Outlined.Refresh,
                 contentDescription = "Refresh assets",
@@ -170,7 +164,6 @@ internal fun AssetsContent(
                 val typeAssets = grouped[type].orEmpty()
                 if (typeAssets.isNotEmpty()) {
                     val typeKey = type.name
-                    val downloadedCount = typeAssets.count { it.isDownloaded }
 
                     item(key = "section-$typeKey") {
                         val expanded = expansion.isExpanded(typeKey, default = true)
@@ -179,12 +172,6 @@ internal fun AssetsContent(
                             expanded = expanded,
                             onToggle = { expansion.toggle(typeKey, default = true) },
                             modifier = Modifier.animateItem().liquidAppear(appear, typeIndex + 1),
-                            badge = {
-                                Pill(
-                                    text = "$downloadedCount/${typeAssets.size}",
-                                    color = if (downloadedCount > 0) FableSuccess else FableTextDim,
-                                )
-                            },
                         ) {
                             typeAssets.forEachIndexed { index, asset ->
                                 val task = tasks
@@ -194,7 +181,6 @@ internal fun AssetsContent(
                                     title = asset.name,
                                     version = asset.version,
                                     sizeBytes = asset.fileSizeBytes,
-                                    icon = assetTypeIcon(asset.type),
                                     isDownloaded = asset.isDownloaded,
                                     task = task,
                                     onDownload = { onDownload(asset) },
@@ -211,7 +197,7 @@ internal fun AssetsContent(
     }
 }
 
-/** First-run card: what is missing, one button to download it, and live progress. */
+/** First-run row: what is missing, one compact button to get it, and live progress. */
 @Composable
 internal fun SetupBanner(
     state: SetupState,
@@ -220,60 +206,35 @@ internal fun SetupBanner(
     modifier: Modifier = Modifier,
 ) {
     val busy = installing || state.isDownloading
-    val title = when {
-        busy -> "Downloading"
-        state.nothingInstalled -> "Get Started"
-        else -> "Finish Setup"
-    }
     val detail = when {
         state.isDownloading -> "${(state.progress * 100).toInt()}%"
         installing -> "Preparing…"
         else -> state.pending.joinToString(", ") { it.kind.label } +
-            if (state.pendingBytes > 0) " (${formatBytes(state.pendingBytes)})" else ""
+            if (state.pendingBytes > 0) " · ${formatBytes(state.pendingBytes)}" else ""
     }
     GlassCard(modifier = modifier.fillMaxWidth()) {
-        Column(
-            Modifier.padding(RowPaddingHorizontal),
-            verticalArrangement = Arrangement.spacedBy(Spacing.md),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconTile(icon = Icons.Outlined.RocketLaunch, tint = FableAccent)
-                Spacer(Modifier.width(Spacing.md))
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleSmall)
-                    Text(detail, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+        ListRow(
+            title = if (busy) "Downloading" else "Recommended",
+            subtitle = detail,
+            subtitleMaxLines = 2,
+            showChevron = false,
+            trailing = {
+                if (!busy) {
+                    GlassButton(text = "Get", primary = true, compact = true, onClick = onDownloadAll)
                 }
-            }
-            AnimatedContent(
-                targetState = busy,
-                transitionSpec = { fadeIn(Motion.enter(Motion.Quick)) togetherWith fadeOut(Motion.exit(Motion.Fast)) },
-                label = "setupAction",
-            ) { working ->
-                if (working) {
-                    ThinProgressBar(progress = if (state.isDownloading) state.progress else null)
-                } else {
-                    GlassButton(
-                        text = "Download All",
-                        icon = Icons.Outlined.Download,
-                        primary = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = onDownloadAll,
-                    )
-                }
-            }
-            if (state.unavailable.isNotEmpty() && !busy) {
-                Text(
-                    text = "No build available for ${state.unavailable.joinToString(", ") { it.kind.label }}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = FableTextDim,
-                )
-            }
+            },
+        )
+        if (busy) {
+            ThinProgressBar(
+                progress = if (state.isDownloading) state.progress else null,
+                modifier = Modifier.padding(horizontal = RowPaddingHorizontal).padding(bottom = Spacing.sm),
+            )
         }
     }
 }
 
 private fun typeDisplayName(type: AssetType): String = when (type) {
-    AssetType.WINE -> "Wine Builds"
+    AssetType.WINE -> "Wine"
     AssetType.BOX64 -> "Box64"
     AssetType.FEX -> "FEX"
     AssetType.DXVK -> "DXVK"
@@ -281,15 +242,4 @@ private fun typeDisplayName(type: AssetType): String = when (type) {
     AssetType.PROTON -> "Proton"
     AssetType.RUNTIME -> "Runtimes"
     AssetType.OTHER -> "Other"
-}
-
-private fun assetTypeIcon(type: AssetType) = when (type) {
-    AssetType.WINE -> Icons.Outlined.WineBar
-    AssetType.BOX64 -> Icons.Outlined.Terminal
-    AssetType.FEX -> Icons.Outlined.DeveloperBoard
-    AssetType.DXVK -> Icons.Outlined.Layers
-    AssetType.VULKAN_DRIVER -> Icons.Outlined.Memory
-    AssetType.PROTON -> Icons.Outlined.RocketLaunch
-    AssetType.RUNTIME -> Icons.Outlined.SettingsInputComponent
-    AssetType.OTHER -> Icons.Outlined.Extension
 }

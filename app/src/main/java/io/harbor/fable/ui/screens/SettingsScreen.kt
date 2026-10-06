@@ -40,7 +40,7 @@ fun SettingsScreen() {
     if (showResetConfirm) {
         ConfirmDialog(
             title = "Reset settings?",
-            message = "Settings return to their defaults. Containers are not affected.",
+            message = "Containers are not affected.",
             confirmLabel = "Reset",
             destructive = true,
             onConfirm = {
@@ -66,36 +66,29 @@ internal fun SettingsContent(
     val appear = rememberLiquidAppear()
 
     FableScreen(title = "Settings") {
-        item(key = "defaults-label") { SectionLabel("Container Defaults", Modifier.animateItem().liquidAppear(appear, 0)) }
+        item(key = "defaults-label") { SectionLabel("New Containers", Modifier.animateItem().liquidAppear(appear, 0)) }
         item(key = "defaults") {
             GlassCard(Modifier.animateItem().liquidAppear(appear, 0)) {
-                InfoRow(
-                    label = "Wine version",
-                    value = settings.defaultWineVersion,
-                    icon = Icons.Outlined.WineBar,
-                )
+                InfoRow(label = "Wine", value = settings.defaultWineVersion)
                 CardDivider()
                 OptionSelector(
-                    label = "Default resolution",
+                    label = "Resolution",
                     options = resolutionOptions,
                     selected = settings.defaultResolution,
                     onSelect = { res -> onUpdate { it.copy(defaultResolution = res) } },
-                    icon = Icons.Outlined.AspectRatio,
                 )
                 CardDivider()
                 OptionSelector(
-                    label = "Translation layer",
+                    label = "Translator",
                     options = translatorOptions,
                     selected = settings.defaultTranslator,
                     onSelect = { t -> onUpdate { it.copy(defaultTranslator = t) } },
-                    icon = Icons.Outlined.DeveloperBoard,
                 )
                 CardDivider()
                 ToggleRow(
-                    title = "Fullscreen by default",
+                    title = "Fullscreen",
                     checked = settings.defaultFullscreen,
                     onCheckedChange = { fs -> onUpdate { it.copy(defaultFullscreen = fs) } },
-                    icon = Icons.Outlined.Fullscreen,
                 )
             }
         }
@@ -103,17 +96,12 @@ internal fun SettingsContent(
         item(key = "graphics-label") { SectionLabel("Graphics", Modifier.animateItem().liquidAppear(appear, 1)) }
         item(key = "graphics") {
             GlassCard(Modifier.animateItem().liquidAppear(appear, 1)) {
-                InfoRow(
-                    label = "Default driver",
-                    value = settings.defaultGraphicsDriver,
-                    icon = Icons.Outlined.Memory,
-                )
+                InfoRow(label = "Driver", value = settings.defaultGraphicsDriver)
                 CardDivider()
                 ToggleRow(
                     title = "VSync",
                     checked = settings.vsync,
                     onCheckedChange = { v -> onUpdate { it.copy(vsync = v) } },
-                    icon = Icons.Outlined.Sync,
                 )
                 CardDivider()
                 OptionSelector(
@@ -121,50 +109,37 @@ internal fun SettingsContent(
                     options = framePacingOptions,
                     selected = settings.framePacing,
                     onSelect = { fp -> onUpdate { it.copy(framePacing = fp) } },
-                    icon = Icons.Outlined.Speed,
                 )
             }
         }
 
-        item(key = "catalog-label") { SectionLabel("Catalog", Modifier.animateItem().liquidAppear(appear, 2)) }
-        item(key = "catalog") {
+        item(key = "device-label") { SectionLabel("Device", Modifier.animateItem().liquidAppear(appear, 2)) }
+        item(key = "device") {
             GlassCard(Modifier.animateItem().liquidAppear(appear, 2)) {
+                InfoRow(label = "GPU", value = deviceInfo.gpu)
+                CardDivider()
+                InfoRow(label = "Model", value = listOf(deviceInfo.device, deviceInfo.vendor).filter { it.isNotBlank() }.distinct().joinToString(" · "))
+                CardDivider()
+                InfoRow(label = "System", value = listOf(deviceInfo.abi, "SDK ${deviceInfo.sdk}").filter { it.isNotBlank() }.joinToString(" · "))
+            }
+        }
+
+        item(key = "about-label") { SectionLabel("App", Modifier.animateItem().liquidAppear(appear, 3)) }
+        item(key = "about") {
+            GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
                 ToggleRow(
-                    title = "Refresh on launch",
+                    title = "Refresh catalog on launch",
                     checked = settings.refreshCatalogOnLaunch,
                     onCheckedChange = { r -> onUpdate { it.copy(refreshCatalogOnLaunch = r) } },
-                    icon = Icons.Outlined.Refresh,
                 )
-            }
-        }
-
-        item(key = "device-label") { SectionLabel("Device", Modifier.animateItem().liquidAppear(appear, 3)) }
-        item(key = "device") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
-                InfoRow(label = "GPU", value = deviceInfo.gpu, icon = Icons.Outlined.Memory)
                 CardDivider()
-                InfoRow(label = "Vendor", value = deviceInfo.vendor, icon = Icons.Outlined.Business)
+                InfoRow(label = "Version", value = versionName)
                 CardDivider()
-                InfoRow(label = "Device", value = deviceInfo.device, icon = Icons.Outlined.Smartphone)
-                CardDivider()
-                InfoRow(label = "Architecture", value = deviceInfo.abi, icon = Icons.Outlined.Architecture)
-                CardDivider()
-                InfoRow(label = "SDK", value = deviceInfo.sdk, icon = Icons.Outlined.Code)
-            }
-        }
-
-        item(key = "about-label") { SectionLabel("About", Modifier.animateItem().liquidAppear(appear, 4)) }
-        item(key = "about") {
-            GlassCard(Modifier.animateItem().liquidAppear(appear, 4)) {
-                InfoRow(label = "Version", value = versionName, icon = Icons.Outlined.Info)
-                CardDivider()
-                InfoRow(label = "License", value = "MIT", icon = Icons.Outlined.Description)
+                InfoRow(label = "License", value = "MIT")
                 CardDivider()
                 ListRow(
-                    title = "Reset to defaults",
+                    title = "Reset Settings",
                     titleColor = FableError,
-                    icon = Icons.Outlined.Restore,
-                    iconTint = FableError,
                     showChevron = false,
                     onClick = onResetClick,
                 )

@@ -24,9 +24,7 @@ import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.ui.components.*
-import io.harbor.fable.ui.theme.FableAccent
-import io.harbor.fable.ui.theme.FableTextDim
-import io.harbor.fable.ui.theme.Spacing
+import io.harbor.fable.ui.theme.FableText
 import kotlinx.coroutines.launch
 
 /** Selectable x86 translation layers. Values match [Container.translator]. */
@@ -45,11 +43,18 @@ fun ContainersScreen(
     val scope = rememberCoroutineScope()
     var showCreate by remember { mutableStateOf(false) }
 
+    var showAddApp by remember { mutableStateOf(false) }
+
     ContainersContent(
         containers = containers,
         onContainerClick = onContainerClick,
         onCreateClick = { showCreate = true },
+        onAddApp = { showAddApp = true },
     )
+
+    if (showAddApp) {
+        AddAppSheet(onDismiss = { showAddApp = false })
+    }
 
     if (showCreate) {
         CreateContainerSheet(
@@ -82,9 +87,11 @@ internal fun ContainersContent(
     containers: List<Container>,
     onContainerClick: (String) -> Unit,
     onCreateClick: () -> Unit,
+    onAddApp: () -> Unit = {},
 ) {
     val appear = rememberLiquidAppear()
 
+    // Creating a container lives in the top bar only; the empty list does not repeat it.
     FableScreen(
         title = "Containers",
         actions = {
@@ -98,28 +105,20 @@ internal fun ContainersContent(
         if (containers.isEmpty()) {
             item(key = "empty") {
                 EmptyState(
-                    icon = Icons.Outlined.Apps,
-                    title = "No containers yet",
-                    message = "Create a container to get started",
-                    actionLabel = "Create Container",
-                    actionIcon = Icons.Outlined.Add,
-                    onAction = onCreateClick,
+                    icon = Icons.Outlined.Inventory2,
+                    title = "No containers",
                     modifier = Modifier.animateItem().liquidAppear(appear, 0),
                 )
             }
         } else {
-            // One continuous surface: every container is a row of the same card. The card
-            // settles first and the rows arrive one after another inside it.
             item(key = "list") {
                 GlassCard(Modifier.fillMaxWidth().animateItem().liquidAppear(appear, 0)) {
                     containers.forEachIndexed { index, container ->
-                        if (index > 0) CardDivider()
+                        if (index > 0) CardDivider(afterIcon = true)
                         ListRow(
-                            modifier = Modifier.liquidAppear(appear, index + 1),
                             title = container.name,
                             subtitle = container.wineVersion,
-                            icon = Icons.Outlined.Apps,
-                            iconTint = containerStatusColor(container.status),
+                            icon = Icons.Outlined.Inventory2,
                             trailing = { StatusPill(container.status) },
                             onClick = { onContainerClick(container.id) },
                         )
@@ -127,20 +126,16 @@ internal fun ContainersContent(
                 }
             }
 
-            // When the list is short, fill the space with quick actions instead of void.
+            // A short list gets one quick action that the top bar does not already offer.
             if (containers.size < 3) {
-                item(key = "quick-actions-label") {
-                    SectionLabel("Quick Actions", Modifier.animateItem().liquidAppear(appear, containers.size + 1))
-                }
                 item(key = "quick-actions") {
-                    GlassCard(Modifier.fillMaxWidth().animateItem().liquidAppear(appear, containers.size + 2)) {
+                    GlassCard(Modifier.fillMaxWidth().animateItem().liquidAppear(appear, 1)) {
                         ListRow(
-                            title = "Create Container",
-                            subtitle = "Set up a new Wine environment",
+                            title = "Add App",
+                            titleColor = FableText,
                             icon = Icons.Outlined.Add,
-                            iconTint = FableAccent,
                             showChevron = false,
-                            onClick = onCreateClick,
+                            onClick = onAddApp,
                         )
                     }
                 }
@@ -171,39 +166,36 @@ private fun CreateContainerSheet(
         GlassTextField(
             value = name,
             onValueChange = { name = it },
-            label = "Container name",
+            label = "Name",
         )
 
-        // Both settings share one surface instead of two stacked cards.
+        // All settings share one section.
         GlassCard {
             OptionSelector(
                 label = "Resolution",
                 options = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) },
                 selected = resolution,
                 onSelect = { resolution = it },
-                icon = Icons.Outlined.AspectRatio,
             )
             CardDivider()
             OptionSelector(
-                label = "Translation layer",
+                label = "Translator",
                 options = TRANSLATOR_OPTIONS,
                 selected = translator,
                 onSelect = { translator = it },
-                icon = Icons.Outlined.DeveloperBoard,
             )
             CardDivider()
             ToggleRow(
                 title = "Fullscreen",
                 checked = fullscreen,
                 onCheckedChange = { fullscreen = it },
-                icon = Icons.Outlined.Fullscreen,
             )
         }
 
         GlassButton(
             text = "Create",
             primary = true,
-            icon = Icons.Outlined.Add,
+            enabled = name.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
             onClick = {
                 if (name.isNotBlank()) {

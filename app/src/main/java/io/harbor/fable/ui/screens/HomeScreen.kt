@@ -73,7 +73,7 @@ internal fun HomeContent(
             item(key = "apps") {
                 GlassCard(Modifier.animateItem().liquidAppear(appear, 1)) {
                     exes.forEachIndexed { index, exe ->
-                        if (index > 0) CardDivider()
+                        if (index > 0) CardDivider(afterIcon = true)
                         ListRow(
                             modifier = Modifier.liquidAppear(appear, index + 2),
                             title = exe.name,
@@ -84,7 +84,7 @@ internal fun HomeContent(
                                 GlassIconButton(
                                     icon = Icons.Outlined.PlayArrow,
                                     contentDescription = "Launch ${exe.name}",
-                                    tint = Color.White,
+                                    tint = Color.Black,
                                     containerColor = FableAccent,
                                     bordered = false,
                                     size = ControlHeight.Compact,
@@ -98,13 +98,10 @@ internal fun HomeContent(
             }
         } else {
             item(key = "empty") {
+                // Adding an app lives in the top bar only; the empty list does not repeat it.
                 EmptyState(
                     icon = Icons.Outlined.SportsEsports,
-                    title = "No apps yet",
-                    message = "Add an app to get started",
-                    actionLabel = "Add App",
-                    actionIcon = Icons.Outlined.Add,
-                    onAction = onAddApp,
+                    title = "No apps",
                     modifier = Modifier.animateItem().liquidAppear(appear, 0),
                 )
             }
@@ -121,13 +118,12 @@ internal fun HomeContent(
             item(key = "containers") {
                 GlassCard(Modifier.animateItem().liquidAppear(appear, 3)) {
                     containers.take(5).forEachIndexed { index, container ->
-                        if (index > 0) CardDivider()
+                        if (index > 0) CardDivider(afterIcon = true)
                         ListRow(
                             modifier = Modifier.liquidAppear(appear, index + 4),
                             title = container.name,
                             subtitle = container.wineVersion,
-                            icon = Icons.Outlined.Apps,
-                            iconTint = containerStatusColor(container.status),
+                            icon = Icons.Outlined.Inventory2,
                             onClick = { onContainerClick(container.id) },
                         )
                     }

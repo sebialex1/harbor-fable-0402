@@ -56,6 +56,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -79,7 +80,7 @@ import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableAccentLight
 import io.harbor.fable.ui.theme.FableBg
 import io.harbor.fable.ui.theme.FableError
-import io.harbor.fable.ui.theme.FableSuccess
+import io.harbor.fable.ui.theme.FableTextFaint
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.FableWarn
@@ -166,8 +167,6 @@ private fun SetupContent(
             .fillMaxSize()
             .background(FableBg),
     ) {
-        LiquidBackdrop(intensity = if (step == SetupStep.READY) 1.15f else 1f)
-
         AnimatedContent(
             targetState = step,
             transitionSpec = {
@@ -206,7 +205,7 @@ private fun SetupContent(
 private fun WelcomeStep(deviceInfo: DeviceGpuInfo, onStart: () -> Unit, onSkip: () -> Unit) {
     SetupColumn {
         Spacer(Modifier.weight(1f))
-        Staggered(index = 0) { GlassOrb() }
+        Staggered(index = 0) { AppMark() }
         Spacer(Modifier.height(Spacing.xxxl))
         Staggered(index = 1) {
             Text(
@@ -224,7 +223,7 @@ private fun WelcomeStep(deviceInfo: DeviceGpuInfo, onStart: () -> Unit, onSkip: 
         Spacer(Modifier.height(Spacing.sm))
         Staggered(index = 2) {
             Text(
-                text = "Windows apps and games on your Xclipse phone",
+                text = "Windows apps and games on Android",
                 style = MaterialTheme.typography.bodyLarge,
                 color = FableTextDim,
                 textAlign = TextAlign.Center,
@@ -237,101 +236,46 @@ private fun WelcomeStep(deviceInfo: DeviceGpuInfo, onStart: () -> Unit, onSkip: 
         Staggered(index = 4) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 GlassButton(
-                    text = "Set up Fable",
-                    icon = Icons.Outlined.RocketLaunch,
+                    text = "Set Up",
                     primary = true,
                     onClick = onStart,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(Spacing.sm))
-                TextAction(text = "Skip for now", onClick = onSkip)
+                TextAction(text = "Not Now", onClick = onSkip)
             }
         }
         Spacer(Modifier.height(Spacing.lg))
     }
 }
 
-/** The app mark floating in a lit glass sphere. */
+/** The app mark, plain white on black. It settles into place once, without a halo. */
 @Composable
-private fun GlassOrb() {
-    val appear = remember { Animatable(0.6f) }
-    LaunchedEffect(Unit) { appear.animateTo(1f, Motion.pop()) }
-    Box(contentAlignment = Alignment.Center) {
-        // Halo.
-        Box(
-            Modifier
-                .size(196.dp)
-                .graphicsLayer { scaleX = appear.value; scaleY = appear.value }
-                .softBlur(28.dp)
-                .background(
-                    Brush.radialGradient(listOf(FableAccent.copy(alpha = 0.55f), Color.Transparent)),
-                    CircleShape,
-                ),
-        )
-        Box(
-            Modifier
-                .size(136.dp)
-                .graphicsLayer { scaleX = appear.value; scaleY = appear.value }
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.04f), Color.White.copy(alpha = 0.10f)),
-                    ),
-                )
-                .drawBehind {
-                    // Specular highlight near the top-left rim.
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            listOf(Color.White.copy(alpha = 0.45f), Color.Transparent),
-                            center = Offset(size.width * 0.32f, size.height * 0.26f),
-                            radius = size.width * 0.38f,
-                        ),
-                    )
-                    // Inner shadow at the bottom for depth.
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f)),
-                            center = Offset(size.width * 0.5f, size.height * 0.45f),
-                            radius = size.width * 0.55f,
-                        ),
-                    )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter = painterResource(R.drawable.ic_launcher_foreground),
-                contentDescription = null,
-                modifier = Modifier.size(150.dp),
-            )
-        }
-    }
+private fun AppMark(size: androidx.compose.ui.unit.Dp = 120.dp) {
+    val appear = remember { Animatable(0.92f) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, Motion.settle()) }
+    Image(
+        painter = painterResource(R.drawable.ic_launcher_monochrome),
+        contentDescription = null,
+        colorFilter = ColorFilter.tint(FableText),
+        modifier = Modifier
+            .size(size)
+            .graphicsLayer { scaleX = appear.value; scaleY = appear.value },
+    )
 }
 
+/** The device and GPU on one quiet line; the only status the welcome step shows. */
 @Composable
 private fun DeviceChip(deviceInfo: DeviceGpuInfo) {
     val gpu = deviceInfo.gpu.takeIf { it.isNotBlank() && !it.equals("unknown", ignoreCase = true) }
-    val xclipse = gpu?.contains("xclipse", ignoreCase = true) == true ||
-        deviceInfo.vendor.contains("s5e", ignoreCase = true) || deviceInfo.vendor.contains("exynos", ignoreCase = true)
     val label = listOfNotNull(deviceInfo.device.ifBlank { null }, gpu?.let { formatGpu(it) }).joinToString(" · ")
-    Row(
-        Modifier
-            .glassSurface(shape = RoundedCornerShape(PillRadius), level = GlassLevel.Control)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-    ) {
-        Icon(
-            imageVector = if (xclipse) Icons.Outlined.Verified else Icons.Outlined.Smartphone,
-            contentDescription = null,
-            tint = if (xclipse) FableSuccess else FableTextDim,
-            modifier = Modifier.size(16.dp),
-        )
-        Text(
-            text = if (label.isNotBlank()) label else "Unknown device",
-            style = MaterialTheme.typography.labelMedium,
-            color = FableText,
-        )
-    }
+    Text(
+        text = label.ifBlank { "Unknown device" },
+        style = MaterialTheme.typography.bodySmall,
+        color = FableTextFaint,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 private fun formatGpu(raw: String): String = when {
@@ -369,21 +313,16 @@ private fun DownloadStep(
         Spacer(Modifier.weight(0.6f))
         Staggered(index = 0) {
             Text(
-                text = if (allDone) "Almost there" else "Setting things up",
+                text = if (allDone) "Almost Done" else "Setting Up",
                 style = MaterialTheme.typography.headlineLarge,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        Spacer(Modifier.height(Spacing.xs))
-        Staggered(index = 1) {
+        if (allDone && setup.unavailable.isNotEmpty()) {
+            Spacer(Modifier.height(Spacing.xs))
             Text(
-                text = when {
-                    preparing && readyCount == 0 -> "Checking the latest releases…"
-                    setup.isDownloading -> "Downloading the recommended runtime"
-                    allDone -> if (setup.unavailable.isEmpty()) "Everything is in place" else "Some packages have no build yet"
-                    else -> "Downloads continue in the background"
-                },
+                text = "Some packages have no build yet",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
@@ -396,7 +335,7 @@ private fun DownloadStep(
                     progress = setup.progress,
                     indeterminate = preparing && tracked.isEmpty(),
                     label = "$readyCount of ${items.size.coerceAtLeast(RecommendedKind.entries.count { it.required })}",
-                    sublabel = if (setup.pendingBytes > 0) "${formatBytes(setup.pendingBytes)} left" else "ready",
+                    sublabel = if (setup.pendingBytes > 0) "${formatBytes(setup.pendingBytes)} left" else "",
                 )
             }
         }
@@ -406,7 +345,7 @@ private fun DownloadStep(
                 // Optional kinds (FEX) are chosen per container later, not during first-run setup.
                 val rows = RecommendedKind.entries.filter { it.required }
                 rows.forEachIndexed { index, kind ->
-                    if (index > 0) CardDivider()
+                    if (index > 0) CardDivider(afterIcon = true)
                     val item = items.firstOrNull { it.kind == kind }
                     SetupItemRow(kind = kind, item = item, preparing = preparing)
                 }
@@ -417,7 +356,7 @@ private fun DownloadStep(
                 Spacer(Modifier.height(Spacing.md))
                 NoticeCard(
                     icon = Icons.Outlined.ErrorOutline,
-                    title = "Setup hit a snag",
+                    title = "Setup failed",
                     lines = listOfNotNull(message),
                     tint = FableError,
                 )
@@ -433,15 +372,13 @@ private fun DownloadStep(
                 ) { (done, failed, missing) ->
                     when {
                         done -> GlassButton(
-                            text = if (missing) "Continue anyway" else "Continue",
-                            icon = Icons.AutoMirrored.Outlined.ArrowForward,
+                            text = if (missing) "Continue Anyway" else "Continue",
                             primary = true,
                             onClick = onContinue,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         failed -> GlassButton(
-                            text = "Try again",
-                            icon = Icons.Outlined.Refresh,
+                            text = "Try Again",
                             primary = true,
                             onClick = onRetry,
                             modifier = Modifier.fillMaxWidth(),
@@ -455,7 +392,7 @@ private fun DownloadStep(
                     }
                 }
                 Spacer(Modifier.height(Spacing.sm))
-                TextAction(text = if (allDone) "Finish later" else "Skip and finish later", onClick = onSkip)
+                TextAction(text = if (allDone) "Finish Later" else "Skip", onClick = onSkip)
             }
         }
         Spacer(Modifier.height(Spacing.lg))
@@ -469,15 +406,8 @@ private fun SetupItemRow(kind: RecommendedKind, item: RecommendedItem?, preparin
     val downloading = status == RecommendedStatus.DOWNLOADING
     val progress = item?.progress ?: 0f
     val sizeBytes = item?.sizeBytes ?: 0L
-    val description = when (kind) {
-        RecommendedKind.WINE -> "Windows compatibility layer"
-        RecommendedKind.BOX64 -> "Runs x86_64 code on ARM64"
-        RecommendedKind.DRIVER -> "Mesa Vulkan driver for Xclipse"
-        RecommendedKind.DXVK -> "DirectX 9–11 on Vulkan"
-        RecommendedKind.FEX -> "Alternative x86_64 translator"
-    }
     val statusText = when {
-        installed -> "Ready"
+        installed -> "Done"
         downloading && progress >= 1f && kind == RecommendedKind.DRIVER -> "Installing"
         downloading -> "${(progress * 100).toInt()}%"
         preparing -> "Preparing"
@@ -485,17 +415,10 @@ private fun SetupItemRow(kind: RecommendedKind, item: RecommendedItem?, preparin
         status == RecommendedStatus.UNAVAILABLE -> "No build"
         else -> ""
     }
-    val tint = when {
-        installed -> FableSuccess
-        status == RecommendedStatus.UNAVAILABLE && !preparing -> FableWarn
-        else -> FableAccent
-    }
     Box {
         ListRow(
             title = kind.label,
-            subtitle = description,
             icon = kindIcon(kind),
-            iconTint = tint,
             showChevron = false,
             trailing = {
                 AnimatedContent(
@@ -506,11 +429,7 @@ private fun SetupItemRow(kind: RecommendedKind, item: RecommendedItem?, preparin
                     },
                     label = "setupItemStatus",
                 ) { text ->
-                    when {
-                        installed -> Pill(text = text, color = FableSuccess, icon = Icons.Outlined.Check)
-                        status == RecommendedStatus.UNAVAILABLE && !preparing -> Pill(text = text, color = FableWarn)
-                        else -> Pill(text = text, color = if (downloading) FableAccent else FableTextDim)
-                    }
+                    StateText(text)
                 }
             },
         )
@@ -535,7 +454,7 @@ private fun kindIcon(kind: RecommendedKind) = when (kind) {
     RecommendedKind.FEX -> Icons.Outlined.SwapHoriz
 }
 
-/** Overall progress as a glowing ring with the count in the middle. Real progress only. */
+/** Overall progress as a thin white ring with the percentage in the middle. Real progress only. */
 @Composable
 private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String, sublabel: String) {
     val animated by animateFloatAsState(progress.coerceIn(0f, 1f), Motion.settle(), label = "ringProgress")
@@ -548,14 +467,14 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
             }
         }
     }
-    Box(Modifier.size(156.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(148.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
-            val stroke = 10.dp.toPx()
-            val inset = stroke / 2 + 6.dp.toPx()
+            val stroke = 4.dp.toPx()
+            val inset = stroke / 2 + 2.dp.toPx()
             val arcSize = androidx.compose.ui.geometry.Size(size.width - inset * 2, size.height - inset * 2)
             val topLeft = Offset(inset, inset)
             drawArc(
-                color = Color.White.copy(alpha = 0.08f),
+                color = Color.White.copy(alpha = 0.12f),
                 startAngle = 0f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -566,22 +485,8 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
             val sweep = if (indeterminate) 80f else 360f * animated
             val start = if (indeterminate) spin.value - 90f else -90f
             if (sweep > 0f) {
-                // Soft glow under the arc.
                 drawArc(
-                    color = FableAccent.copy(alpha = 0.35f),
-                    startAngle = start,
-                    sweepAngle = sweep,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(stroke * 1.9f, cap = StrokeCap.Round),
-                )
-                drawArc(
-                    brush = Brush.sweepGradient(
-                        0f to FableAccentLight,
-                        0.5f to FableAccent,
-                        1f to FableAccentLight,
-                    ),
+                    color = FableText,
                     startAngle = start,
                     sweepAngle = sweep,
                     useCenter = false,
@@ -597,8 +502,7 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
                 style = MaterialTheme.typography.headlineLarge,
                 color = FableText,
             )
-            Text(label, style = MaterialTheme.typography.labelMedium)
-            Text(sublabel, style = MaterialTheme.typography.labelSmall)
+            Text(listOf(label, sublabel).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -607,15 +511,14 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
 
 @Composable
 private fun ReadyStep(setup: SetupState, onFinish: () -> Unit) {
-    val ready = setup.required.filter { it.status == RecommendedStatus.INSTALLED }.map { it.kind.label }
     val missing = setup.required.filter { it.status != RecommendedStatus.INSTALLED }.map { it.kind.label }
     SetupColumn {
         Spacer(Modifier.weight(1f))
-        Staggered(index = 0) { SuccessMark() }
+        Staggered(index = 0) { AppMark(size = 96.dp) }
         Spacer(Modifier.height(Spacing.xxxl))
         Staggered(index = 1) {
             Text(
-                text = if (missing.isEmpty()) "You're all set" else "Ready to go",
+                text = if (missing.isEmpty()) "You're All Set" else "Ready",
                 style = MaterialTheme.typography.headlineLarge,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
@@ -624,14 +527,7 @@ private fun ReadyStep(setup: SetupState, onFinish: () -> Unit) {
         Spacer(Modifier.height(Spacing.sm))
         Staggered(index = 2) {
             Text(
-                text = buildString {
-                    if (ready.isNotEmpty()) append(ready.joinToString(", ")).append(if (ready.size > 1) " are ready." else " is ready.")
-                    if (missing.isNotEmpty()) {
-                        if (isNotEmpty()) append(' ')
-                        append(missing.joinToString(", ")).append(" can be added later from the Assets tab.")
-                    }
-                    if (isEmpty()) append("Add an app from the Home tab to start.")
-                },
+                text = if (missing.isEmpty()) "" else "Get ${missing.joinToString(", ")} later in Assets.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = FableTextDim,
                 textAlign = TextAlign.Center,
@@ -642,53 +538,12 @@ private fun ReadyStep(setup: SetupState, onFinish: () -> Unit) {
         Staggered(index = 3) {
             GlassButton(
                 text = "Open Fable",
-                icon = Icons.AutoMirrored.Outlined.ArrowForward,
                 primary = true,
                 onClick = onFinish,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
         Spacer(Modifier.height(Spacing.lg))
-    }
-}
-
-@Composable
-private fun SuccessMark() {
-    val scale = remember { Animatable(0.4f) }
-    val check = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        scale.animateTo(1f, Motion.pop())
-        check.animateTo(1f, Motion.enter(Motion.Standard))
-    }
-    Box(contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .size(176.dp)
-                .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
-                .softBlur(26.dp)
-                .background(Brush.radialGradient(listOf(FableSuccess.copy(alpha = 0.45f), Color.Transparent)), CircleShape),
-        )
-        Box(
-            Modifier
-                .size(120.dp)
-                .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
-                .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(FableSuccess.copy(alpha = 0.32f), FableSuccess.copy(alpha = 0.10f)))),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Check,
-                contentDescription = null,
-                tint = FableSuccess,
-                modifier = Modifier
-                    .size(56.dp)
-                    .graphicsLayer {
-                        alpha = check.value
-                        scaleX = 0.6f + 0.4f * check.value
-                        scaleY = 0.6f + 0.4f * check.value
-                    },
-            )
-        }
     }
 }
 
