@@ -45,7 +45,11 @@ import java.util.zip.ZipFile
  * `vkGetPhysicalDeviceXlibPresentationSupportKHR`, which winex11 dlsym's at Vulkan init, so with a
  * plain copy winevulkan asserts (`!status`, loader.c, status 0xc000007a) and DXVK still gets no
  * instance. The shim dlopen's the real loader, forwards the entry points Wine dlsym's and answers
- * the Xlib query itself. When the shim isn't in the APK the alias falls back to the plain copy.
+ * the Xlib query itself. It also makes `VK_KHR_xlib_surface` look like an instance extension:
+ * winevulkan rewrites DXVK's `VK_KHR_win32_surface` into the X11 driver's host extension and the
+ * Android loader rejects it (`wine_vkCreateInstance ... res=-7`), so the shim advertises it in
+ * `vkEnumerateInstanceExtensionProperties` and strips it again in `vkCreateInstance`. When the
+ * shim isn't in the APK the alias falls back to the plain copy.
  *
  * For the rest, once per [VERSION], system build and bundled set, each [Spec] missing from the
  * library directory is looked up in [SYSTEM_LIB_DIRS] under its candidate names and the first

@@ -80,7 +80,10 @@ target_link_libraries(winlator
 # libvulkan.so.1 shim (vulkan/vulkan_shim.c): wraps Android's /system/lib64/libvulkan.so,
 # forwards the entry points Wine's win32u / winex11 dlsym directly and stubs
 # vkGetPhysicalDeviceXlibPresentationSupportKHR, which Android's loader doesn't export (without
-# it winevulkan asserts and DXVK gets no instance). Packaged in the APK as libvulkan_shim.so;
+# it winevulkan asserts and DXVK gets no instance), and masquerades VK_KHR_xlib_surface as an
+# instance extension (advertised by vkEnumerateInstanceExtensionProperties, stripped again in
+# vkCreateInstance) so the host instance winevulkan asks for can be created. Packaged in the APK
+# as libvulkan_shim.so;
 # NativeLibResolver installs it as <filesDir>/x11/lib/libvulkan.so.1. Nothing JNI-loads it.
 add_library(vulkan_shim SHARED
     vulkan/vulkan_shim.c
