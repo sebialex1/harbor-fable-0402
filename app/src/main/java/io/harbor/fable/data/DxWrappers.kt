@@ -72,7 +72,7 @@ internal object DxWrappers {
         val upToDate: Boolean = false,
     ) {
         /** `WINEDLLOVERRIDES` value for the installed layers, or null when none is installed. */
-        val dllOverrides: String? get() = dllOverrides(nativeDlls)
+        val dllOverrides: String? get() = DxWrappers.dllOverrides(nativeDlls)
 
         fun describe(): List<String> = buildList {
             Kind.entries.forEach { kind ->

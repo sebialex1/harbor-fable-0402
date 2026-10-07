@@ -386,12 +386,14 @@ internal class WineRuntime(
      * ([ContainerTools]); refreshed after an app update.
      */
     fun installContainerTools(containerDir: File): ContainerTools.Report {
-        val stamp = runCatching {
-            @Suppress("DEPRECATION")
-            appContext.packageManager.getPackageInfo(appContext.packageName, 0).lastUpdateTime.toString()
-        }.getOrDefault("0")
+        // The APK's install/update time: tools are rewritten once after every app update.
+        val stamp = runCatching { packageUpdateTime() }.getOrDefault("0")
         return ContainerTools.install(containerDir, appContext.assets, stamp)
     }
+
+    @Suppress("DEPRECATION") // getPackageInfo(String, Int) is deprecated from API 33; minSdk is 28.
+    private fun packageUpdateTime(): String =
+        appContext.packageManager.getPackageInfo(appContext.packageName, 0).lastUpdateTime.toString()
 
     // --- Executables and drivers ---------------------------------------------------------
 
