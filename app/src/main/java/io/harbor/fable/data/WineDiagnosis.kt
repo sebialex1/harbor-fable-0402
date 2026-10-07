@@ -74,6 +74,11 @@ internal object WineDiagnosis {
             if (freeTypeMissing) add("Wine cannot find FreeType (libfreetype.so); see the Native libraries section")
             if (freeTypeTooOld) add("Wine loaded a FreeType without the functions it needs (Android's libft2.so?); see the Native libraries section")
             failedDlls.forEach { add("Wine couldn't load $it") }
+            if (failedDlls.any { it.startsWith("kernel32.dll", ignoreCase = true) && it.contains("c0000135", ignoreCase = true) }) {
+                // STATUS_DLL_NOT_FOUND for the first DLL a process loads: outside wineboot's
+                // bootstrap Wine only loads builtins that exist in C:\windows\system32.
+                add("kernel32.dll c0000135 = not found in C:\\windows\\system32; check the Prefix section (WinePrefix copies Wine's DLLs there)")
+            }
             if (lscpuMissing) add("lscpu not found (harmless: Box64 falls back to /proc/cpuinfo)")
             if (isEmpty && !lscpuMissing) add("no known failure pattern in the process output")
         }

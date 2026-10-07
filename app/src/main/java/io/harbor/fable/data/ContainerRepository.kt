@@ -13,6 +13,7 @@ import io.harbor.fable.nativebridge.NativeLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -433,14 +434,29 @@ class ContainerRepository internal constructor(
             return LaunchResult.Failed("Wine isn't installed in this container")
         }
         describeBinary(log, "wine", wineBinary)
-        // Winlator-style copy of Wine's PE DLLs into system32/syswow64, so the loader finds
-        // kernel32.dll in the prefix even without WINEDLLPATH. installWine() already did it for
-        // new trees; this catches containers set up by an older Fable (a marker makes it a no-op
-        // once done for this build).
-        val dllsCopied = withContext(Dispatchers.IO) { runCatching { runtime.installBuiltinDlls(dir, wineBuild) } }
-        dllsCopied.onSuccess { count ->
-            if (count > 0) log.line("copied $count built-in Wine DLLs into drive_c/windows/system32 and syswow64")
-        }.onFailure { error -> log.error("copying Wine DLLs into the prefix failed", error) }
+
+        // 2b. Complete the prefix the way Winlator does: prefixPack.txz ships system32/syswow64
+        //     without Wine's DLLs, and outside prefix bootstrap Wine only loads builtins whose
+        //     file is in system32, so kernel32.dll failed with c0000135. Containers set up by
+        //     older builds get the copy here, on their next launch; drive links are checked too.
+        log.section("Prefix")
+        val copying = WinePrefix.needsSystemDlls(dir, wineBuild)
+        if (copying) {
+            log.line("copying Wine's DLLs into drive_c/windows/system32 and syswow64 (once per Wine build)")
+            setStatus(container.id, ContainerStatus.CONFIGURING)
+        }
+        val prefix = try {
+            withContext(Dispatchers.IO) { WinePrefix.ensure(prefix = dir, wineRoot = dir, build = wineBuild) }
+        } finally {
+            if (copying) withContext(NonCancellable) { setStatus(container.id, ContainerStatus.READY) }
+        }
+        prefix.describe().forEach { log.line(it) }
+        if (!prefix.hasKernel32) {
+            log.error("${WinePrefix.KERNEL32} is missing; Wine would stop with c0000135")
+            return LaunchResult.Failed(
+                "Couldn't finish the Wine prefix (no kernel32.dll in system32). Free some storage and try again"
+            )
+        }
 
         // 3. The display server has to be listening before Wine starts (Winlator's XEnvironment
         //    starts XServerComponent before GuestProgramLauncherComponent the same way).
@@ -501,10 +517,10 @@ class ContainerRepository internal constructor(
         log.line("host CPU: ${cpu.name}, ${cpu.count} cores, max ${cpu.maxFrequencyHz?.let { "${it / 1_000_000} MHz" } ?: "unknown"}")
         log.line("lscpu stub: ${lscpu?.absolutePath ?: "couldn't be written"}")
 
-        // Wine's compiled-in dll_dir is the Termux build path, which doesn't exist on this
-        // device, so say exactly where Wine will look for its PE DLLs (WINEDLLPATH) and whether
-        // kernel32.dll / ntdll.dll are actually there. A c0000135 with these present means the
-        // search path is wrong; with them missing, the Wine package itself is incomplete.
+        // Where Wine's builtin PE DLLs are (WINEDLLPATH, extra to the dll_dir ntdll.so derives
+        // from its own location at run time) and whether kernel32.dll / ntdll.dll are there. With
+        // them missing the Wine package itself is incomplete. (The c0000135 Fable used to hit
+        // had a different cause, an empty system32; WinePrefix fixes that above.)
         val wineLocations = WineRuntime.wineLocationEnvironment(dir)
         log.section("Wine DLL search path")
         val wineDllPath = wineLocations.firstOrNull { it.startsWith("WINEDLLPATH=") }?.substringAfter('=')
@@ -513,7 +529,7 @@ class ContainerRepository internal constructor(
         val kernel32 = dllDirs.map { File(it, "kernel32.dll") }.filter { it.isFile }
         log.line(
             "kernel32.dll in a WINEDLLPATH dir: " +
-                if (kernel32.isEmpty()) "NO (Wine will fail with c0000135)" else "yes (${kernel32.joinToString { it.absolutePath }})",
+                if (kernel32.isEmpty()) "NO (the Wine package is incomplete)" else "yes (${kernel32.joinToString { it.absolutePath }})",
         )
         val ntdll = File(dir, "lib/wine/x86_64-windows/ntdll.dll").takeIf { it.isFile }
             ?: File(dir, "lib64/wine/x86_64-windows/ntdll.dll").takeIf { it.isFile }
@@ -538,8 +554,9 @@ class ContainerRepository internal constructor(
             addAll(translator.environment)
             // What Winlator's bionic Wine reads instead of /etc/resolv.conf and netlink.
             addAll(runtime.bionicWineEnvironment())
-            // WINEDLLPATH / WINELOADER / WINESERVER: Wine's compiled-in paths point into Termux's
-            // prefix, so tell it where kernel32.dll, ntdll.dll and wineserver really are.
+            // WINEDLLPATH / WINELOADER / WINESERVER: explicit locations of the container's Wine
+            // files. Belt and braces: Wine derives the same paths from ntdll.so's location, and
+            // WINEDLLPATH can't stand in for missing system32 files (see WinePrefix).
             addAll(wineLocations)
             if (screen != null) {
                 add("DISPLAY=${screen.display}")
@@ -566,9 +583,12 @@ class ContainerRepository internal constructor(
         log.line("launcher: ${if (useNative) "native JNI fork/execve ($LAUNCHER_ENV=$LAUNCHER_NATIVE)" else "ProcessBuilder"}")
         log.section("Environment (Fable additions; the launcher also sets WINEPREFIX, HOME, TMPDIR, PATH, BOX64_*)")
         environment.forEach { log.line(it) }
-        // A freshly extracted prefix gets `wineboot -u` once, before the first program runs
-        // (Winlator's WineUtils does the same during prefix setup).
-        if (runtime.winebootPending(dir)) {
+        // Optional `wineboot -u` for a freshly extracted prefix, only when the container asks for
+        // it ($WINEBOOT_ENV=1). Winlator-Ludashi never runs it: prefixPack.txz plus the DLL copy
+        // (WinePrefix) is a complete prefix, and Wine runs `wineboot --init` by itself on every
+        // start. A forced update under Box64 re-registers every DLL (minutes) and can stop on
+        // the Wine Mono / Gecko install prompts, so it isn't done by default.
+        if (runtime.winebootPending(dir) && current.envVars[WINEBOOT_ENV]?.trim() == "1") {
             setStatus(container.id, ContainerStatus.CONFIGURING)
             runWineboot(runtime, dir, wineBinary, translator, environment, driver, log)
             setStatus(container.id, ContainerStatus.READY)
@@ -641,13 +661,14 @@ class ContainerRepository internal constructor(
      * Runs `<translator> <container>/bin/wine wineboot -u` for a prefix [WineRuntime.installWine]
      * just unpacked, and waits for it (up to [WINEBOOT_TIMEOUT_MS]).
      *
-     * Winlator runs `wine wineboot -u` while it sets up a prefix (WineUtils.java); Fable only
-     * unpacked prefixPack.txz, so the prefix was never updated for the installed Wine build and
-     * its services never started once. It uses the launch's own [environment] (WINEDLLPATH,
-     * WINELOADER/WINESERVER, BOX64_*, LD_LIBRARY_PATH, FONTCONFIG_FILE, DISPLAY), because without
-     * it wineboot fails the same way the launch did (kernel32.dll, status c0000135). Only the
-     * diagnostic WINEDEBUG is toned down: +loaddll,+module on wineboot's dozens of helper
-     * processes would bury the error lines. A failure is logged but never blocks the launch.
+     * Opt-in ([WINEBOOT_ENV]=1 in the container's environment): it brings the prefix's registry
+     * up to date with the installed Wine build, which prefixPack.txz normally already matches.
+     * It uses the launch's own [environment] (BOX64_*, LD_LIBRARY_PATH, FONTCONFIG_FILE,
+     * DISPLAY, …) and needs the DLLs [WinePrefix] copied, like any Wine process. Only the
+     * diagnostic WINEDEBUG is toned down (+loaddll,+module on wineboot's dozens of helper
+     * processes would bury the error lines), and mscoree/mshtml are disabled unless the
+     * container sets WINEDLLOVERRIDES, so the update doesn't wait on the Wine Mono / Gecko
+     * install prompts. A failure is logged but never blocks the launch.
      */
     private suspend fun runWineboot(
         runtime: WineRuntime,
@@ -660,6 +681,7 @@ class ContainerRepository internal constructor(
     ) {
         log.section("Prefix initialisation (wineboot -u)")
         val winebootEnv = environment.map { if (it == "WINEDEBUG=$DIAGNOSTIC_WINEDEBUG") "WINEDEBUG=$WINEBOOT_WINEDEBUG" else it }
+            .let { env -> if (env.any { it.startsWith("WINEDLLOVERRIDES=") }) env else env + "WINEDLLOVERRIDES=mscoree,mshtml=" }
         val winebootLog = File(dir, WineRuntime.WINEBOOT_LOG)
         val outcome = withContext(Dispatchers.IO) {
             WineProcessLauncher.launch(
@@ -1078,6 +1100,9 @@ class ContainerRepository internal constructor(
          * JNI fork/execve path (diagnostics only). Never passed on to Wine.
          */
         private const val LAUNCHER_ENV = "FABLE_LAUNCHER"
+
+        /** Container environment switch: `FABLE_WINEBOOT=1` runs `wineboot -u` once for a new prefix. */
+        private const val WINEBOOT_ENV = "FABLE_WINEBOOT"
         private const val LAUNCHER_NATIVE = "native"
 
         /**
