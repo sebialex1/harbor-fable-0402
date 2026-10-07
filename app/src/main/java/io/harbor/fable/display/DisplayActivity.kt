@@ -14,6 +14,7 @@ import android.widget.Toast
 import com.winlator.widget.XServerView
 import com.winlator.xserver.Pointer
 import com.winlator.xserver.XServer
+import kotlin.math.hypot
 
 /**
  * Shows the X server's screen (Wine's virtual desktop) full screen, like Winlator's
@@ -21,14 +22,26 @@ import com.winlator.xserver.XServer
  * the running [DisplayServer].
  *
  * Input is deliberately minimal (Winlator's TouchpadView / input-controls overlay are not
- * vendored): a finger acts as the mouse at the touched point with the left button held, a
- * second finger is a right click, and hardware keyboard events go through Winlator's
+ * vendored): the screen works like a laptop trackpad — dragging a finger moves the cursor
+ * relatively, a quick tap is a left click, a second finger is a right click, and hardware keyboard events go through Winlator's
  * `Keyboard.onKeyEvent`. Back leaves the screen; Wine keeps running.
  */
 class DisplayActivity : Activity() {
     private var view: XServerView? = null
     private var server: XServer? = null
     private var leftDown = false
+
+    // Trackpad state (screen pixels).
+    private var activePointerId = MotionEvent.INVALID_POINTER_ID
+    private var lastX = 0f
+    private var lastY = 0f
+    private var downX = 0f
+    private var downY = 0f
+    private var downTime = 0L
+    private var carryX = 0f
+    private var carryY = 0f
+    private var tapCandidate = false
+    private val touchSlopPx by lazy { TOUCH_SLOP_DP * resources.displayMetrics.density }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,17 +101,43 @@ class DisplayActivity : Activity() {
     private fun onTouch(xServer: XServer, view: XServerView, event: MotionEvent): Boolean {
         val t = view.renderer.viewTransformation
         if (t.aspect <= 0f) return true
-        val x = ((event.x - t.viewOffsetX) / t.aspect).toInt().coerceIn(0, xServer.screenInfo.width - 1)
-        val y = ((event.y - t.viewOffsetY) / t.aspect).toInt().coerceIn(0, xServer.screenInfo.height - 1)
         runCatching {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    xServer.injectPointerMove(x, y)
-                    xServer.injectPointerButtonPress(Pointer.Button.BUTTON_LEFT)
-                    leftDown = true
+                    // Trackpad: remember where the finger landed; the cursor stays put.
+                    activePointerId = event.getPointerId(0)
+                    lastX = event.x
+                    lastY = event.y
+                    downX = event.x
+                    downY = event.y
+                    downTime = event.eventTime
+                    carryX = 0f
+                    carryY = 0f
+                    tapCandidate = true
                 }
-                MotionEvent.ACTION_MOVE -> if (event.pointerCount == 1) xServer.injectPointerMove(x, y)
+                MotionEvent.ACTION_MOVE -> {
+                    val index = event.findPointerIndex(activePointerId)
+                    if (event.pointerCount == 1 && index >= 0) {
+                        val px = event.getX(index)
+                        val py = event.getY(index)
+                        if (tapCandidate && hypot(px - downX, py - downY) > touchSlopPx) tapCandidate = false
+                        // Screen pixels -> X server pixels, keeping sub-pixel remainders so slow
+                        // drags still move the cursor.
+                        carryX += (px - lastX) / t.aspect * SENSITIVITY
+                        carryY += (py - lastY) / t.aspect * SENSITIVITY
+                        lastX = px
+                        lastY = py
+                        val dx = carryX.toInt()
+                        val dy = carryY.toInt()
+                        if (dx != 0 || dy != 0) {
+                            carryX -= dx
+                            carryY -= dy
+                            xServer.injectPointerMoveDelta(dx, dy)
+                        }
+                    }
+                }
                 MotionEvent.ACTION_POINTER_DOWN -> {
+                    tapCandidate = false
                     if (leftDown) {
                         xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT)
                         leftDown = false
@@ -106,9 +145,46 @@ class DisplayActivity : Activity() {
                     xServer.injectPointerButtonPress(Pointer.Button.BUTTON_RIGHT)
                     xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT)
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (leftDown) {
-                    xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT)
-                    leftDown = false
+                MotionEvent.ACTION_POINTER_UP -> {
+                    // Keep tracking whichever finger remains without a jump.
+                    val upIndex = event.actionIndex
+                    if (event.getPointerId(upIndex) == activePointerId) {
+                        val newIndex = if (upIndex == 0) 1 else 0
+                        activePointerId = event.getPointerId(newIndex)
+                        lastX = event.getX(newIndex)
+                        lastY = event.getY(newIndex)
+                    } else {
+                        val index = event.findPointerIndex(activePointerId)
+                        if (index >= 0) {
+                            lastX = event.getX(index)
+                            lastY = event.getY(index)
+                        }
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    val isTap = tapCandidate &&
+                        event.eventTime - downTime < TAP_TIMEOUT_MS &&
+                        hypot(event.x - downX, event.y - downY) <= touchSlopPx
+                    if (leftDown) {
+                        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT)
+                        leftDown = false
+                    }
+                    if (isTap) {
+                        xServer.injectPointerButtonPress(Pointer.Button.BUTTON_LEFT)
+                        leftDown = true
+                        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT)
+                        leftDown = false
+                    }
+                    tapCandidate = false
+                    activePointerId = MotionEvent.INVALID_POINTER_ID
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    if (leftDown) {
+                        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT)
+                        leftDown = false
+                    }
+                    tapCandidate = false
+                    activePointerId = MotionEvent.INVALID_POINTER_ID
                 }
             }
         }
@@ -126,6 +202,10 @@ class DisplayActivity : Activity() {
     }
 
     companion object {
+        private const val SENSITIVITY = 1.5f
+        private const val TOUCH_SLOP_DP = 10f
+        private const val TAP_TIMEOUT_MS = 200L
+
         fun open(context: Context) {
             if (DisplayServer.xServer == null) return
             context.startActivity(
