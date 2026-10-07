@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-// Host regression test: cc -Itests/include -I<NDK>/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
-// Do NOT add the NDK sysroot itself to a host build: pass a directory containing only vulkan/.
+// Host regression test: cc -D_GNU_SOURCE -Itests/include -I<dir> tests/vulkan_shim_test.c -lpthread
+// <dir> must contain only vulkan/ and vk_video/ copied from <NDK>/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include.
+// Do NOT add the NDK sysroot itself to a host build.
 #include <assert.h>
 #include <stdio.h>
 #define dlopen test_dlopen
@@ -18,6 +19,21 @@ int __android_log_print(int priority, const char *tag, const char *format, ...) 
     (void)priority; (void)tag; (void)format;
     return 0;
 }
+int __android_log_write(int priority, const char *tag, const char *text) {
+    (void)priority; (void)tag; (void)text;
+    return 0;
+}
+
+/* vulkan_hal_inject.c is not part of this test: no custom driver is configured here. */
+int fable_hal_inject_open(const char *loader_path, void *driver, const char *driver_path,
+                          struct fable_hal_inject *out, char *err, size_t err_len) {
+    (void)loader_path; (void)driver; (void)driver_path; (void)out; (void)err; (void)err_len;
+    return 0;
+}
+unsigned fable_hal_inject_hits(void) { return 0; }
+const char *fable_hal_inject_requested(void) { return ""; }
+int fable_hal_inject_loader_loaded(void) { return 0; }
+void *fable_dlopen_fresh(const char *path, int flags) { (void)path; (void)flags; return NULL; }
 
 static VkResult fake_create_instance(const VkInstanceCreateInfo *info,
                                     const VkAllocationCallbacks *allocator, VkInstance *instance) {
@@ -93,6 +109,10 @@ int android_bridge_refresh(VkSurfaceKHR surface) { (void)surface; return 1; }
 void android_bridge_destroy_surface(VkSurfaceKHR surface) { assert(surface == test_surface); ++deleted; }
 
 int main(void) {
+    unsetenv("FABLE_VULKAN_DRIVER");
+    unsetenv("VK_ICD_FILENAMES");
+    unsetenv("VK_DRIVER_FILES");
+    setenv("FABLE_VULKAN_SHIM_LOG", "/dev/null", 1);
     const char *names[] = { XLIB_SURFACE_EXTENSION_NAME, VK_KHR_SURFACE_EXTENSION_NAME };
     VkInstanceCreateInfo info = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
                                  .enabledExtensionCount = 2, .ppEnabledExtensionNames = names };

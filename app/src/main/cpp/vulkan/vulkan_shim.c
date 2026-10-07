@@ -52,27 +52,41 @@
  * function is reached through the forwarded vkGetInstanceProcAddr /
  * vkGetDeviceProcAddr. Surface queries and destruction also stay behind the shim.
  *
- * Which Vulkan implementation sits behind the shim:
+ * Which Vulkan implementation sits behind the shim (real.direct_icd, an enum shim_mode):
  *
- *   FABLE_VULKAN_DRIVER set  the ICD .so it names (the adrenotools-installed RADV Xclipse
- *                            vulkan.radeon.so) is dlopen'ed directly and the shim acts as the
- *                            loader. Android's loader can't be used for it: it ignores
- *                            VK_ICD_FILENAMES and always picks the vendor (Samsung) driver,
- *                            which hides textureCompressionBC so DXVK finds no adapter.
- *   VK_ICD_FILENAMES /       secondary: library_path from the JSON manifest, same handling.
- *   VK_DRIVER_FILES
- *   otherwise / on failure   Android's system loader, as before.
+ *   SHIM_MODE_SPLIT (2)      FABLE_VULKAN_DRIVER set (RADV Xclipse vulkan.radeon.so) — the default.
+ *                            Winlator/adrenotools-style injection (vulkan_hal_inject.c): a private
+ *                            instance of Android's system loader is opened and its HAL lookup is
+ *                            redirected to the custom driver. The system loader provides instance
+ *                            creation and all WSI (VK_KHR_surface, VK_KHR_android_surface,
+ *                            VK_KHR_swapchain, implemented over the driver's
+ *                            VK_ANDROID_native_buffer); the custom driver provides every physical
+ *                            device, VkDevice, queue, memory allocation and command. RADV is built
+ *                            with -Dplatforms=android, i.e. as exactly such a HAL: it exports HMI and
+ *                            has no WSI of its own, so this is the only way DXVK gets both a
+ *                            presentable instance and RADV's real RDNA2 features
+ *                            (textureCompressionBC & co).
+ *   SHIM_MODE_DIRECT_ICD (1) the ICD .so is dlopen'ed directly and the shim acts as the loader. Only
+ *                            usable for an ICD with its own VK_KHR_surface + VK_KHR_android_surface
+ *                            (not RADV Xclipse); tried when split mode is unavailable (driver is not
+ *                            an Android HAL) or FABLE_VULKAN_DRIVER_MODE=direct.
+ *   SHIM_MODE_SYSTEM (0)     Android's system loader alone (the vendor driver, Samsung Xclipse), with
+ *                            textureCompressionBC forced on. No custom driver, or every custom path
+ *                            failed.
  *
- * The log says which: "Using Fable Vulkan driver: <path>" or "Using system Vulkan loader: <path>".
- * Those lines (and every other shim diagnostic) go to logcat, to stderr — i.e. the Wine process
- * log — prefixed "[vulkan_shim]", and to $FABLE_VULKAN_SHIM_LOG.
+ * VK_ICD_FILENAMES / VK_DRIVER_FILES are a secondary source for the driver (library_path from the
+ * JSON manifest) with the same handling. FABLE_VULKAN_DRIVER_MODE=split|direct|system overrides
+ * the choice; FABLE_VULKAN_SPLIT_PROBE=0 skips split mode's start-up device probe.
  *
- * A directly opened ICD must provide VK_KHR_surface and VK_KHR_android_surface. RADV Xclipse is
- * built with -Dplatforms=android, i.e. as an Android Vulkan HAL that leaves all WSI to the
- * platform loader: it has neither, and instance creation on it fails with res=-7. open_direct_icd
- * probes for both and falls back to the system loader when they are missing (override with
- * FABLE_VULKAN_DRIVER_FORCE=1); vkCreateInstance also retries on the system loader if a direct
- * ICD still answers VK_ERROR_EXTENSION_NOT_PRESENT before any instance exists on it.
+ * The log says which: "Using split Vulkan: ...", "Using Fable Vulkan driver: <path>" (direct) or
+ * "Using system Vulkan loader: <path>". Those lines (and every other shim diagnostic) go to
+ * logcat, to stderr — i.e. the Wine process log — prefixed "[vulkan_shim]", and to
+ * $FABLE_VULKAN_SHIM_LOG.
+ *
+ * Driver selection runs on the first Vulkan call (pthread_once), not in the library constructor:
+ * split mode's probe creates a Vulkan instance, which must not happen inside the dynamic linker's
+ * dlopen of this shim. If an instance still cannot be created on the selected custom path (and no
+ * instance exists yet), vkCreateInstance switches to the system loader and retries.
  *
  * Only vk* symbols are exported (-fvisibility=hidden + VK_SHIM_EXPORT).
  */
@@ -99,13 +113,12 @@
 #include <vulkan/vulkan_android.h>
 
 #include "android_surface_bridge.h"
+#include "vulkan_hal_inject.h"
+#include "vulkan_shim_log.h"
 
 #define VK_SHIM_EXPORT __attribute__((visibility("default")))
 
 #define LOG_TAG "vulkan_shim"
-#define LOGI(...) shim_log(ANDROID_LOG_INFO, __VA_ARGS__)
-#define LOGW(...) shim_log(ANDROID_LOG_WARN, __VA_ARGS__)
-#define LOGE(...) shim_log(ANDROID_LOG_ERROR, __VA_ARGS__)
 
 /* --- Diagnostic logging -------------------------------------------------------------------
  *
@@ -124,8 +137,7 @@ static pthread_mutex_t shim_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static FILE *shim_log_file;
 static int shim_log_file_tried;
 
-__attribute__((format(printf, 2, 3)))
-static void shim_log(int prio, const char *fmt, ...) {
+void shim_log(int prio, const char *fmt, ...) {
     char msg[1024];
     va_list ap;
     va_start(ap, fmt);
@@ -165,6 +177,19 @@ static const char *const REAL_LOADER_PATHS[] = {
 #define FABLE_DRIVER_ENV "FABLE_VULKAN_DRIVER"
 /* "1" keeps a directly opened ICD even when it lacks VK_KHR_surface / VK_KHR_android_surface. */
 #define FABLE_DRIVER_FORCE_ENV "FABLE_VULKAN_DRIVER_FORCE"
+/* "split" (default), "direct" or "system": which way the custom driver is used, see above. */
+#define FABLE_DRIVER_MODE_ENV "FABLE_VULKAN_DRIVER_MODE"
+/* "0" skips split mode's start-up probe (instance + physical-device enumeration on RADV). */
+#define FABLE_SPLIT_PROBE_ENV "FABLE_VULKAN_SPLIT_PROBE"
+
+/* The system loader split mode injects the custom driver into. */
+#define SYSTEM_LOADER_PATH "/system/lib64/libvulkan.so"
+
+enum shim_mode {
+    SHIM_MODE_SYSTEM = 0,     /* Android's system loader + vendor driver */
+    SHIM_MODE_DIRECT_ICD = 1, /* custom ICD opened directly, the shim is the loader */
+    SHIM_MODE_SPLIT = 2,      /* system loader (instance + WSI) with the custom driver as its HAL (devices) */
+};
 
 /* Highest loader <-> ICD interface version the shim speaks (Vulkan loader interface v5). */
 #define SHIM_ICD_INTERFACE_VERSION 5u
@@ -199,17 +224,20 @@ typedef VkBool32(VKAPI_PTR *PFN_vkGetPhysicalDeviceXlibPresentationSupportKHR)(V
  * shim_init() under pthread_once and read-only afterwards, which is what makes the forwarders
  * thread-safe.
  *
- * Two kinds of implementation are supported:
- *   - the Android system loader (libvulkan.so): exports every core entry point, so plain dlsym
- *     works for all of them;
- *   - a Vulkan ICD opened directly (direct_icd = 1), e.g. the RADV Xclipse vulkan.radeon.so
- *     named by FABLE_VULKAN_DRIVER: ICDs only promise vk_icdGetInstanceProcAddr, so every other
- *     entry point is resolved through it (globals with a NULL instance, the rest once an
- *     instance exists, see cache_instance_procs()). */
+ * Three kinds of implementation are supported (enum shim_mode):
+ *   - the Android system loader (libvulkan.so), SHIM_MODE_SYSTEM: exports every core entry
+ *     point, so plain dlsym works for all of them;
+ *   - split, SHIM_MODE_SPLIT: a private instance of the same system loader whose HAL is the
+ *     custom driver (handle = that loader instance, driver_path = the driver). Also a full
+ *     loader, so plain dlsym works too; the loader routes device-level work to the driver;
+ *   - a Vulkan ICD opened directly, SHIM_MODE_DIRECT_ICD: ICDs only promise
+ *     vk_icdGetInstanceProcAddr, so every other entry point is resolved through it (globals with
+ *     a NULL instance, the rest once an instance exists, see cache_instance_procs()). */
 static struct {
     void *handle;
     const char *path;
-    int direct_icd;
+    int direct_icd;          /* enum shim_mode (historical name) */
+    const char *driver_path; /* SHIM_MODE_SPLIT: the injected driver */
     PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
     PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
     PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties;
@@ -235,6 +263,8 @@ enum real_proc_id {
     RP_vkGetPhysicalDeviceSurfaceFormatsKHR,
     RP_vkDestroySurfaceKHR,
     RP_vkQueuePresentKHR,
+    RP_vkCreateDevice,
+    RP_vkGetPhysicalDeviceProperties,
     RP_COUNT
 };
 
@@ -247,6 +277,8 @@ static const char *const REAL_PROC_NAMES[RP_COUNT] = {
     [RP_vkGetPhysicalDeviceSurfaceFormatsKHR] = "vkGetPhysicalDeviceSurfaceFormatsKHR",
     [RP_vkDestroySurfaceKHR] = "vkDestroySurfaceKHR",
     [RP_vkQueuePresentKHR] = "vkQueuePresentKHR",
+    [RP_vkCreateDevice] = "vkCreateDevice",
+    [RP_vkGetPhysicalDeviceProperties] = "vkGetPhysicalDeviceProperties",
 };
 
 static void *real_procs[RP_COUNT];
@@ -260,7 +292,7 @@ static void store_real_proc(enum real_proc_id id, void *fn) {
 static void *real_proc(enum real_proc_id id) {
     void *fn = __atomic_load_n(&real_procs[id], __ATOMIC_ACQUIRE);
     if (fn || !real.handle) return fn;
-    if (!real.direct_icd) {
+    if (real.direct_icd != SHIM_MODE_DIRECT_ICD) { /* system loader, or split mode's loader instance */
         fn = dlsym(real.handle, REAL_PROC_NAMES[id]);
         store_real_proc(id, fn);
         return __atomic_load_n(&real_procs[id], __ATOMIC_ACQUIRE);
@@ -286,7 +318,7 @@ static void cache_instance_procs(VkInstance instance) {
  * cache_instance_procs(). */
 static void *load_real(const char *name, int required) {
     void *fn = dlsym(real.handle, name);
-    if (!fn && real.direct_icd) {
+    if (!fn && real.direct_icd == SHIM_MODE_DIRECT_ICD) {
         for (int id = 0; id < RP_COUNT; id++) {
             if (strcmp(name, REAL_PROC_NAMES[id]) == 0) {
                 fn = real_proc((enum real_proc_id)id);
@@ -467,7 +499,8 @@ static int open_direct_icd(const char *path, const char *origin) {
     real.handle = handle;
     real.path = strdup(path);
     if (!real.path) real.path = "(fable vulkan driver)";
-    real.direct_icd = 1;
+    real.direct_icd = SHIM_MODE_DIRECT_ICD;
+    real.driver_path = NULL;
     real.vkGetInstanceProcAddr = gipa;
     real.vkCreateInstance = create;
     real.vkEnumerateInstanceExtensionProperties = enumerate;
@@ -485,16 +518,344 @@ static int open_direct_icd(const char *path, const char *origin) {
     return 1;
 }
 
+/* Binds the shim's directly used entry points to a full loader at real.handle (the system
+ * loader, or split mode's private instance of it). Plain dlsym works for all of them. */
+static void bind_loader_exports(void) {
+    real.vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)load_real("vkGetInstanceProcAddr", 1);
+    real.vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)load_real("vkGetDeviceProcAddr", 1);
+    store_real_proc(RP_vkGetDeviceProcAddr, (void *)real.vkGetDeviceProcAddr);
+    real.vkEnumerateInstanceExtensionProperties =
+        (PFN_vkEnumerateInstanceExtensionProperties)load_real("vkEnumerateInstanceExtensionProperties", 1);
+    real.vkCreateInstance = (PFN_vkCreateInstance)load_real("vkCreateInstance", 1);
+    real.vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)load_real("vkDestroySurfaceKHR", 0);
+    real.vkQueuePresentKHR = (PFN_vkQueuePresentKHR)load_real("vkQueuePresentKHR", 0);
+    real.vkCreateXlibSurfaceKHR = (PFN_vkCreateXlibSurfaceKHR)load_real("vkCreateXlibSurfaceKHR", 0);
+    real.vkGetPhysicalDeviceXlibPresentationSupportKHR =
+        (PFN_vkGetPhysicalDeviceXlibPresentationSupportKHR)load_real("vkGetPhysicalDeviceXlibPresentationSupportKHR", 0);
+}
+
+/* --- Split mode: system loader for instance + WSI, custom HAL driver for devices ------------ */
+
+/* The leading fields of Android's hw_module_t (hardware/hardware.h), enough to sanity-check the
+ * HMI export of a Vulkan HAL without the platform headers. */
+struct shim_hw_module_head {
+    uint32_t tag;
+    uint16_t module_api_version;
+    uint16_t hal_api_version;
+    const char *id;
+    const char *name;
+    const char *author;
+};
+#define SHIM_HARDWARE_MODULE_TAG (((uint32_t)'H' << 24) | ((uint32_t)'W' << 16) | ((uint32_t)'M' << 8) | (uint32_t)'T')
+
+static const char *driver_id_name(VkDriverId id) {
+    switch (id) {
+    case VK_DRIVER_ID_MESA_RADV: return "MESA_RADV";
+    case VK_DRIVER_ID_AMD_PROPRIETARY: return "AMD_PROPRIETARY";
+    case VK_DRIVER_ID_SAMSUNG_PROPRIETARY: return "SAMSUNG_PROPRIETARY";
+    case VK_DRIVER_ID_ARM_PROPRIETARY: return "ARM_PROPRIETARY";
+    case VK_DRIVER_ID_QUALCOMM_PROPRIETARY: return "QUALCOMM_PROPRIETARY";
+    case VK_DRIVER_ID_MESA_TURNIP: return "MESA_TURNIP";
+    default: return "other";
+    }
+}
+
+/* Lists the instance extensions the split loader offers (it adds WSI on top of the driver's) and
+ * checks the two DXVK/winevulkan need. Also the call that makes the loader open its HAL. */
+static int split_check_instance_extensions(PFN_vkEnumerateInstanceExtensionProperties enumerate, VkResult *res_out) {
+    uint32_t count = 0;
+    VkResult res = enumerate(NULL, &count, NULL);
+    VkExtensionProperties *exts = NULL;
+    if (res == VK_SUCCESS && count) {
+        exts = calloc(count, sizeof(*exts));
+        if (!exts) return 0;
+        res = enumerate(NULL, &count, exts);
+    }
+    *res_out = res;
+    if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
+        free(exts);
+        return 0;
+    }
+    int has_surface = 0, has_android_surface = 0;
+    char list[900];
+    size_t used = 0;
+    list[0] = '\0';
+    for (uint32_t i = 0; exts && i < count; i++) {
+        const char *name = exts[i].extensionName;
+        if (strcmp(name, VK_KHR_SURFACE_EXTENSION_NAME) == 0) has_surface = 1;
+        if (strcmp(name, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME) == 0) has_android_surface = 1;
+        int w = snprintf(list + used, sizeof(list) - used, "%s%s", used ? " " : "", name);
+        if (w > 0 && (size_t)w < sizeof(list) - used) used += (size_t)w;
+    }
+    free(exts);
+    LOGI("split: system loader instance extensions with the injected HAL (%u): %s", count, list);
+    if (!has_surface || !has_android_surface) {
+        LOGE("split: the system loader does not offer %s%s%s", has_surface ? "" : VK_KHR_SURFACE_EXTENSION_NAME,
+             (!has_surface && !has_android_surface) ? ", " : "",
+             has_android_surface ? "" : VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+        return 0;
+    }
+    return 1;
+}
+
+/* Start-up probe: a throw-away instance on the split loader, then every physical device it
+ * reports. Split mode is only kept if at least one device really is the injected driver (RADV)
+ * and the loader exposes VK_KHR_swapchain on it (i.e. the driver's VK_ANDROID_native_buffer was
+ * accepted). Logs what DXVK is going to see. */
+static int split_probe_devices(PFN_vkGetInstanceProcAddr gipa, const char *driver_path) {
+    PFN_vkCreateInstance create = (PFN_vkCreateInstance)gipa(VK_NULL_HANDLE, "vkCreateInstance");
+    PFN_vkEnumerateInstanceVersion instance_version =
+        (PFN_vkEnumerateInstanceVersion)gipa(VK_NULL_HANDLE, "vkEnumerateInstanceVersion");
+    if (!create) {
+        LOGE("split probe: no vkCreateInstance");
+        return 0;
+    }
+    uint32_t api = VK_API_VERSION_1_0;
+    if (instance_version && instance_version(&api) != VK_SUCCESS) api = VK_API_VERSION_1_0;
+    const VkApplicationInfo app = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "fable-vulkan-shim-probe",
+        .apiVersion = api >= VK_API_VERSION_1_1 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_0,
+    };
+    const VkInstanceCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pApplicationInfo = &app,
+    };
+    VkInstance instance = VK_NULL_HANDLE;
+    VkResult res = create(&info, NULL, &instance);
+    if (res != VK_SUCCESS) {
+        LOGE("split probe: vkCreateInstance on the system loader with %s as HAL failed, res=%d", driver_path, (int)res);
+        return 0;
+    }
+
+    PFN_vkDestroyInstance destroy = (PFN_vkDestroyInstance)gipa(instance, "vkDestroyInstance");
+    PFN_vkEnumeratePhysicalDevices enumerate_devices =
+        (PFN_vkEnumeratePhysicalDevices)gipa(instance, "vkEnumeratePhysicalDevices");
+    PFN_vkGetPhysicalDeviceProperties get_props =
+        (PFN_vkGetPhysicalDeviceProperties)gipa(instance, "vkGetPhysicalDeviceProperties");
+    PFN_vkGetPhysicalDeviceProperties2 get_props2 = app.apiVersion >= VK_API_VERSION_1_1
+        ? (PFN_vkGetPhysicalDeviceProperties2)gipa(instance, "vkGetPhysicalDeviceProperties2") : NULL;
+    PFN_vkGetPhysicalDeviceFeatures get_features =
+        (PFN_vkGetPhysicalDeviceFeatures)gipa(instance, "vkGetPhysicalDeviceFeatures");
+    PFN_vkEnumerateDeviceExtensionProperties device_exts =
+        (PFN_vkEnumerateDeviceExtensionProperties)gipa(instance, "vkEnumerateDeviceExtensionProperties");
+
+    int usable = 0, foreign = 0, no_swapchain = 0;
+    uint32_t count = 0;
+    VkPhysicalDevice devices[8];
+    if (!enumerate_devices || !get_props || !get_features || !device_exts) {
+        LOGE("split probe: the system loader is missing core instance entry points");
+    } else {
+        res = enumerate_devices(instance, &count, NULL);
+        if (res == VK_SUCCESS && count > 8) count = 8;
+        if (res == VK_SUCCESS && count) {
+            res = enumerate_devices(instance, &count, devices);
+            if (res == VK_INCOMPLETE) res = VK_SUCCESS;
+        }
+        if (res != VK_SUCCESS) {
+            LOGE("split probe: vkEnumeratePhysicalDevices failed, res=%d", (int)res);
+            count = 0;
+        } else if (!count) {
+            LOGE("split probe: %s reports no physical devices through the system loader", driver_path);
+        }
+    }
+
+    for (uint32_t i = 0; i < count; i++) {
+        VkPhysicalDeviceProperties props;
+        memset(&props, 0, sizeof(props));
+        get_props(devices[i], &props);
+        VkPhysicalDeviceDriverProperties driver_props;
+        memset(&driver_props, 0, sizeof(driver_props));
+        driver_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+        if (get_props2 && props.apiVersion >= VK_API_VERSION_1_2) {
+            VkPhysicalDeviceProperties2 props2 = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                .pNext = &driver_props,
+            };
+            get_props2(devices[i], &props2);
+        }
+        VkPhysicalDeviceFeatures features;
+        memset(&features, 0, sizeof(features));
+        get_features(devices[i], &features);
+
+        int has_swapchain = 0;
+        uint32_t ext_count = 0;
+        if (device_exts(devices[i], NULL, &ext_count, NULL) == VK_SUCCESS && ext_count) {
+            VkExtensionProperties *exts = calloc(ext_count, sizeof(*exts));
+            if (exts) {
+                VkResult r = device_exts(devices[i], NULL, &ext_count, exts);
+                if (r == VK_SUCCESS || r == VK_INCOMPLETE) {
+                    for (uint32_t e = 0; e < ext_count; e++) {
+                        if (strcmp(exts[e].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) has_swapchain = 1;
+                    }
+                }
+                free(exts);
+            }
+        }
+        const int is_radv = driver_props.driverID == VK_DRIVER_ID_MESA_RADV || strstr(props.deviceName, "RADV") != NULL;
+        LOGI("split probe: device %u \"%s\" vendor 0x%04x device 0x%04x api %u.%u.%u driverID %s (%s %s) "
+             "textureCompressionBC=%d %s=%s -> %s",
+             i, props.deviceName, props.vendorID, props.deviceID, VK_API_VERSION_MAJOR(props.apiVersion),
+             VK_API_VERSION_MINOR(props.apiVersion), VK_API_VERSION_PATCH(props.apiVersion),
+             driver_props.driverID ? driver_id_name(driver_props.driverID) : "(unknown)",
+             driver_props.driverName[0] ? driver_props.driverName : "?",
+             driver_props.driverInfo[0] ? driver_props.driverInfo : "",
+             (int)features.textureCompressionBC, VK_KHR_SWAPCHAIN_EXTENSION_NAME, has_swapchain ? "yes" : "NO",
+             !is_radv ? "not the injected driver" : has_swapchain ? "usable" : "no presentation");
+        if (!is_radv) foreign++;
+        else if (!has_swapchain) no_swapchain++;
+        else usable++;
+    }
+    if (destroy) destroy(instance, NULL);
+
+    if (!usable) {
+        if (foreign) {
+            LOGE("split probe: the system loader's devices are not %s (the HAL redirect did not take effect)", driver_path);
+        }
+        if (no_swapchain) {
+            LOGE("split probe: the system loader exposes no %s on %s (its VK_ANDROID_native_buffer was not "
+                 "accepted), so nothing could be presented", VK_KHR_SWAPCHAIN_EXTENSION_NAME, driver_path);
+        }
+        return 0;
+    }
+    return 1;
+}
+
+/* Split mode for the driver at `path`. Returns 1 when it is in use; 0 when split mode is not
+ * possible for this driver (the caller may still try it as a direct ICD); -1 when the file
+ * itself is unusable. */
+static int open_split_driver(const char *path, const char *origin) {
+    if (strchr(path, '/')) {
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) || access(path, R_OK) != 0) {
+            LOGE("Fable Vulkan driver %s [%s] does not exist or is not a readable regular file", path, origin);
+            return -1;
+        }
+    }
+    /* Same RTLD_NOW reasoning as open_direct_icd: unresolvable dependencies fail here. */
+    void *driver = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!driver) {
+        LOGE("dlopen(%s) [%s] failed: %s", path, origin, dlerror());
+        return -1;
+    }
+    const struct shim_hw_module_head *hmi = (const struct shim_hw_module_head *)dlsym(driver, "HMI");
+    if (!hmi) {
+        LOGW("split: %s [%s] does not export HMI, so it is not an Android Vulkan HAL the system loader can "
+             "load; split mode unavailable", path, origin);
+        return 0;
+    }
+    if (hmi->tag != SHIM_HARDWARE_MODULE_TAG || !hmi->id || strcmp(hmi->id, "vulkan") != 0) {
+        LOGW("split: %s [%s] exports HMI but it is not a Vulkan hw_module_t (tag 0x%08x, id %s); split mode "
+             "unavailable", path, origin, hmi->tag, hmi->id ? hmi->id : "(null)");
+        return 0;
+    }
+    LOGI("split: %s [%s] is an Android Vulkan HAL (HMI \"%s\" by %s, module API 0x%04x)", path, origin,
+         hmi->name ? hmi->name : "?", hmi->author ? hmi->author : "?", hmi->module_api_version);
+
+    struct fable_hal_inject inject;
+    char err[512] = "";
+    if (!fable_hal_inject_open(SYSTEM_LOADER_PATH, driver, path, &inject, err, sizeof(err))) {
+        LOGE("split: HAL injection into %s failed: %s", SYSTEM_LOADER_PATH, err);
+        return 0;
+    }
+
+    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)dlsym(inject.loader, "vkGetInstanceProcAddr");
+    PFN_vkEnumerateInstanceExtensionProperties enumerate =
+        (PFN_vkEnumerateInstanceExtensionProperties)dlsym(inject.loader, "vkEnumerateInstanceExtensionProperties");
+    if (!gipa || !enumerate) {
+        LOGE("split: the private %s lacks vkGetInstanceProcAddr / vkEnumerateInstanceExtensionProperties",
+             SYSTEM_LOADER_PATH);
+        return 0;
+    }
+
+    /* First call into the loader: this is where it opens its HAL — through the hooks. */
+    VkResult res = VK_SUCCESS;
+    int wsi_ok = split_check_instance_extensions(enumerate, &res);
+    if (fable_hal_inject_hits() == 0) {
+        LOGE("split: the system loader never asked for a vulkan.*.so HAL through the redirected imports "
+             "(res=%d); it is not using %s", (int)res, path);
+        return 0;
+    }
+    LOGI("split: the system loader asked for \"%s\" and got %s", fable_hal_inject_requested(), path);
+    if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
+        LOGE("split: vkEnumerateInstanceExtensionProperties on the system loader with %s as HAL failed, res=%d "
+             "(the loader could not open the HAL)", path, (int)res);
+        return 0;
+    }
+    if (!wsi_ok) return 0;
+
+    const char *probe = getenv(FABLE_SPLIT_PROBE_ENV);
+    if (probe && strcmp(probe, "0") == 0) {
+        LOGW("split: %s=0, skipping the device probe", FABLE_SPLIT_PROBE_ENV);
+    } else if (!split_probe_devices(gipa, path)) {
+        return 0;
+    }
+
+    real.handle = inject.loader;
+    real.path = SYSTEM_LOADER_PATH;
+    real.direct_icd = SHIM_MODE_SPLIT;
+    real.driver_path = strdup(path);
+    if (!real.driver_path) real.driver_path = "(fable vulkan driver)";
+    bind_loader_exports();
+    if (!real.vkGetInstanceProcAddr || !real.vkCreateInstance || !real.vkEnumerateInstanceExtensionProperties) {
+        LOGE("split: the private system loader lacks core exports");
+        memset(&real, 0, sizeof(real));
+        for (int id = 0; id < RP_COUNT; id++) __atomic_store_n(&real_procs[id], NULL, __ATOMIC_RELEASE);
+        return 0;
+    }
+
+    LOGI("Using split Vulkan (Winlator-style driver injection, from %s):", origin);
+    LOGI("  system loader %s (%s): vkCreateInstance, instance extensions, VK_KHR_surface, "
+         "VK_KHR_android_surface (Xlib surfaces are translated to it by this shim), surface queries, "
+         "VK_KHR_swapchain, vkQueuePresentKHR", SYSTEM_LOADER_PATH, inject.how);
+    LOGI("  %s (loaded as the loader's HAL \"%s\"): physical devices, vkCreateDevice, queues, memory, "
+         "vkQueueSubmit and all rendering; swapchain images via VK_ANDROID_native_buffer",
+         real.driver_path, fable_hal_inject_requested());
+    return 1;
+}
+
+/* Which custom-driver path FABLE_VULKAN_DRIVER_MODE asks for. */
+enum driver_preference { PREFER_SPLIT, PREFER_DIRECT, PREFER_SYSTEM };
+
+static enum driver_preference driver_preference(void) {
+    const char *mode = getenv(FABLE_DRIVER_MODE_ENV);
+    if (!mode || !*mode || strcmp(mode, "split") == 0 || strcmp(mode, "inject") == 0) return PREFER_SPLIT;
+    if (strcmp(mode, "direct") == 0 || strcmp(mode, "icd") == 0) return PREFER_DIRECT;
+    if (strcmp(mode, "system") == 0) return PREFER_SYSTEM;
+    LOGW("%s=%s is not one of split, direct, system; using split", FABLE_DRIVER_MODE_ENV, mode);
+    return PREFER_SPLIT;
+}
+
+/* Split mode first (system WSI + custom device), then the driver as a direct ICD (only works
+ * for an ICD with its own WSI). Returns 1 when one of them is in use. */
+static int open_custom_driver(const char *path, const char *origin, enum driver_preference pref) {
+    if (pref == PREFER_SPLIT) {
+        int r = open_split_driver(path, origin);
+        if (r > 0) return 1;
+        if (r < 0) return 0;
+        LOGW("split mode unavailable for %s; trying it as a directly opened ICD", path);
+    }
+    return open_direct_icd(path, origin);
+}
+
 /* The configured Fable driver, if any: FABLE_VULKAN_DRIVER (the .so itself) first, then the
  * library_path of the VK_ICD_FILENAMES / VK_DRIVER_FILES manifest. */
 static int open_fable_driver(void) {
     const char *driver = getenv(FABLE_DRIVER_ENV);
     const char *icd_files = getenv("VK_ICD_FILENAMES");
     const char *driver_files = getenv("VK_DRIVER_FILES");
-    LOGI("env: %s=%s VK_ICD_FILENAMES=%s VK_DRIVER_FILES=%s", FABLE_DRIVER_ENV,
-         driver ? driver : "(unset)", icd_files ? icd_files : "(unset)", driver_files ? driver_files : "(unset)");
+    const char *mode = getenv(FABLE_DRIVER_MODE_ENV);
+    LOGI("env: %s=%s VK_ICD_FILENAMES=%s VK_DRIVER_FILES=%s %s=%s", FABLE_DRIVER_ENV,
+         driver ? driver : "(unset)", icd_files ? icd_files : "(unset)", driver_files ? driver_files : "(unset)",
+         FABLE_DRIVER_MODE_ENV, mode ? mode : "(unset: split)");
+    const int configured = (driver && *driver) || (icd_files && *icd_files) || (driver_files && *driver_files);
+    const enum driver_preference pref = driver_preference();
+    if (configured && pref == PREFER_SYSTEM) {
+        LOGW("%s=system: ignoring the configured Fable Vulkan driver", FABLE_DRIVER_MODE_ENV);
+        return 0;
+    }
     if (driver && *driver) {
-        if (open_direct_icd(driver, FABLE_DRIVER_ENV)) return 1;
+        if (open_custom_driver(driver, FABLE_DRIVER_ENV, pref)) return 1;
     } else {
         LOGI("%s is not set: no custom Vulkan driver is active in Fable", FABLE_DRIVER_ENV);
     }
@@ -511,7 +872,7 @@ static int open_fable_driver(void) {
             if (!library) continue;
             /* Skip the FABLE_VULKAN_DRIVER path that already failed above. */
             int same = driver && strcmp(library, driver) == 0;
-            int ok = !same && open_direct_icd(library, manifest_vars[v]);
+            int ok = !same && open_custom_driver(library, manifest_vars[v], pref);
             free(library);
             if (ok) {
                 free(copy);
@@ -520,62 +881,66 @@ static int open_fable_driver(void) {
         }
         free(copy);
     }
-    if ((driver && *driver) || getenv("VK_ICD_FILENAMES") || getenv("VK_DRIVER_FILES")) {
-        LOGW("Fable Vulkan driver configured but not usable; falling back to the system Vulkan loader");
+    if (configured) {
+        LOGW("Fable Vulkan driver configured but not usable; falling back to the system Vulkan loader "
+             "(vendor driver, textureCompressionBC forced on)");
     }
     return 0;
 }
 
 static int open_system_loader(void) {
+    /* Once split mode has mapped its private loader instance, a plain dlopen of the same file
+     * would return *that* instance (bionic matches loaded libraries by inode, and the bare
+     * SONAME by name), i.e. the one whose HAL is the custom driver. Map a fresh one instead. */
+    const int fresh = fable_hal_inject_loader_loaded();
     for (size_t i = 0; i < sizeof(REAL_LOADER_PATHS) / sizeof(REAL_LOADER_PATHS[0]); i++) {
+        if (fresh && REAL_LOADER_PATHS[i][0] != '/') continue;
         /* RTLD_LAZY: the loader's own unresolved references must not take the whole process
          * down at load time; RTLD_LOCAL: its symbols stay behind this shim. */
-        real.handle = dlopen(REAL_LOADER_PATHS[i], RTLD_LAZY | RTLD_LOCAL);
+        real.handle = fresh ? fable_dlopen_fresh(REAL_LOADER_PATHS[i], RTLD_NOW | RTLD_LOCAL)
+                            : dlopen(REAL_LOADER_PATHS[i], RTLD_LAZY | RTLD_LOCAL);
         if (real.handle) {
             real.path = REAL_LOADER_PATHS[i];
             break;
         }
-        LOGW("dlopen(%s) failed: %s", REAL_LOADER_PATHS[i], dlerror());
+        LOGW("dlopen(%s)%s failed: %s", REAL_LOADER_PATHS[i], fresh ? " (fresh instance)" : "", dlerror());
     }
     if (!real.handle) {
         LOGE("Could not open the system Vulkan loader (tried /system/lib64/libvulkan.so, libvulkan.so)");
         return 0;
     }
-    real.direct_icd = 0;
+    real.direct_icd = SHIM_MODE_SYSTEM;
+    real.driver_path = NULL;
+    bind_loader_exports();
 
-    real.vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)load_real("vkGetInstanceProcAddr", 1);
-    real.vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)load_real("vkGetDeviceProcAddr", 1);
-    store_real_proc(RP_vkGetDeviceProcAddr, (void *)real.vkGetDeviceProcAddr);
-    real.vkEnumerateInstanceExtensionProperties =
-        (PFN_vkEnumerateInstanceExtensionProperties)load_real("vkEnumerateInstanceExtensionProperties", 1);
-    real.vkCreateInstance = (PFN_vkCreateInstance)load_real("vkCreateInstance", 1);
-    real.vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)load_real("vkDestroySurfaceKHR", 0);
-    real.vkQueuePresentKHR = (PFN_vkQueuePresentKHR)load_real("vkQueuePresentKHR", 0);
-    real.vkCreateXlibSurfaceKHR = (PFN_vkCreateXlibSurfaceKHR)load_real("vkCreateXlibSurfaceKHR", 0);
-    real.vkGetPhysicalDeviceXlibPresentationSupportKHR =
-        (PFN_vkGetPhysicalDeviceXlibPresentationSupportKHR)load_real("vkGetPhysicalDeviceXlibPresentationSupportKHR", 0);
-
-    LOGI("Using system Vulkan loader: %s", real.path);
+    LOGI("Using system Vulkan loader: %s%s (vendor driver; textureCompressionBC forced on)", real.path,
+         fresh ? " (fresh instance, separate from split mode's)" : "");
     return 1;
 }
 
-static void shim_init(void) {
+static void log_shim_loaded(void) {
     Dl_info self;
     const char *ld_path = getenv("LD_LIBRARY_PATH");
-    if (dladdr((void *)&shim_init, &self) && self.dli_fname) {
+    if (dladdr((void *)&log_shim_loaded, &self) && self.dli_fname) {
         LOGI("libvulkan.so.1 shim loaded from %s (pid %d)", self.dli_fname, (int)getpid());
     } else {
         LOGI("libvulkan.so.1 shim loaded (pid %d)", (int)getpid());
     }
     LOGI("env: LD_LIBRARY_PATH=%s", ld_path ? ld_path : "(unset)");
+}
+
+static void shim_init(void) {
+    LOGI("selecting the Vulkan implementation (first Vulkan call, pid %d)", (int)getpid());
     if (!open_fable_driver() && !open_system_loader()) {
         LOGE("No Vulkan loader found; every forwarded call will fail");
         return;
     }
 
-    LOGI("Wrapping %s (vkGetInstanceProcAddr %p, vkCreateXlibSurfaceKHR %s, "
+    LOGI("Wrapping %s%s%s (mode %s, vkGetInstanceProcAddr %p, vkCreateXlibSurfaceKHR %s, "
          "vkGetPhysicalDeviceXlibPresentationSupportKHR %s)",
-         real.path, (void *)real.vkGetInstanceProcAddr,
+         real.path, real.driver_path ? " + " : "", real.driver_path ? real.driver_path : "",
+         real.direct_icd == SHIM_MODE_SPLIT ? "split" : real.direct_icd == SHIM_MODE_DIRECT_ICD ? "direct ICD" : "system",
+         (void *)real.vkGetInstanceProcAddr,
          real.vkCreateXlibSurfaceKHR ? "forwarded" : "via vkGetInstanceProcAddr",
          real.vkGetPhysicalDeviceXlibPresentationSupportKHR ? "forwarded" : "stubbed (VK_TRUE)");
 }
@@ -584,9 +949,11 @@ static inline void ensure_init(void) {
     pthread_once(&shim_once, shim_init);
 }
 
+/* Only announces the shim: driver selection (which may create a probe instance) waits for the
+ * first Vulkan call, outside the dynamic linker's dlopen of this library. */
 __attribute__((constructor))
 static void vulkan_shim_constructor(void) {
-    ensure_init();
+    log_shim_loaded();
 }
 
 /* Instance-level lookup in the real implementation for an entry point it doesn't export as a
@@ -822,8 +1189,17 @@ static void log_missing_extensions(const VkInstanceCreateInfo *info) {
     free(props);
 }
 
-/* Drops a direct ICD (left mapped, see open_direct_icd) and re-initialises on Android's system
- * loader. Only valid while no instance exists on the ICD. Returns 1 on success. */
+static const char *mode_label(void) {
+    switch (real.direct_icd) {
+    case SHIM_MODE_SPLIT: return "split: system loader instance + WSI, custom driver devices";
+    case SHIM_MODE_DIRECT_ICD: return "direct ICD";
+    default: return "system loader";
+    }
+}
+
+/* Drops a direct ICD or split mode's loader instance (both left mapped: the driver has already
+ * run code and Mesa is not written to be unloaded mid-process) and re-initialises on Android's
+ * system loader. Only valid while no instance exists on them. Returns 1 on success. */
 static int switch_to_system_loader(void) {
     memset(&real, 0, sizeof(real));
     for (int id = 0; id < RP_COUNT; id++) __atomic_store_n(&real_procs[id], NULL, __ATOMIC_RELEASE);
@@ -886,31 +1262,36 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *
             int w = snprintf(list + used, sizeof(list) - used, "%s%s", used ? " " : "", name ? name : "(null)");
             if (w > 0 && (size_t)w < sizeof(list) - used) used += (size_t)w;
         }
-        LOGI("vkCreateInstance on %s (%s): %u extensions requested, forwarding %u: %s", real.path,
-             real.direct_icd ? "direct ICD" : "system loader", requested, info.enabledExtensionCount, list);
+        LOGI("vkCreateInstance on %s%s%s (%s): %u extensions requested, forwarding %u: %s", real.path,
+             real.driver_path ? " + " : "", real.driver_path ? real.driver_path : "", mode_label(), requested,
+             info.enabledExtensionCount, list);
     }
 
     VkResult res = real.vkCreateInstance(&info, pAllocator, pInstance);
 
-    if (res == VK_ERROR_EXTENSION_NOT_PRESENT) {
-        log_missing_extensions(&info);
-        /* Last line of defence for a direct ICD that passed the init-time probe but still rejects
-         * the request: as long as no instance lives on it, swap in the system loader and retry. */
-        if (real.direct_icd && __atomic_load_n(&instances_created, __ATOMIC_ACQUIRE) == 0) {
-            LOGE("vkCreateInstance: %s rejected the instance (res=-7); retrying on the system Vulkan loader",
-                 real.path);
-            if (switch_to_system_loader()) {
-                res = real.vkCreateInstance(&info, pAllocator, pInstance);
-                if (res == VK_ERROR_EXTENSION_NOT_PRESENT) log_missing_extensions(&info);
-            }
+    if (res == VK_ERROR_EXTENSION_NOT_PRESENT) log_missing_extensions(&info);
+    /* Last line of defence for a custom path (direct ICD, or split mode) that passed the
+     * selection-time probe but still rejects the request: as long as no instance lives on it,
+     * swap in the system loader and retry. */
+    if ((res == VK_ERROR_EXTENSION_NOT_PRESENT || res == VK_ERROR_INCOMPATIBLE_DRIVER ||
+         res == VK_ERROR_INITIALIZATION_FAILED) &&
+        real.direct_icd != SHIM_MODE_SYSTEM && __atomic_load_n(&instances_created, __ATOMIC_ACQUIRE) == 0) {
+        LOGE("vkCreateInstance: %s%s%s (%s) rejected the instance (res=%d); retrying on the system Vulkan loader",
+             real.path, real.driver_path ? " + " : "", real.driver_path ? real.driver_path : "", mode_label(), (int)res);
+        if (switch_to_system_loader()) {
+            res = real.vkCreateInstance(&info, pAllocator, pInstance);
+            if (res == VK_ERROR_EXTENSION_NOT_PRESENT) log_missing_extensions(&info);
         }
     }
 
     if (res == VK_SUCCESS) {
         __atomic_add_fetch(&instances_created, 1, __ATOMIC_ACQ_REL);
         cache_instance_procs(*pInstance);
-        LOGI("vkCreateInstance: instance created on %s (%u extensions requested, %u forwarded)",
-             real.path, requested, info.enabledExtensionCount);
+        LOGI("vkCreateInstance: instance created on %s (%s; %u extensions requested, %u forwarded)",
+             real.path, mode_label(), requested, info.enabledExtensionCount);
+        if (real.direct_icd == SHIM_MODE_SPLIT) {
+            LOGI("vkCreateInstance: WSI from %s, physical devices / VkDevice from %s", real.path, real.driver_path);
+        }
     } else {
         LOGE("vkCreateInstance: failed on %s, res=%d%s", real.path ? real.path : "(no loader)", (int)res,
              res == VK_ERROR_EXTENSION_NOT_PRESENT ? " (VK_ERROR_EXTENSION_NOT_PRESENT)" :
@@ -932,6 +1313,9 @@ VK_SHIM_EXPORT void VKAPI_CALL vkGetPhysicalDeviceFeatures2(VkPhysicalDevice phy
                                                             VkPhysicalDeviceFeatures2 *pFeatures);
 VK_SHIM_EXPORT void VKAPI_CALL vkGetPhysicalDeviceFeatures2KHR(VkPhysicalDevice physicalDevice,
                                                                VkPhysicalDeviceFeatures2 *pFeatures);
+VK_SHIM_EXPORT VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice physicalDevice,
+                                                 const VkDeviceCreateInfo *pCreateInfo,
+                                                 const VkAllocationCallbacks *pAllocator, VkDevice *pDevice);
 
 VK_SHIM_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
     ensure_init();
@@ -959,6 +1343,7 @@ VK_SHIM_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance in
     SHIM_PROC(vkGetPhysicalDeviceFeatures);
     SHIM_PROC(vkGetPhysicalDeviceFeatures2);
     SHIM_PROC(vkGetPhysicalDeviceFeatures2KHR);
+    SHIM_PROC(vkCreateDevice);
     /* Defined below, also needed by Wine's direct dlsym lookup. */
     extern VK_SHIM_EXPORT void VKAPI_CALL vkDestroySurfaceKHR(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
     SHIM_PROC(vkDestroySurfaceKHR);
@@ -1007,6 +1392,50 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPres
     return fn(queue, pPresentInfo);
 }
 
+/* --- Device creation (diagnostics only) -----------------------------------------------------
+ *
+ * Forwards unchanged; logs which device (and therefore which driver) DXVK got, whether it asked
+ * for textureCompressionBC, and the result — the line that tells "RADV device" from "Samsung
+ * device" in the Wine log. */
+
+static const VkPhysicalDeviceFeatures *requested_features(const VkDeviceCreateInfo *info) {
+    if (info->pEnabledFeatures) return info->pEnabledFeatures;
+    for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext) {
+        if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
+            return &((const VkPhysicalDeviceFeatures2 *)p)->features;
+        }
+    }
+    return NULL;
+}
+
+VK_SHIM_EXPORT VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice physicalDevice,
+                                                 const VkDeviceCreateInfo *pCreateInfo,
+                                                 const VkAllocationCallbacks *pAllocator, VkDevice *pDevice) {
+    ensure_init();
+    PFN_vkCreateDevice fn = (PFN_vkCreateDevice)real_proc(RP_vkCreateDevice);
+    if (!fn) {
+        LOGE("vkCreateDevice: not available in %s", real.path ? real.path : "(no loader)");
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkResult res = fn(physicalDevice, pCreateInfo, pAllocator, pDevice);
+
+    VkPhysicalDeviceProperties props;
+    memset(&props, 0, sizeof(props));
+    PFN_vkGetPhysicalDeviceProperties get_props =
+        (PFN_vkGetPhysicalDeviceProperties)real_proc(RP_vkGetPhysicalDeviceProperties);
+    if (get_props) get_props(physicalDevice, &props);
+    const VkPhysicalDeviceFeatures *features = pCreateInfo ? requested_features(pCreateInfo) : NULL;
+    LOGI("vkCreateDevice on \"%s\" (vendor 0x%04x device 0x%04x) via %s%s%s [%s]: %u extensions, "
+         "textureCompressionBC %s -> res=%d",
+         props.deviceName[0] ? props.deviceName : "?", props.vendorID, props.deviceID,
+         real.direct_icd == SHIM_MODE_SPLIT ? real.driver_path : real.path,
+         real.direct_icd == SHIM_MODE_SPLIT ? " through " : "",
+         real.direct_icd == SHIM_MODE_SPLIT ? real.path : "", mode_label(),
+         pCreateInfo ? pCreateInfo->enabledExtensionCount : 0,
+         !features ? "not requested" : features->textureCompressionBC ? "requested" : "not requested", (int)res);
+    return res;
+}
+
 /* --- Physical device feature override -----------------------------------------------------
  *
  * Samsung's proprietary Xclipse (RDNA2) Vulkan driver does not report textureCompressionBC
@@ -1020,10 +1449,22 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPres
  * other Vulkan consumer. Because the hardware genuinely supports block-compressed texture
  * formats, games that rely on them (ULTRAKILL, the d3d11-test tool, most Unity titles) render
  * correctly once the gate is lifted.
+ *
+ * Only on the system loader (and a direct ICD). In split mode the devices are RADV's, which
+ * reports the real value.
  */
 
 static void force_texture_compression_bc(VkPhysicalDeviceFeatures *features) {
     static int logged;
+    if (real.direct_icd == SHIM_MODE_SPLIT) {
+        /* RADV answers truthfully on RDNA2; report it once, never override it. Forcing it would
+         * only move the failure to vkCreateDevice (VK_ERROR_FEATURE_NOT_PRESENT). */
+        if (features && !__atomic_exchange_n(&logged, 1, __ATOMIC_ACQ_REL)) {
+            LOGI("vkGetPhysicalDeviceFeatures: %s reports textureCompressionBC = %d (split mode, not overridden)",
+                 real.driver_path, (int)features->textureCompressionBC);
+        }
+        return;
+    }
     if (features && !features->textureCompressionBC) {
         features->textureCompressionBC = VK_TRUE;
         if (!__atomic_exchange_n(&logged, 1, __ATOMIC_ACQ_REL)) {

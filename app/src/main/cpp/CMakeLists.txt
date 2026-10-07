@@ -83,11 +83,15 @@ target_link_libraries(winlator
 # it winevulkan asserts and DXVK gets no instance), and masquerades VK_KHR_xlib_surface as an
 # instance extension (translated to Android WSI in vkCreateInstance). ImageReader provides a
 # real Android BufferQueue inside Wine; presented frames go to the X server over a Unix socket.
+# With a custom driver (FABLE_VULKAN_DRIVER, RADV Xclipse) vulkan/vulkan_hal_inject.c does the
+# Winlator/adrenotools-style injection: a private instance of the system loader gets the driver as
+# its HAL, so the loader provides instance + WSI and RADV provides the devices ("split" mode).
 # Packaged in the APK
 # as libvulkan_shim.so;
 # NativeLibResolver installs it as <filesDir>/x11/lib/libvulkan.so.1. Nothing JNI-loads it.
 add_library(vulkan_shim SHARED
     vulkan/vulkan_shim.c
+    vulkan/vulkan_hal_inject.c
     vulkan/android_surface_bridge.c
 )
 
