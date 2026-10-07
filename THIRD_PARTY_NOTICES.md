@@ -154,9 +154,11 @@ SOFTWARE.
 
 ## X11 client libraries (Termux builds)
 
-Wine's `winex11.so` runs under Box64, which maps `libX11.so` / `libXext.so` onto native
-aarch64 libraries. Fable bundles unmodified Termux (Android NDK, bionic) builds under
-`app/src/main/assets/x11/arm64-v8a/`, downloaded from https://packages.termux.dev/apt/termux-main/:
+Wine's `winex11.so` runs under Box64, which maps `libX11.so` / `libXext.so` (and the X
+extension libraries) onto native aarch64 libraries. Fable bundles unmodified Termux (Android NDK,
+bionic) builds under `app/src/main/assets/x11/arm64-v8a/`, downloaded from
+https://packages.termux.dev/apt/termux-main/ (and https://packages.termux.dev/apt/termux-x11/
+where noted):
 
 | Library | Termux package | License |
 |---|---|---|
@@ -166,6 +168,29 @@ aarch64 libraries. Fable bundles unmodified Termux (Android NDK, bionic) builds 
 | libXdmcp.so | libxdmcp 1.1.5-2 | MIT (`libxdmcp.txt`) |
 | libXext.so | libxext 1.3.7 | MIT/X11-style (`libxext.txt`) |
 | libandroid-support.so | libandroid-support 29-1 | Apache-2.0 / Termux terms (`libandroid-support.txt`) |
+| libXrender.so | libxrender 0.9.12-1 | MIT/X11-style (`libxrender.txt`) |
+| libXcursor.so | libxcursor 1.2.3-1 | MIT/X11-style (`libxcursor.txt`) |
+| libXfixes.so | libxfixes 6.0.2 | MIT/X11-style (`libxfixes.txt`) |
+| libXi.so | libxi 1.8.3 | MIT/X11-style (`libxi.txt`) |
+| libXrandr.so | libxrandr 1.5.5 | MIT/X11-style (`libxrandr.txt`) |
+| libXinerama.so | libxinerama 1.1.6 (termux-x11 repo) | MIT/X11-style (`libxinerama.txt`) |
+| libXcomposite.so | libxcomposite 0.4.7 (termux-x11 repo) | MIT/X11-style (`libxcomposite.txt`) |
+
+### FreeType and its dependencies (Termux builds)
+
+Wine's font code (`win32u` / `gdi32`, through Box64's wrapped `libfreetype.so.6`) needs a full
+FreeType. Android's `/system/lib64/libft2.so` is too stripped down (Wine: "upgrade FreeType to at
+least version 2.1.4", then `kernel32.dll` status c0000135), so Fable bundles unmodified Termux
+aarch64 builds next to the X11 libraries. Where Box64 / the DT_NEEDED entries use a versioned name
+the same file ships under both names.
+
+| Library (file names) | Termux package | License |
+|---|---|---|
+| libfreetype.so.6, libfreetype.so | freetype 2.14.3 | FreeType License (FTL) or GPL-2.0, at the user's choice; Fable uses it under the FTL (`freetype.txt`). Portions of this software are copyright (C) The FreeType Project (www.freetype.org). All rights reserved. |
+| libpng16.so, libpng.so | libpng 1.6.59 | libpng license (`libpng.txt`) |
+| libz.so.1, libz.so | zlib 1.3.2 | zlib license (`zlib.txt`) |
+| libbz2.so.1.0, libbz2.so | libbz2 1.0.8-8 | bzip2 license (BSD-style, `libbz2.txt`) |
+| libbrotlidec.so, libbrotlicommon.so | brotli 1.2.0 | MIT (`brotli.txt`) |
 
 The full license texts ship in the APK under `assets/x11/licenses/`. At install time Fable
 patches one string in its copy of libxcb (the compiled-in socket directory
