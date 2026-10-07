@@ -5,4 +5,25 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!--
+        DisplayActivity (the Wine screen). Fullscreen, true-black window behind the X surface, and
+        Material widgets for the side menu: the stock Switch picks its colours from here, so the
+        accent is white on grey like the rest of Fable instead of the Holo blue
+        Theme.Black.NoTitleBar.Fullscreen gave it.
+    -->
+    <style name="Theme.Fable.Display" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/fable_bg</item>
+        <item name="android:colorBackground">@color/fable_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:colorAccent">@color/white</item>
+        <item name="android:colorControlActivated">@color/white</item>
+        <item name="android:colorControlNormal">@color/white</item>
+        <item name="android:colorControlHighlight">@color/fable_pressed</item>
+        <item name="android:colorSwitchThumbNormal">@color/fable_switch_thumb</item>
+        <item name="android:colorForeground">@color/white</item>
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/fable_text_dim</item>
+    </style>
 </resources>

@@ -103,7 +103,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ## Phosphor Icons
 
-The app's icons (`app/src/main/java/io/harbor/fable/ui/icons/FableIcons.kt`) are path data
+The app's icons (`app/src/main/java/io/harbor/fable/ui/icons/FableIcons.kt`, and the display
+side menu's `app/src/main/res/drawable/ic_menu_*.xml` vector drawables) are path data
 copied from Phosphor Icons (https://phosphoricons.com, https://github.com/phosphor-icons/core),
 Regular, Fill and Bold weights, used under the MIT License.
 

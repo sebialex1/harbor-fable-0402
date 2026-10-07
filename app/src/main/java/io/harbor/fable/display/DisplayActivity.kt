@@ -11,6 +11,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
+import android.text.TextUtils
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -24,11 +25,13 @@ import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.winlator.widget.XServerView
+import io.harbor.fable.R
 import io.harbor.fable.data.ContainerRepository
 import io.harbor.fable.data.WineFailure
 import com.winlator.xserver.Pointer
@@ -87,6 +90,7 @@ class DisplayActivity : Activity() {
     private var keyboardShown = false
     private var winePaused = false
     private var pauseItem: TextView? = null
+    private var pauseIcon: ImageView? = null
 
     // Trackpad state (screen pixels).
     private var activePointerId = MotionEvent.INVALID_POINTER_ID
@@ -207,6 +211,7 @@ class DisplayActivity : Activity() {
         drawerPanel = null
         controlsOverlay = null
         pauseItem = null
+        pauseIcon = null
         // Only a real exit stops Wine; a recreate (config change not covered by the manifest)
         // comes straight back to the same display. A paused Wine is killed just the same
         // (SIGKILL is delivered to stopped processes).
@@ -293,9 +298,7 @@ class DisplayActivity : Activity() {
         winePaused = paused
         repository.setPausedInBackground(id, paused)
         pauseItem?.text = if (paused) "Resume Wine" else "Pause Wine"
-        pauseItem?.setCompoundDrawablesRelativeWithIntrinsicBounds(
-            menuIcon(if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause), null, null, null,
-        )
+        pauseIcon?.setImageDrawable(menuIcon(if (paused) R.drawable.ic_menu_play else R.drawable.ic_menu_pause))
         statusText?.let { label ->
             if (paused) {
                 label.text = "Paused"
@@ -307,49 +310,68 @@ class DisplayActivity : Activity() {
     }
 
     /**
-     * The side menu: a tap-to-close scrim over the whole screen with a rounded, translucent panel
-     * on the right edge. Hidden until Back opens it ([setDrawerOpen]).
+     * The side menu: a tap-to-close scrim over the whole screen with an opaque, rounded panel on
+     * the right edge, in the app's grouped-list idiom — a header, a section of switches and a
+     * section of actions, each on its own card. Hidden until Back opens it ([setDrawerOpen]).
      */
     private fun createDrawer(): View {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16f), dp(20f), dp(16f), dp(16f))
+            setPadding(dp(16f), dp(24f), dp(16f), dp(16f))
             background = GradientDrawable().apply {
                 setColor(DRAWER_BACKGROUND.toInt())
-                val r = 20f * density
+                val r = DRAWER_RADIUS_DP * density
                 // Rounded on the screen side only; the right edge is flush with the display's.
                 cornerRadii = floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r)
             }
             // Taps on the panel itself must not fall through to the scrim (which closes).
             isClickable = true
+
+            // Header: the app name and what Back does now.
             addView(TextView(this@DisplayActivity).apply {
                 setTextColor(0xFFFFFFFF.toInt())
-                textSize = 20f
-                typeface = Typeface.DEFAULT_BOLD
+                textSize = 22f
+                typeface = fableFont(R.font.inter_medium)
+                letterSpacing = -0.02f
                 text = "Fable"
-                setPadding(dp(12f), 0, dp(12f), dp(4f))
+                setPadding(dp(4f), 0, dp(4f), 0)
             })
             addView(TextView(this@DisplayActivity).apply {
                 setTextColor(DRAWER_TEXT_DIM.toInt())
-                textSize = 12f
+                textSize = 13f
+                typeface = fableFont(R.font.inter_regular)
                 text = "Back closes this menu"
-                setPadding(dp(12f), 0, dp(12f), dp(12f))
+                setPadding(dp(4f), dp(2f), dp(4f), 0)
             })
-            addView(menuSwitch("On-screen controls", android.R.drawable.ic_menu_directions) { setControlsShown(it) })
-            addView(menuSwitch("On-screen keyboard", android.R.drawable.ic_menu_edit) { setKeyboardShown(it) })
-            addView(menuDivider())
-            addView(menuItem("Pause Wine", android.R.drawable.ic_media_pause) {
-                setWinePaused(!winePaused)
-                setDrawerOpen(false)
-            }.also { pauseItem = it })
-            addView(menuItem("Stop Wine", android.R.drawable.ic_lock_power_off) {
-                // Same as the old Back: finishing stops the container in onDestroy.
-                finish()
-            })
-            addView(menuDivider())
-            addView(menuItem("Close menu", android.R.drawable.ic_menu_close_clear_cancel) { setDrawerOpen(false) })
+
+            addView(menuSectionLabel("Overlays"))
+            addView(menuCard(
+                menuSwitch("On-screen controls", R.drawable.ic_menu_gamepad, "D-pad and Enter / Esc / Space / Shift") { setControlsShown(it) },
+                menuDivider(),
+                menuSwitch("On-screen keyboard", R.drawable.ic_menu_keyboard, "Android's keyboard, typed into Wine") { setKeyboardShown(it) },
+            ))
+
+            addView(menuSectionLabel("Wine"))
+            addView(menuCard(
+                menuItem("Pause Wine", R.drawable.ic_menu_pause, "Freezes every process of the container") {
+                    setWinePaused(!winePaused)
+                    setDrawerOpen(false)
+                }.also {
+                    pauseItem = it.findViewById(ROW_TITLE_ID)
+                    pauseIcon = it.findViewById(ROW_ICON_ID)
+                },
+                menuDivider(),
+                menuItem("Stop Wine", R.drawable.ic_menu_power, "Ends the session and returns to the app") {
+                    // Same as the old Back: finishing stops the container in onDestroy.
+                    finish()
+                },
+            ))
+
+            // Spacer pushes Close to the bottom, where the thumb is on a landscape phone.
+            addView(View(this@DisplayActivity), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(menuCard(menuItem("Close menu", R.drawable.ic_menu_close, null) { setDrawerOpen(false) }))
         }
         drawerPanel = panel
         return FrameLayout(this).apply {
@@ -363,71 +385,151 @@ class DisplayActivity : Activity() {
         }
     }
 
-    private fun menuIcon(resId: Int): Drawable? =
-        runCatching { getDrawable(resId)?.mutate()?.apply { setTint(0xFFFFFFFF.toInt()) } }.getOrNull()
+    /** Inter from `res/font`, the same face the Compose screens use; the system face if it fails. */
+    private fun fableFont(resId: Int): Typeface =
+        runCatching { resources.getFont(resId) }.getOrNull() ?: Typeface.DEFAULT
 
-    /** A menu row: white icon + label, highlighted while pressed. */
-    private fun menuItem(label: String, iconRes: Int, onClick: () -> Unit): TextView {
+    private fun menuIcon(resId: Int, tint: Int = 0xFFFFFFFF.toInt()): Drawable? {
+        val density = resources.displayMetrics.density
+        return runCatching {
+            getDrawable(resId)?.mutate()?.apply {
+                setTint(tint)
+                val size = (MENU_ICON_DP * density).toInt()
+                setBounds(0, 0, size, size)
+            }
+        }.getOrNull()
+    }
+
+    /** Small grey uppercase caption above a card, like the Compose `SectionLabel`. */
+    private fun menuSectionLabel(label: String): TextView {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
         return TextView(this).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 16f
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12f), dp(14f), dp(12f), dp(14f))
-            compoundDrawablePadding = dp(16f)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(menuIcon(iconRes), null, null, null)
-            background = menuRowBackground()
+            setTextColor(DRAWER_TEXT_DIM.toInt())
+            textSize = 12f
+            typeface = fableFont(R.font.inter_medium)
+            letterSpacing = 0.04f
+            isAllCaps = true
             text = label
+            setPadding(dp(16f), dp(20f), dp(16f), dp(6f))
+        }
+    }
+
+    /** A grouped card: an opaque raised surface with rounded corners holding the given rows. */
+    private fun menuCard(vararg rows: View): View {
+        val density = resources.displayMetrics.density
+        return LinearLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(DRAWER_CARD.toInt())
+                cornerRadius = MENU_CARD_RADIUS_DP * density
+            }
+            clipToOutline = true
+            rows.forEach { addView(it) }
+        }
+    }
+
+    /** Icon tile + title (+ subtitle) shared by action and switch rows. */
+    private fun menuRowContent(label: String, subtitle: String?, iconRes: Int): View {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        val tile = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                setColor(DRAWER_ICON_TILE.toInt())
+                cornerRadius = 7f * density
+            }
+            addView(
+                ImageView(this@DisplayActivity).apply {
+                    id = ROW_ICON_ID
+                    setImageDrawable(menuIcon(iconRes))
+                },
+                FrameLayout.LayoutParams(dp(MENU_ICON_DP), dp(MENU_ICON_DP), Gravity.CENTER),
+            )
+        }
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(this@DisplayActivity).apply {
+                id = ROW_TITLE_ID
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 16f
+                typeface = fableFont(R.font.inter_regular)
+                letterSpacing = -0.01f
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                text = label
+            })
+            if (subtitle != null) {
+                addView(TextView(this@DisplayActivity).apply {
+                    setTextColor(DRAWER_TEXT_DIM.toInt())
+                    textSize = 12f
+                    typeface = fableFont(R.font.inter_regular)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    text = subtitle
+                })
+            }
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(tile, LinearLayout.LayoutParams(dp(MENU_TILE_DP), dp(MENU_TILE_DP)).apply { marginEnd = dp(12f) })
+            addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+    }
+
+    /** A menu row: icon tile + label, highlighted while pressed. Its title view has [ROW_TITLE_ID]. */
+    private fun menuItem(label: String, iconRes: Int, subtitle: String?, onClick: () -> Unit): View {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        return LinearLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(MENU_ROW_MIN_DP)
+            setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
+            background = menuRowBackground()
+            addView(menuRowContent(label, subtitle, iconRes), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             setOnClickListener { onClick() }
         }
     }
 
     /** A menu row with a switch on the right; [onChange] gets the new state. */
-    private fun menuSwitch(label: String, iconRes: Int, onChange: (Boolean) -> Unit): View {
+    private fun menuSwitch(label: String, iconRes: Int, subtitle: String?, onChange: (Boolean) -> Unit): View {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
         val toggle = Switch(this).apply {
             setOnCheckedChangeListener { _, checked -> onChange(checked) }
         }
-        val text = TextView(this).apply {
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 16f
-            gravity = Gravity.CENTER_VERTICAL
-            compoundDrawablePadding = dp(16f)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(menuIcon(iconRes), null, null, null)
-            this.text = label
-        }
         return LinearLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(MENU_ROW_MIN_DP)
             setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
             background = menuRowBackground()
-            addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(toggle)
+            addView(menuRowContent(label, subtitle, iconRes), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(toggle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8f) })
             // The whole row flips the switch, not just the small knob.
             setOnClickListener { toggle.toggle() }
         }
     }
 
+    /** Hairline between rows of a card, inset past the icon tile like a grouped list's. */
     private fun menuDivider(): View {
         val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
         return View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (1f * density).toInt().coerceAtLeast(1)).apply {
-                setMargins((12f * density).toInt(), (8f * density).toInt(), (12f * density).toInt(), (8f * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (0.75f * density).toInt().coerceAtLeast(1)).apply {
+                setMargins(dp(12f + MENU_TILE_DP + 12f), 0, 0, 0)
             }
             setBackgroundColor(DRAWER_DIVIDER.toInt())
         }
     }
 
     private fun menuRowBackground(): Drawable {
-        val density = resources.displayMetrics.density
-        val pressed = GradientDrawable().apply {
-            setColor(DRAWER_ROW_PRESSED.toInt())
-            cornerRadius = 10f * density
-        }
+        val pressed = ColorDrawable(DRAWER_ROW_PRESSED.toInt())
         return StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_pressed), pressed)
             addState(intArrayOf(), ColorDrawable(0))
@@ -832,14 +934,25 @@ class DisplayActivity : Activity() {
         private const val TAP_TIMEOUT_MS = 200L
         private const val HUD_INTERVAL_MS = 1000L
 
-        // Side menu: Fable's dark theme over the game (translucent black, white text, 0x8E8E93 dim).
-        private const val DRAWER_WIDTH_DP = 300f
+        // Side menu: Fable's grouped-list palette (ui/theme/Color.kt) over the game. The panel
+        // is near-black and opaque enough to read on any frame; cards are one grey up, icon
+        // tiles one more, like FableCard / IconTile.
+        private const val DRAWER_WIDTH_DP = 320f
+        private const val DRAWER_RADIUS_DP = 24f
         private const val DRAWER_ANIMATION_MS = 180L
-        private const val DRAWER_BACKGROUND = 0xCC000000L
-        private const val DRAWER_SCRIM = 0x55000000L
+        private const val DRAWER_BACKGROUND = 0xF2000000L
+        private const val DRAWER_SCRIM = 0x66000000L
+        private const val DRAWER_CARD = 0xFF1C1C1EL
+        private const val DRAWER_ICON_TILE = 0xFF2C2C2EL
         private const val DRAWER_DIVIDER = 0xFF38383AL
-        private const val DRAWER_ROW_PRESSED = 0x33FFFFFFL
+        private const val DRAWER_ROW_PRESSED = 0x1AFFFFFFL
         private const val DRAWER_TEXT_DIM = 0xFF8E8E93L
+        private const val MENU_CARD_RADIUS_DP = 12f
+        private const val MENU_ROW_MIN_DP = 52f
+        private const val MENU_TILE_DP = 32f
+        private const val MENU_ICON_DP = 20f
+        private val ROW_TITLE_ID = View.generateViewId()
+        private val ROW_ICON_ID = View.generateViewId()
 
         // On-screen controls.
         private const val PAD_BUTTON_DP = 52f

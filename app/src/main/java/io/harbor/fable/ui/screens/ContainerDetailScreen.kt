@@ -1,15 +1,18 @@
 package io.harbor.fable.ui.screens
 
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LeadingIconTab
 import androidx.compose.material3.LocalContentColor
@@ -27,10 +30,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,10 +49,10 @@ import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.ControlHeight
-import io.harbor.fable.ui.theme.ControlRadiusCompact
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableBg
 import io.harbor.fable.ui.theme.FableError
+import io.harbor.fable.ui.theme.FableOnAccent
 import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.FableTextFaint
@@ -252,34 +253,25 @@ internal fun ContainerDetailContent(
 
         when (tab) {
             ContainerTab.Apps -> {
-                // Launch controls: the primary app and the desktop side by side.
+                // Launch card: the primary app as a hero row with a white play button, and the
+                // Wine desktop as a plain row beneath it. With no primary app the desktop is the
+                // only thing to launch, so it takes the play button.
                 item(key = "launch") {
                     val primaryName = container.exeName?.takeIf { !container.exePath.isNullOrBlank() }
-                    Row(
-                        Modifier.fillMaxWidth().animateItem().entrance(appear, 0),
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    ) {
-                        if (primaryName != null) {
-                            FableButton(
-                                text = primaryName,
-                                icon = FableIcons.Play,
-                                primary = true,
-                                modifier = Modifier.weight(1f),
-                                onClick = onLaunchPrimary,
-                            )
-                        }
-                        FableButton(
-                            text = if (primaryName != null) "Desktop" else "Launch Desktop",
-                            icon = FableIcons.Desktop,
-                            primary = primaryName == null,
-                            modifier = Modifier.weight(1f),
-                            onClick = onLaunchDesktop,
-                        )
-                    }
+                    val primaryIcon = exes.firstOrNull { !it.isTool && it.path == container.exePath }?.icon
+                    LaunchCard(
+                        primaryName = primaryName,
+                        primaryIconPath = primaryIcon,
+                        subtitle = graphicsSummary(container),
+                        onLaunchPrimary = onLaunchPrimary,
+                        onLaunchDesktop = onLaunchDesktop,
+                        modifier = Modifier.animateItem().entrance(appear, 0),
+                    )
                 }
 
                 val apps = exes.filter { !it.isTool }
                 if (apps.isNotEmpty()) {
+                    item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().entrance(appear, 1)) }
                     item(key = "apps") {
                         FableCard(Modifier.animateItem().entrance(appear, 1)) {
                             apps.forEachIndexed { index, exe ->
@@ -502,8 +494,75 @@ private fun ContainerTabRow(selected: ContainerTab, onSelect: (ContainerTab) -> 
 }
 
 /**
- * The built-in tools as a single row of tiles instead of a list, so they stay out of the apps'
- * way: tap one to launch it. A tool this build doesn't bundle is dimmed; launching it says so.
+ * What the Apps tab launches: the primary app (name, icon and the container's graphics summary)
+ * with a filled play button, and the Wine desktop as a second row. Without a primary app the
+ * first row explains how to get one and the desktop row carries the play button instead.
+ */
+@Composable
+private fun LaunchCard(
+    primaryName: String?,
+    primaryIconPath: String?,
+    subtitle: String,
+    onLaunchPrimary: () -> Unit,
+    onLaunchDesktop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FableCard(modifier) {
+        if (primaryName != null) {
+            ListRow(
+                title = primaryName,
+                subtitle = subtitle,
+                leading = { ExeIcon(name = primaryName, iconPath = primaryIconPath, size = LaunchIconSize) },
+                showChevron = false,
+                onClick = onLaunchPrimary,
+                trailing = { PlayButton(contentDescription = "Launch $primaryName", onClick = onLaunchPrimary) },
+            )
+        } else {
+            ListRow(
+                title = "No app selected",
+                subtitle = "Add an .exe with +, or tap an app below to make it the primary",
+                subtitleMaxLines = 2,
+                titleColor = FableTextDim,
+                leading = { IconTile(icon = FableIcons.Apps, tint = FableTextFaint, size = LaunchIconSize) },
+                showChevron = false,
+            )
+        }
+        // Hairline aligned with the text, past the (larger than a row's) launch tile.
+        CardDivider(afterIcon = true, modifier = Modifier.padding(start = LaunchIconSize - RowIconSize))
+        val desktopPlay: (@Composable RowScope.() -> Unit)? =
+            if (primaryName == null) {
+                { PlayButton(contentDescription = "Launch desktop", onClick = onLaunchDesktop) }
+            } else {
+                null
+            }
+        ListRow(
+            title = "Wine Desktop",
+            subtitle = "Explorer, file manager and the Windows shell",
+            leading = { IconTile(icon = FableIcons.Desktop, size = LaunchIconSize) },
+            showChevron = primaryName != null,
+            onClick = onLaunchDesktop,
+            trailing = desktopPlay,
+        )
+    }
+}
+
+/** The one filled control on the Apps tab: a white disc with a black play glyph. */
+@Composable
+private fun PlayButton(contentDescription: String, onClick: () -> Unit) {
+    FableIconButton(
+        icon = FableIcons.Play,
+        contentDescription = contentDescription,
+        tint = FableOnAccent,
+        containerColor = FableAccent,
+        size = PlayButtonSize,
+        onClick = onClick,
+    )
+}
+
+/**
+ * The built-in tools as a 2×2 grid of equal cards, so they stay out of the apps' way: tap one to
+ * launch it. Each card is an icon tile, the short name and what the tool checks. A tool this
+ * build doesn't bundle is dimmed and says so; launching it explains.
  */
 @Composable
 private fun ToolTiles(
@@ -512,32 +571,67 @@ private fun ToolTiles(
     onLaunch: (ExeEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    FableCard(modifier) {
-        Row(Modifier.fillMaxWidth().padding(Spacing.xs)) {
-            tools.forEach { exe ->
-                val tint = if (exe.id in unavailable) FableTextFaint else FableText
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(ControlRadiusCompact))
-                        .clickable(role = Role.Button, onClick = { onLaunch(exe) })
-                        .padding(vertical = Spacing.sm),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-                ) {
-                    IconTile(icon = toolIcon(exe.toolId), tint = tint)
-                    Text(
-                        text = toolLabel(exe),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = tint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        tools.chunked(TOOL_COLUMNS).forEach { rowTools ->
+            Row(
+                Modifier.fillMaxWidth().height(IntrinsicSize.Max),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                rowTools.forEach { exe ->
+                    ToolTile(
+                        exe = exe,
+                        available = exe.id !in unavailable,
+                        onClick = { onLaunch(exe) },
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                 }
+                // Keep a lone tile on the last row at half width, aligned with the grid.
+                repeat(TOOL_COLUMNS - rowTools.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
 }
+
+@Composable
+private fun ToolTile(
+    exe: ExeEntry,
+    available: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val titleTint = if (available) FableText else FableTextFaint
+    val caption = if (available) toolCaption(exe) else "Not bundled in this build"
+    FableCard(modifier, onClick = onClick) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            IconTile(icon = toolIcon(exe.toolId), tint = titleTint, size = ToolIconSize)
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                Text(
+                    text = toolLabel(exe),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = titleTint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = caption,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (available) FableTextDim else FableTextFaint,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Tool grid geometry and the launch card's tile sizes, one step up from a list row's. */
+private const val TOOL_COLUMNS = 2
+private val LaunchIconSize = 44.dp
+private val PlayButtonSize = 40.dp
+private val ToolIconSize = 40.dp
 
 /** Settings-tab group keys for [ExpansionState]. */
 private const val GRAPHICS_KEY = "graphics"
@@ -665,10 +759,19 @@ private fun toolIcon(toolId: String?): ImageVector = when (toolId) {
     else -> FableIcons.Test3d
 }
 
-/** Caption for a built-in tool's tile, short enough for four tiles in a row. */
+/** Title for a built-in tool's tile, short enough for two tiles in a row. */
 private fun toolLabel(exe: ExeEntry): String = when (exe.toolId) {
-    ContainerTools.D3D9_TEST.id -> "D3D9"
-    ContainerTools.D3D11_TEST.id -> "D3D11"
-    ContainerTools.D3D12_TEST.id -> "D3D12"
+    ContainerTools.D3D9_TEST.id -> "Direct3D 9"
+    ContainerTools.D3D11_TEST.id -> "Direct3D 11"
+    ContainerTools.D3D12_TEST.id -> "Direct3D 12"
     else -> exe.name
+}
+
+/** One line under the title: what the tool renders through, from [ContainerTools]. */
+private fun toolCaption(exe: ExeEntry): String = when (exe.toolId) {
+    ContainerTools.GPU_INFO.id -> "Vulkan and Direct3D report"
+    ContainerTools.D3D9_TEST.id -> "Test render via DXVK d3d9"
+    ContainerTools.D3D11_TEST.id -> "Test render via DXVK d3d11"
+    ContainerTools.D3D12_TEST.id -> "Test render via VKD3D-Proton"
+    else -> "Built-in tool"
 }

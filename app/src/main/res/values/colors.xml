@@ -3,4 +3,11 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="fable_bg">#FF000000</color>
+    <!-- Display side menu: the Compose palette (ui/theme/Color.kt), repeated for View widgets. -->
+    <color name="fable_surface">#FF1C1C1E</color>
+    <color name="fable_surface_raised">#FF2C2C2E</color>
+    <color name="fable_divider">#FF38383A</color>
+    <color name="fable_pressed">#33FFFFFF</color>
+    <color name="fable_text_dim">#FF8E8E93</color>
+    <color name="fable_switch_thumb">#FFE5E5EA</color>
 </resources>
