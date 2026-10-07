@@ -18,7 +18,12 @@ import java.net.Inet4Address
 
 /** Result of looking for a usable `box64` executable. */
 internal sealed interface Box64Status {
-    data class Ready(val executable: File) : Box64Status
+    /**
+     * [rcFile] is the `box64rc` (per-program settings) shipped in the same package, used when a
+     * container turns on [io.harbor.fable.data.models.Box64Settings.useRcFile]; null when the
+     * package has none.
+     */
+    data class Ready(val executable: File, val rcFile: File? = null) : Box64Status
 
     /** No Box64 package has been downloaded yet. */
     data object NotDownloaded : Box64Status
@@ -237,7 +242,8 @@ internal class WineRuntime(
                 if (executable != null) {
                     executable.setReadable(true, false)
                     executable.setExecutable(true, false)
-                    return@withContext Box64Status.Ready(executable)
+                    val rcFile = BOX64_RC_NAMES.firstNotNullOfOrNull { ArchiveExtractor.findFile(dir, it) }
+                    return@withContext Box64Status.Ready(executable, rcFile)
                 }
             }
             Box64Status.NoExecutable(packages.first().name)
@@ -395,6 +401,9 @@ internal class WineRuntime(
         private const val WINE_MARKER = ".fable-wine.json"
         private const val COMPLETE_MARKER = ".fable-complete"
         private val WINE_BINARIES = listOf("bin/wine", "bin/wine64")
+
+        /** Names a Box64 package's rc file goes by (upstream installs `/etc/box64.box64rc`). */
+        private val BOX64_RC_NAMES = listOf("box64.box64rc", ".box64rc")
         private const val FEX_ROOTFS_SEARCH_DEPTH = 3
 
         /** Winlator's fallback resolver when the active network reports none. */

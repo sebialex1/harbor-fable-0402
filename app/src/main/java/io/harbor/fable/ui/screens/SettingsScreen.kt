@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import io.harbor.fable.data.models.Box64Preset
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.nativebridge.DeviceGpuInfo
 import io.harbor.fable.nativebridge.DeviceProbe
@@ -124,6 +125,13 @@ internal fun SettingsContent(
                     options = translatorOptions,
                     selected = settings.defaultTranslator,
                     onSelect = { t -> onUpdate { it.copy(defaultTranslator = t) } },
+                )
+                CardDivider()
+                OptionSelector(
+                    label = "Box64 preset",
+                    options = Box64Preset.entries.map { SelectOption(it, it.label, it.description) },
+                    selected = settings.defaultBox64Preset,
+                    onSelect = { preset -> onUpdate { it.copy(defaultBox64Preset = preset) } },
                 )
                 CardDivider()
                 OptionSelector(

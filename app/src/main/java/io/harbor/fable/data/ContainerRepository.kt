@@ -2,6 +2,8 @@ package io.harbor.fable.data
 
 import android.content.Context
 import android.util.Log
+import io.harbor.fable.data.models.Box64Preset
+import io.harbor.fable.data.models.Box64Settings
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
@@ -144,6 +146,7 @@ class ContainerRepository internal constructor(
         dxvkVersion: String? = null,
         driverId: String? = null,
         translator: String = ContainerDefaults.TRANSLATOR,
+        box64: Box64Settings = Box64Settings(),
     ): Container {
         val trimmed = name.trim()
         require(trimmed.isNotEmpty()) { "Container name is required" }
@@ -158,6 +161,7 @@ class ContainerRepository internal constructor(
                 dxvkVersion = dxvkVersion,
                 driverId = driverId,
                 translator = translator,
+                box64 = box64,
                 status = ContainerStatus.CREATED,
             )
         )
@@ -409,6 +413,9 @@ class ContainerRepository internal constructor(
                 return LaunchResult.Failed(error.message ?: "Couldn't set up the x86_64 translator")
             }
         describeBinary(log, "translator ${translator.name}", translator.executable)
+        if (!usesFex(configured)) {
+            log.line("box64 preset: ${configured.box64.summary}${if (configured.box64.useRcFile) ", rc file ${translator.rcFile ?: "not in the package"}" else ""}")
+        }
         if (!translator.executable.canExecute() && !translator.executable.setExecutable(true, false)) {
             log.error("chmod +x failed on ${translator.executable}")
             return LaunchResult.Failed("Couldn't mark ${translator.executable.name} executable")
@@ -830,8 +837,11 @@ class ContainerRepository internal constructor(
                     ResolvedTranslator(
                         name = NativeLoader.TRANSLATOR_BOX64,
                         executable = status.executable,
-                        // CPU facts from the environment so Box64 doesn't popen("lscpu") (HostCpu).
-                        environment = BOX64_ENVIRONMENT + HostCpu.get().box64Environment(),
+                        // The container's preset (Winlator's Box64PresetManager values) plus its own
+                        // changes, then CPU facts so Box64 doesn't popen("lscpu") (HostCpu).
+                        environment = container.box64.environment(status.rcFile?.absolutePath) +
+                            HostCpu.get().box64Environment(),
+                        rcFile = status.rcFile,
                     )
                 )
                 Box64Status.NotDownloaded -> Result.failure(
@@ -1124,7 +1134,10 @@ class ContainerRepository internal constructor(
                 envVars TEXT NOT NULL,
                 screenResolution TEXT NOT NULL,
                 isFullscreen INTEGER NOT NULL,
-                translator TEXT NOT NULL DEFAULT 'box64'
+                translator TEXT NOT NULL DEFAULT 'box64',
+                box64Preset TEXT NOT NULL DEFAULT 'compatibility',
+                box64Overrides TEXT NOT NULL DEFAULT '{}',
+                box64RcFile INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE exes (
                 id TEXT NOT NULL PRIMARY KEY,
@@ -1181,6 +1194,8 @@ private data class ResolvedTranslator(
     val executable: File,
     val environment: List<String>,
     val earlyExitHint: String? = null,
+    /** The `box64rc` that came with the Box64 package, when it has one. */
+    val rcFile: File? = null,
 )
 
 /**
@@ -1191,31 +1206,10 @@ private data class ResolvedTranslator(
  */
 internal const val DIAGNOSTIC_WINEDEBUG = "+loaddll,+module"
 
-/**
- * Box64 settings Winlator bionic launches Wine with (GuestProgramLauncherComponent's base
- * variables plus its default "COMPATIBILITY" Box64 preset). BOX64_X11GLX makes Box64's wrapped
- * libX11 advertise GLX; BOX64_NORCFILES stops it reading /etc/box64.box64rc-style files that
- * don't exist on Android. The per-device BOX64_SYSINFO_* variables (no `lscpu` on Android) are
- * added by [HostCpu.box64Environment].
- */
-internal val BOX64_ENVIRONMENT = listOf(
-    "BOX64_NOBANNER=1",
-    "BOX64_DYNAREC=1",
-    "BOX64_X11GLX=1",
-    "BOX64_NORCFILES=1",
-    "BOX64_MMAP32=0",
-    "BOX64_AVX=0",
-    "BOX64_UNITYPLAYER=1",
-    "BOX64_DYNAREC_SAFEFLAGS=2",
-    "BOX64_DYNAREC_FASTNAN=0",
-    "BOX64_DYNAREC_FASTROUND=0",
-    "BOX64_DYNAREC_X87DOUBLE=1",
-    "BOX64_DYNAREC_BIGBLOCK=0",
-    "BOX64_DYNAREC_STRONGMEM=1",
-    "BOX64_DYNAREC_FORWARD=128",
-    "BOX64_DYNAREC_CALLRET=0",
-    "BOX64_DYNAREC_WAIT=1",
-)
+// The Box64 variables a container launches with come from its Box64Settings: Winlator's base
+// variables (GuestProgramLauncherComponent.addBox64EnvVars: BOX64_NOBANNER, BOX64_X11GLX,
+// BOX64_NORCFILES) plus the container's preset (Box64PresetManager) and its own changes. The
+// per-device BOX64_SYSINFO_* variables (no `lscpu` on Android) come from HostCpu.box64Environment.
 
 /** Starts (or reuses) the X display server for a launch at the container's resolution. */
 internal fun interface DisplayProvider {
@@ -1353,6 +1347,9 @@ class FileContainerStore(private val file: File) : ContainerDao {
         put("screenResolution", screenResolution)
         put("isFullscreen", isFullscreen)
         put("translator", translator)
+        put("box64Preset", box64.preset.id)
+        put("box64Overrides", JSONObject(box64.overrides))
+        put("box64RcFile", box64.useRcFile)
     }
 
     private fun JSONObject.toContainer(): Container = Container(
@@ -1371,6 +1368,12 @@ class FileContainerStore(private val file: File) : ContainerDao {
         screenResolution = optString("screenResolution", ContainerDefaults.SCREEN_RESOLUTION),
         isFullscreen = optBoolean("isFullscreen", false),
         translator = optString("translator", ContainerDefaults.TRANSLATOR).ifBlank { ContainerDefaults.TRANSLATOR },
+        // Records from before presets existed launched with Winlator's Compatibility values.
+        box64 = Box64Settings(
+            preset = Box64Preset.fromId(stringOrNull("box64Preset")),
+            overrides = optJSONObject("box64Overrides")?.toStringMap() ?: emptyMap(),
+            useRcFile = optBoolean("box64RcFile", false),
+        ),
     )
 
     private fun ExeEntry.toJson(): JSONObject = JSONObject().apply {

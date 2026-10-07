@@ -23,6 +23,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.WineBuild
+import io.harbor.fable.data.models.Box64Preset
+import io.harbor.fable.data.models.Box64Settings
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.ui.components.*
@@ -64,12 +66,13 @@ fun ContainersScreen(
             wineBuilds = wineBuilds,
             defaultFullscreen = appSettings.defaultFullscreen,
             defaultTranslator = appSettings.defaultTranslator,
+            defaultBox64Preset = appSettings.defaultBox64Preset,
             onDismiss = { showCreate = false },
             onOpenAssets = {
                 showCreate = false
                 onOpenAssets()
             },
-            onCreate = { name, resolution, wineVersion, fullscreen, translator ->
+            onCreate = { name, resolution, wineVersion, fullscreen, translator, box64Preset ->
                 scope.launch {
                     repository.create(
                         name = name,
@@ -80,6 +83,7 @@ fun ContainersScreen(
                         dxvkVersion = appSettings.defaultDxvkVersion,
                         driverId = appSettings.defaultDriverId,
                         translator = translator,
+                        box64 = Box64Settings(preset = box64Preset),
                     )
                 }
                 showCreate = false
@@ -133,14 +137,23 @@ private fun CreateContainerSheet(
     wineBuilds: List<WineBuild>,
     defaultFullscreen: Boolean,
     defaultTranslator: String,
+    defaultBox64Preset: Box64Preset,
     onDismiss: () -> Unit,
     onOpenAssets: () -> Unit,
-    onCreate: (name: String, resolution: String, wineVersion: String, fullscreen: Boolean, translator: String) -> Unit,
+    onCreate: (
+        name: String,
+        resolution: String,
+        wineVersion: String,
+        fullscreen: Boolean,
+        translator: String,
+        box64Preset: Box64Preset,
+    ) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var resolution by remember { mutableStateOf(defaultResolution) }
     var fullscreen by remember { mutableStateOf(defaultFullscreen) }
     var translator by remember { mutableStateOf(defaultTranslator) }
+    var box64Preset by remember { mutableStateOf(defaultBox64Preset) }
     // The user's default when it is downloaded, else the newest bionic package.
     var wineChoice by remember { mutableStateOf<String?>(null) }
     val wineVersion = wineChoice
@@ -189,6 +202,15 @@ private fun CreateContainerSheet(
                 selected = translator,
                 onSelect = { translator = it },
             )
+            if (translator != "fex") {
+                CardDivider()
+                OptionSelector(
+                    label = "Box64 preset",
+                    options = Box64Preset.entries.map { SelectOption(it, it.label, it.description) },
+                    selected = box64Preset,
+                    onSelect = { box64Preset = it },
+                )
+            }
             CardDivider()
             ToggleRow(
                 title = "Fullscreen",
@@ -204,7 +226,7 @@ private fun CreateContainerSheet(
             modifier = Modifier.fillMaxWidth(),
             onClick = {
                 if (name.isNotBlank()) {
-                    close { onCreate(name.trim(), resolution, wineVersion, fullscreen, translator) }
+                    close { onCreate(name.trim(), resolution, wineVersion, fullscreen, translator, box64Preset) }
                 }
             },
         )

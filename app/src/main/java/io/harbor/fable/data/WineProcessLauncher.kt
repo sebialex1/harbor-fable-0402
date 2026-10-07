@@ -14,7 +14,8 @@ import java.io.IOException
  * The command and environment mirror the native launcher exactly:
  * `<translator> <wine> <program> [args…]` with WINEPREFIX, HOME, USER, TMPDIR, XDG_CACHE_HOME,
  * PATH, the Vulkan driver variables (plus the `fable_icd.json` manifest), the caller's variables
- * (DISPLAY, LD_LIBRARY_PATH, BOX64_*, WINEDEBUG, …) and BOX64_PATH / BOX64_LD_LIBRARY_PATH.
+ * (DISPLAY, LD_LIBRARY_PATH, the container's Box64 preset as BOX64_* (see
+ * [io.harbor.fable.data.models.Box64Settings]), WINEDEBUG, …) and BOX64_PATH / BOX64_LD_LIBRARY_PATH.
  * stdout/stderr go to [WineRuntime.LAUNCH_LOG] in the container directory, and a reaper thread
  * appends `[fable] exit code N` when the process ends (what [WineRuntime.exitedCleanly] reads).
  */

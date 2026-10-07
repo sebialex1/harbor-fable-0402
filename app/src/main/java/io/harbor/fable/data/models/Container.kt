@@ -45,6 +45,8 @@ data class Container(
     val isFullscreen: Boolean = false,
     /** x86 translation layer: "box64" or "fex". */
     val translator: String = ContainerDefaults.TRANSLATOR,
+    /** Box64 preset and per-variable changes; passed to Wine as `BOX64_*` variables. */
+    val box64: Box64Settings = Box64Settings(),
 )
 
 data class ExeEntry(

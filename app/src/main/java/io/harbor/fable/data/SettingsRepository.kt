@@ -2,6 +2,7 @@ package io.harbor.fable.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import io.harbor.fable.data.models.Box64Preset
 import io.harbor.fable.data.models.ContainerDefaults
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +31,8 @@ data class AppSettings(
     val defaultResolution: String = ContainerDefaults.SCREEN_RESOLUTION,
     val defaultFullscreen: Boolean = false,
     val defaultTranslator: String = ContainerDefaults.TRANSLATOR,
+    /** Box64 preset new containers start with (Winlator's default is Compatibility). */
+    val defaultBox64Preset: Box64Preset = Box64Preset.DEFAULT,
     val vsync: Boolean = true,
     val framePacing: FramePacing = FramePacing.ADAPTIVE,
     val refreshCatalogOnLaunch: Boolean = true,
@@ -75,6 +78,9 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
             defaultResolution = prefs.getString(KEY_RESOLUTION, null) ?: defaults.defaultResolution,
             defaultFullscreen = prefs.getBoolean(KEY_FULLSCREEN, defaults.defaultFullscreen),
             defaultTranslator = prefs.getString(KEY_TRANSLATOR, null) ?: defaults.defaultTranslator,
+            defaultBox64Preset = prefs.getString(KEY_BOX64_PRESET, null)
+                ?.let { Box64Preset.fromId(it) }
+                ?: defaults.defaultBox64Preset,
             vsync = prefs.getBoolean(KEY_VSYNC, defaults.vsync),
             framePacing = prefs.getString(KEY_FRAME_PACING, null)
                 ?.let { name -> FramePacing.entries.firstOrNull { it.name == name } }
@@ -93,6 +99,7 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
             .putString(KEY_RESOLUTION, settings.defaultResolution)
             .putBoolean(KEY_FULLSCREEN, settings.defaultFullscreen)
             .putString(KEY_TRANSLATOR, settings.defaultTranslator)
+            .putString(KEY_BOX64_PRESET, settings.defaultBox64Preset.id)
             .putBoolean(KEY_VSYNC, settings.vsync)
             .putString(KEY_FRAME_PACING, settings.framePacing.name)
             .putBoolean(KEY_REFRESH_ON_LAUNCH, settings.refreshCatalogOnLaunch)
@@ -109,6 +116,7 @@ class SettingsRepository internal constructor(private val prefs: SharedPreferenc
         private const val KEY_RESOLUTION = "default_resolution"
         private const val KEY_FULLSCREEN = "default_fullscreen"
         private const val KEY_TRANSLATOR = "default_translator"
+        private const val KEY_BOX64_PRESET = "default_box64_preset"
         private const val KEY_VSYNC = "vsync"
         private const val KEY_FRAME_PACING = "frame_pacing"
         private const val KEY_REFRESH_ON_LAUNCH = "refresh_catalog_on_launch"

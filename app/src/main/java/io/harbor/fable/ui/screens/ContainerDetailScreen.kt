@@ -10,11 +10,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
+import io.harbor.fable.data.ContainerRepository
+import io.harbor.fable.data.models.Box64Options
+import io.harbor.fable.data.models.Box64Preset
+import io.harbor.fable.data.models.Box64Settings
 import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
@@ -75,6 +80,9 @@ fun ContainerDetailScreen(
         onFullscreenChange = { fullscreen ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(isFullscreen = fullscreen)) } }
         },
+        onBox64Change = { box64 ->
+            container?.let { fableUi.scope.launch { repository.update(it.copy(box64 = box64)) } }
+        },
         onAddExe = { showAddExe = true },
         onDelete = { showDeleteConfirm = true },
     )
@@ -113,10 +121,12 @@ internal fun ContainerDetailContent(
     onSelectResolution: (String) -> Unit,
     onSelectTranslator: (String) -> Unit,
     onFullscreenChange: (Boolean) -> Unit,
+    onBox64Change: (Box64Settings) -> Unit,
     onAddExe: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val appear = rememberEntrance()
+    var box64Expanded by rememberSaveable { mutableStateOf(false) }
 
     FableScreen(
         title = container?.name ?: "Container",
@@ -209,6 +219,28 @@ internal fun ContainerDetailContent(
             }
         }
 
+        // Box64 presets (Winlator's Box64PresetManager) and the individual BOX64_* switches. FEX
+        // containers don't run Box64, so the section is hidden for them.
+        if (!ContainerRepository.usesFex(container)) {
+            item(key = "box64-label") { SectionLabel("Box64", Modifier.animateItem().entrance(appear, 2)) }
+            item(key = "box64") {
+                Box64PresetCard(
+                    settings = container.box64,
+                    onChange = onBox64Change,
+                    modifier = Modifier.animateItem().entrance(appear, 2),
+                )
+            }
+            item(key = "box64-options") {
+                Box64OptionsSection(
+                    settings = container.box64,
+                    expanded = box64Expanded,
+                    onToggle = { box64Expanded = !box64Expanded },
+                    onChange = onBox64Change,
+                    modifier = Modifier.animateItem().entrance(appear, 2),
+                )
+            }
+        }
+
         item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().entrance(appear, 2)) }
         item(key = "apps") {
             FableCard(Modifier.animateItem().entrance(appear, 2)) {
@@ -235,6 +267,85 @@ internal fun ContainerDetailContent(
                     titleColor = FableError,
                     showChevron = false,
                     onClick = onDelete,
+                )
+            }
+        }
+    }
+}
+
+/** Preset picker, the rc-file switch and, when settings were changed, a way back to the preset. */
+@Composable
+private fun Box64PresetCard(
+    settings: Box64Settings,
+    onChange: (Box64Settings) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FableCard(modifier) {
+        OptionSelector(
+            label = "Preset",
+            options = Box64Preset.entries.map { SelectOption(it, it.label, it.description) },
+            selected = settings.preset,
+            onSelect = { preset -> onChange(settings.withPreset(preset)) },
+            hint = if (settings.isCustomized) "Choosing a preset replaces your ${settings.overrides.size} changed setting(s)" else null,
+        )
+        CardDivider()
+        ToggleRow(
+            title = "Use box64rc",
+            subtitle = "Per-game fixes from the Box64 package or .box64rc in the container",
+            checked = settings.useRcFile,
+            onCheckedChange = { onChange(settings.copy(useRcFile = it)) },
+        )
+        if (settings.isCustomized) {
+            CardDivider()
+            ListRow(
+                title = "Reset to ${settings.preset.label}",
+                subtitle = settings.overrides.keys.mapNotNull { Box64Options.option(it)?.label }.joinToString(", "),
+                showChevron = false,
+                onClick = { onChange(settings.withPreset(settings.preset)) },
+            )
+        }
+    }
+}
+
+/**
+ * Every BOX64_* variable Fable exposes, collapsed by default. Each row shows the effective value
+ * (the preset's, or the user's change); a change that matches the preset again is dropped.
+ */
+@Composable
+private fun Box64OptionsSection(
+    settings: Box64Settings,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onChange: (Box64Settings) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    CollapsibleSection(
+        title = "Advanced Box64 Settings",
+        expanded = expanded,
+        onToggle = onToggle,
+        modifier = modifier,
+        badge = { if (settings.isCustomized) Pill(text = "${settings.overrides.size} changed") },
+    ) {
+        Box64Options.all.forEachIndexed { index, option ->
+            if (index > 0) CardDivider()
+            val value = settings.value(option.key)
+            val presetValue = settings.preset.variables[option.key].orEmpty()
+            val changed = option.key in settings.overrides
+            if (option.isToggle) {
+                ToggleRow(
+                    title = option.label,
+                    subtitle = if (changed) "${option.description}. ${settings.preset.label}: ${option.labelFor(presetValue)}" else option.description,
+                    checked = value == "1",
+                    onCheckedChange = { on -> onChange(settings.with(option.key, if (on) "1" else "0")) },
+                )
+            } else {
+                OptionSelector(
+                    label = option.label,
+                    options = option.choices.map { SelectOption(it.value, it.label) },
+                    selected = value,
+                    onSelect = { choice -> onChange(settings.with(option.key, choice)) },
+                    hint = "${option.description}. ${settings.preset.label}: ${option.labelFor(presetValue)}" +
+                        if (changed) " (changed)" else "",
                 )
             }
         }
