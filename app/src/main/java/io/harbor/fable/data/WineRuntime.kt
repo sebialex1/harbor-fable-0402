@@ -111,6 +111,14 @@ internal class WineRuntime(
     fun wineBinary(containerDir: File): File? =
         WINE_BINARIES.map { File(containerDir, it) }.firstOrNull { it.isFile }
 
+    /** True when [installWine] set up a fresh prefix that hasn't been through `wineboot -u` yet. */
+    fun winebootPending(containerDir: File): Boolean = File(containerDir, WINEBOOT_PENDING).isFile
+
+    /** Records that `wineboot -u` ran for [containerDir], so it isn't repeated on every launch. */
+    fun markWinebootDone(containerDir: File) {
+        File(containerDir, WINEBOOT_PENDING).delete()
+    }
+
     /**
      * Extracts the bionic Wine package [archive] into [containerDir], replacing any previous Wine
      * tree, then unpacks its `prefixPack.txz` (a ready-made `.wine` prefix) into the same
@@ -121,6 +129,9 @@ internal class WineRuntime(
      * build (e.g. a glibc build imported by hand).
      */
     suspend fun installWine(archive: File, containerDir: File): InstalledWine = withContext(Dispatchers.IO) {
+        // A prefix without system.reg has never been set up; remember that before anything is
+        // extracted so wineboot -u can be scheduled for it below.
+        val freshPrefix = !File(containerDir, "system.reg").isFile
         File(containerDir, WINE_MARKER).delete()
         val profile = readWcpProfile(archive)
             ?: throw IOException("${archive.name} is not a Winlator Wine package (no profile.json)")
@@ -148,6 +159,18 @@ internal class WineRuntime(
         if (prefixArchive.isFile && !File(containerDir, "system.reg").isFile) {
             // prefixPack.txz holds `.wine/…`; strip it so drive_c and the registry land in the prefix.
             ArchiveExtractor.extract(prefixArchive, containerDir, stripComponents = 1, context = coroutineContext)
+        }
+        if (freshPrefix) {
+            // Winlator runs `wine wineboot -u` while setting up a prefix (WineUtils.java), which
+            // brings the prefixPack's registry and drive_c up to date with this Wine build and
+            // starts the prefix's services once. Fable never did. It can't run from here: Wine
+            // needs the launch environment (box64 + BOX64_*, WINEDLLPATH, the bundled
+            // FreeType/Fontconfig on LD_LIBRARY_PATH, FONTCONFIG_FILE, DISPLAY), and the display
+            // server that provides the native libraries only starts at launch. So mark the
+            // prefix and let ContainerRepository run wineboot -u right before the first launch,
+            // with exactly the environment that launch uses.
+            runCatching { File(containerDir, WINEBOOT_PENDING).writeText(buildName(archive)) }
+                .onFailure { Log.w(TAG, "Could not mark ${containerDir.name} for wineboot", it) }
         }
         val build = buildName(archive)
         writeAtomic(
@@ -372,6 +395,12 @@ internal class WineRuntime(
 
         /** Name of the file in the container directory that Wine/Box64/FEX output goes to. */
         const val LAUNCH_LOG = "fable-launch.log"
+
+        /** Output of the one-off `wineboot -u` that initialises a fresh prefix. */
+        const val WINEBOOT_LOG = "fable-wineboot.log"
+
+        /** Present while a freshly extracted prefix still needs `wineboot -u`. */
+        private const val WINEBOOT_PENDING = ".fable-wineboot-pending"
 
         /**
          * Directories (relative to the container) that can hold Wine's built-in PE DLLs, in the

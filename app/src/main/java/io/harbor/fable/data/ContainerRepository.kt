@@ -553,6 +553,13 @@ class ContainerRepository internal constructor(
         log.line("launcher: ${if (useNative) "native JNI fork/execve ($LAUNCHER_ENV=$LAUNCHER_NATIVE)" else "ProcessBuilder"}")
         log.section("Environment (Fable additions; the launcher also sets WINEPREFIX, HOME, TMPDIR, PATH, BOX64_*)")
         environment.forEach { log.line(it) }
+        // A freshly extracted prefix gets `wineboot -u` once, before the first program runs
+        // (Winlator's WineUtils does the same during prefix setup).
+        if (runtime.winebootPending(dir)) {
+            setStatus(container.id, ContainerStatus.CONFIGURING)
+            runWineboot(runtime, dir, wineBinary, translator, environment, driver, log)
+            setStatus(container.id, ContainerStatus.READY)
+        }
         log.section("Launch")
         val processLog = File(dir, WineRuntime.LAUNCH_LOG)
         val started: WineProcess = if (useNative) {
@@ -615,6 +622,81 @@ class ContainerRepository internal constructor(
         }
         markStarted(container.id, exe?.id, started, log, processLog, label, spawnedAt, screen)
         return LaunchResult.Started(pid)
+    }
+
+    /**
+     * Runs `<translator> <container>/bin/wine wineboot -u` for a prefix [WineRuntime.installWine]
+     * just unpacked, and waits for it (up to [WINEBOOT_TIMEOUT_MS]).
+     *
+     * Winlator runs `wine wineboot -u` while it sets up a prefix (WineUtils.java); Fable only
+     * unpacked prefixPack.txz, so the prefix was never updated for the installed Wine build and
+     * its services never started once. It uses the launch's own [environment] (WINEDLLPATH,
+     * WINELOADER/WINESERVER, BOX64_*, LD_LIBRARY_PATH, FONTCONFIG_FILE, DISPLAY), because without
+     * it wineboot fails the same way the launch did (kernel32.dll, status c0000135). Only the
+     * diagnostic WINEDEBUG is toned down: +loaddll,+module on wineboot's dozens of helper
+     * processes would bury the error lines. A failure is logged but never blocks the launch.
+     */
+    private suspend fun runWineboot(
+        runtime: WineRuntime,
+        dir: File,
+        wineBinary: File,
+        translator: ResolvedTranslator,
+        environment: List<String>,
+        driver: String?,
+        log: LaunchLog,
+    ) {
+        log.section("Prefix initialisation (wineboot -u)")
+        val winebootEnv = environment.map { if (it == "WINEDEBUG=$DIAGNOSTIC_WINEDEBUG") "WINEDEBUG=$WINEBOOT_WINEDEBUG" else it }
+        val winebootLog = File(dir, WineRuntime.WINEBOOT_LOG)
+        val outcome = withContext(Dispatchers.IO) {
+            WineProcessLauncher.launch(
+                WineProcessLauncher.Request(
+                    containerDir = dir,
+                    wine = wineBinary,
+                    translatorName = translator.name,
+                    translator = translator.executable,
+                    program = "wineboot",
+                    args = listOf("-u"),
+                    env = winebootEnv,
+                    driverPath = driver,
+                    processLogName = WineRuntime.WINEBOOT_LOG,
+                ),
+                log,
+            )
+        }
+        val started = when (outcome) {
+            is WineProcessLauncher.Outcome.Started -> outcome.process
+            is WineProcessLauncher.Outcome.Failed -> {
+                log.error("wineboot -u couldn't start: ${outcome.reason}; launching anyway")
+                log.attachTail(winebootLog, "wineboot output (${winebootLog.name})")
+                return
+            }
+        }
+        val process = started.process
+        val startedAt = System.nanoTime()
+        val finished = withContext(Dispatchers.IO) {
+            process?.waitFor(WINEBOOT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS) ?: false
+        }
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+        if (finished) {
+            val code = process?.exitValue()
+            if (code == 0) {
+                log.line("wineboot -u finished in ${elapsedMs}ms")
+                runtime.markWinebootDone(dir)
+            } else {
+                // Left pending so it's retried on the next launch once the cause is fixed.
+                log.error("wineboot -u exited with status $code after ${elapsedMs}ms; launching anyway")
+            }
+        } else {
+            // Don't stall every launch on a wineboot that hangs: give up on it for this prefix.
+            log.error("wineboot -u still running after ${WINEBOOT_TIMEOUT_MS}ms; stopped it and launching anyway")
+            started.destroy()
+            killPrefixProcesses(dir)
+            runtime.markWinebootDone(dir)
+        }
+        // Give the reaper a moment to append the exit line before the tail is copied.
+        delay(REAPER_GRACE_MS)
+        log.attachTail(winebootLog, "wineboot output (${winebootLog.name})")
     }
 
     /**
@@ -968,6 +1050,15 @@ class ContainerRepository internal constructor(
         private const val STARTUP_FAILURE_WINDOW_MS = 30_000L
         private const val STARTUP_POLL_MS = 400L
         private const val REAPER_GRACE_MS = 200L
+
+        /**
+         * How long the first-launch `wineboot -u` may take. Under Box64 it re-registers the
+         * built-in DLLs and starts services.exe/winedevice, which can take a minute or more.
+         */
+        private const val WINEBOOT_TIMEOUT_MS = 180_000L
+
+        /** Wine's default err output for wineboot, without the fixme noise. */
+        private const val WINEBOOT_WINEDEBUG = "fixme-all"
 
         /**
          * Container environment switch for the launcher: `FABLE_LAUNCHER=native` selects the old

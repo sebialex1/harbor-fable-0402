@@ -36,6 +36,11 @@ internal object WineProcessLauncher {
         /** `KEY=VALUE` pairs from the caller. PATH / LD_LIBRARY_PATH are prepended, others override. */
         val env: List<String>,
         val driverPath: String?,
+        /**
+         * File in [containerDir] stdout/stderr go to. Prefix initialisation (`wineboot -u`) uses its
+         * own file so its output isn't truncated away by the launch that follows it.
+         */
+        val processLogName: String = WineRuntime.LAUNCH_LOG,
     )
 
     sealed interface Outcome {
@@ -56,7 +61,7 @@ internal object WineProcessLauncher {
         val dir = request.containerDir
         if (!dir.isDirectory) return Outcome.Failed("Container path is not a directory")
         val containerPath = dir.absolutePath
-        val processLog = File(dir, WineRuntime.LAUNCH_LOG)
+        val processLog = File(dir, request.processLogName)
         // Truncate the process log first so even an early failure leaves a fresh, readable trail.
         runCatching { processLog.writeText("[fable] launcher: ProcessBuilder\n") }
             .onFailure { log.error("couldn't create ${processLog.absolutePath}", it) }
