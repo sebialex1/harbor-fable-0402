@@ -4,6 +4,9 @@ import androidx.compose.ui.graphics.Color
 
 // Monochrome OLED palette, modelled on the iOS dark system colours: a true-black canvas, grouped
 // surfaces one step up in grey, and white as the only emphasis. There are no hues in the UI.
+//
+// Phase 1 overhaul: added glass/translucency support, a blue accent for topbar notifications, and
+// gradient surface colours for depth that replaces the old opaque-only philosophy.
 
 /** True black canvas, so OLED pixels are off behind the content. */
 val FableBg = Color(0xFF000000)
@@ -13,9 +16,6 @@ val FableSurface = Color(0xFF1C1C1E)
 
 /** One step above a grouped surface: controls, chips and tiles on a card (iOS tertiary). */
 val FableSurfaceRaised = Color(0xFF2C2C2E)
-
-// --- Surfaces. Every surface is opaque: depth comes from a lighter grey, never from
-// translucency, blur or shadows.
 
 /** Pressed and selected state of a raised control. */
 val FableSurfaceHigh = Color(0xFF3A3A3C)
@@ -41,6 +41,13 @@ val FableAccent = Color(0xFFFFFFFF)
 val FableAccentLight = Color(0xFFE5E5EA)
 val FableOnAccent = Color(0xFF000000)
 
+/**
+ * Blue accent for topbar-integrated notifications and progress indicators.
+ * A muted, system-style blue that reads as informational without breaking the dark theme.
+ */
+val FableBlue = Color(0xFF4A9EFF)
+val FableBlueDim = Color(0xFF2E6BCC)
+
 /** Label colours (iOS label / secondaryLabel / tertiaryLabel on black). */
 val FableText = Color(0xFFFFFFFF)
 val FableTextDim = Color(0xFF8E8E93)
@@ -56,7 +63,35 @@ val FableWarn = Color(0xFFD1D1D6)
  */
 val FableError = FableText
 
-// Tab bar: a floating, opaque dark-grey pill over the black canvas.
-val TabBarBg = FableSurface
+// --- Glass surfaces: translucent overlays with optional blur for depth.
+// On API 31+ these get a real RenderEffect blur; on older versions the higher alpha compensates.
+
+/** Translucent panel fill for glass surfaces (drawn over content with blur). */
+val GlassSurface = Color(0xCC1C1C1E)
+val GlassSurfaceRaised = Color(0xCC2C2C2E)
+val GlassBorder = Color(0x33FFFFFF)
+
+/** Lighter glass for floating elements (topbar depth, notification overlays). */
+val GlassLight = Color(0x801C1C1E)
+
+/** Scrim behind glass overlays. */
+val GlassScrim = Color(0x99000000)
+
+// --- Gradient stops for depth and blending.
+
+/** Vertical gradient that fades from a surface colour to transparent, for tile backgrounds. */
+val GradientTopStop = Color(0x18FFFFFF)
+val GradientBottomStop = Color(0x00000000)
+
+/** White gradient for the play button's hollow glass effect. */
+val PlayGradientTop = Color(0x22FFFFFF)
+val PlayGradientBottom = Color(0x08FFFFFF)
+
+/** Blue gradient for notification text glow. */
+val NotifyGradientStart = Color(0x4D4A9EFF)
+val NotifyGradientEnd = Color(0x004A9EFF)
+
+// Tab bar: a floating, glass pill over the black canvas.
+val TabBarBg = GlassSurface
 val TabItemActive = FableText
 val TabItemIdle = FableTextDim
