@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -22,6 +23,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.animation.PathInterpolator
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
@@ -250,23 +252,38 @@ class DisplayActivity : Activity() {
         val panel = drawerPanel ?: return
         if (open == drawerOpen) return
         drawerOpen = open
+        // Slide distance: the panel's width plus its margin, once laid out; the screen's before.
+        val offscreen = (panel.width.takeIf { it > 0 }?.plus(dpPx(DRAWER_MARGIN_DP)) ?: resources.displayMetrics.widthPixels).toFloat()
+        scrim.animate().cancel()
+        panel.animate().cancel()
         if (open) {
             scrim.visibility = View.VISIBLE
             scrim.alpha = 0f
-            scrim.animate().alpha(1f).setDuration(DRAWER_ANIMATION_MS).start()
-            // Slide in from the right edge; the panel's width is known once it has been laid out,
-            // so start from its measured width or, before the first layout, the screen's.
-            val from = (panel.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels).toFloat()
-            panel.translationX = from
-            panel.animate().translationX(0f).setDuration(DRAWER_ANIMATION_MS).start()
+            scrim.animate().alpha(1f).setDuration(DRAWER_ANIMATION_MS).setInterpolator(DRAWER_EASE_OUT).start()
+            // Glides in from the right edge while it fades up and settles from a slight scale,
+            // like a glass sheet sliding over the game.
+            panel.translationX = offscreen
+            panel.alpha = 0.4f
+            panel.scaleX = 0.97f
+            panel.scaleY = 0.97f
+            panel.animate()
+                .translationX(0f).alpha(1f).scaleX(1f).scaleY(1f)
+                .setDuration(DRAWER_ANIMATION_MS)
+                .setInterpolator(DRAWER_EASE_OUT)
+                .start()
         } else {
-            val to = (panel.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels).toFloat()
-            panel.animate().translationX(to).setDuration(DRAWER_ANIMATION_MS).start()
-            scrim.animate().alpha(0f).setDuration(DRAWER_ANIMATION_MS)
+            panel.animate()
+                .translationX(offscreen).alpha(0.4f).scaleX(0.97f).scaleY(0.97f)
+                .setDuration(DRAWER_CLOSE_MS)
+                .setInterpolator(DRAWER_EASE_IN)
+                .start()
+            scrim.animate().alpha(0f).setDuration(DRAWER_CLOSE_MS).setInterpolator(DRAWER_EASE_IN)
                 .withEndAction { if (!drawerOpen) scrim.visibility = View.GONE }
                 .start()
         }
     }
+
+    private fun dpPx(v: Float): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun setControlsShown(shown: Boolean) {
         controlsOverlay?.visibility = if (shown) View.VISIBLE else View.GONE
@@ -305,61 +322,59 @@ class DisplayActivity : Activity() {
     }
 
     /**
-     * The side menu: a tap-to-close scrim over the whole screen with an opaque, rounded panel on
-     * the right edge, in the app's grouped-list idiom — a header, a section of switches and a
-     * section of actions, each on its own card. Hidden until Back opens it ([setDrawerOpen]).
+     * The side menu: a light tap-to-close scrim over the whole screen with a floating glass panel
+     * on the right — translucent so the game stays visible behind it, with a light-catching rim
+     * and no branding header. A compact close button sits at the top, then two short sections
+     * (Overlays, Wine) on glass cards, and a neutral glass Exit button pinned at the bottom.
+     * Hidden until Back opens it ([setDrawerOpen]).
+     *
+     * Touch handling is unchanged: while the menu is closed the scrim is GONE, so every touch
+     * reaches the X server view underneath; while it is open the scrim takes taps outside the
+     * panel (closing the menu) and the panel swallows its own, so nothing leaks into the game.
      */
     private fun createDrawer(): View {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
-        val sections = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
 
-            // Header: the app name and what Back does now.
-            addView(TextView(this@DisplayActivity).apply {
-                setTextColor(0xFFFFFFFF.toInt())
-                textSize = 22f
-                typeface = fableFont(R.font.inter_medium)
-                letterSpacing = -0.02f
-                text = "Fable"
-                setPadding(dp(4f), 0, dp(4f), 0)
-            })
+        // Top row: a small caption on the left, close on the right. No app name.
+        val topRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             addView(TextView(this@DisplayActivity).apply {
                 setTextColor(DRAWER_TEXT_DIM.toInt())
-                textSize = 13f
-                typeface = fableFont(R.font.inter_regular)
-                text = "Back closes this menu"
-                setPadding(dp(4f), dp(2f), dp(4f), 0)
-            })
+                textSize = 12f
+                typeface = fableFont(R.font.inter_medium)
+                letterSpacing = 0.06f
+                isAllCaps = true
+                text = "Menu"
+                setPadding(dp(4f), 0, 0, 0)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(FrameLayout(this@DisplayActivity).apply {
+                background = glassPill(DRAWER_BUTTON_FILL, DRAWER_BUTTON_PRESSED, cornerDp = 16f)
+                contentDescription = "Close menu"
+                isClickable = true
+                setOnClickListener { setDrawerOpen(false) }
+                addView(ImageView(this@DisplayActivity).apply {
+                    setImageDrawable(menuIcon(R.drawable.ic_menu_close, DRAWER_TEXT_SOFT.toInt()))
+                }, FrameLayout.LayoutParams(dp(16f), dp(16f), Gravity.CENTER))
+            }, LinearLayout.LayoutParams(dp(32f), dp(32f)))
+        }
 
-            addView(menuSectionLabel("Overlays"))
+        val sections = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(menuSectionLabel("Overlays", first = true))
             addView(menuCard(
-                menuSwitch("On-screen controls", R.drawable.ic_menu_gamepad, "D-pad and Enter / Esc / Space / Shift") { setControlsShown(it) },
+                menuSwitch("On-screen controls", R.drawable.ic_menu_gamepad, "D-pad and action keys", TONE_BLUE) { setControlsShown(it) },
                 menuDivider(),
-                Button(this@DisplayActivity).apply {
-                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    text = "On-screen keyboard"
-                    isAllCaps = false
-                    textSize = 16f
-                    typeface = fableFont(R.font.inter_regular)
-                    setTextColor(0xFFFFFFFF.toInt())
-                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                    minimumHeight = dp(MENU_ROW_MIN_DP)
-                    setPadding(dp(16f), dp(10f), dp(12f), dp(10f))
-                    background = menuRowBackground()
-                    setCompoundDrawablesRelative(menuIcon(R.drawable.ic_menu_keyboard), null, null, null)
-                    compoundDrawablePadding = dp(16f)
-                    contentDescription = "Open Android's keyboard to type into Wine"
-                    setOnClickListener {
-                        setDrawerOpen(false)
-                        showKeyboard()
-                    }
-                },
+                menuItem("Keyboard", R.drawable.ic_menu_keyboard, "Type into Wine", TONE_INDIGO) {
+                    setDrawerOpen(false)
+                    showKeyboard()
+                }.also { it.contentDescription = "Open Android's keyboard to type into Wine" },
             ))
 
             addView(menuSectionLabel("Wine"))
             addView(menuCard(
-                menuItem("Pause Wine", R.drawable.ic_menu_pause, "Freezes every process of the container") {
+                menuItem("Pause Wine", R.drawable.ic_menu_pause, "Freeze every process", TONE_TEAL) {
                     setWinePaused(!winePaused)
                     setDrawerOpen(false)
                 }.also {
@@ -370,50 +385,65 @@ class DisplayActivity : Activity() {
         }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16f), dp(24f), dp(16f), dp(16f))
-            background = GradientDrawable().apply {
-                setColor(DRAWER_BACKGROUND.toInt())
-                val r = DRAWER_RADIUS_DP * density
-                cornerRadii = floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r)
+            setPadding(dp(14f), dp(14f), dp(14f), dp(14f))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(DRAWER_GLASS_TOP.toInt(), DRAWER_GLASS_BOTTOM.toInt()),
+            ).apply {
+                cornerRadius = DRAWER_RADIUS_DP * density
+                setStroke(dp(1f).coerceAtLeast(1), DRAWER_RIM.toInt())
             }
+            elevation = 0f
             isClickable = true
+            addView(topRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             // Landscape screens can be shorter than the grouped rows. Keep Exit outside the
             // scrollable content so it never gets clipped or pushed off the bottom.
             addView(ScrollView(this@DisplayActivity).apply {
                 isFillViewport = false
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
                 addView(sections)
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            addView(Button(this@DisplayActivity).apply {
-                text = "Exit Container"
-                isAllCaps = false
-                textSize = 16f
-                typeface = fableFont(R.font.inter_medium)
-                setTextColor(0xFFFFFFFF.toInt())
-                background = GradientDrawable().apply {
-                    setColor(0xFFB53838.toInt())
-                    cornerRadius = MENU_CARD_RADIUS_DP * density
-                }
-                setCompoundDrawablesRelative(menuIcon(R.drawable.ic_menu_power), null, null, null)
-                compoundDrawablePadding = dp(10f)
-                setPadding(dp(16f), 0, dp(16f), 0)
+            // Exit: a neutral glass button, not a red slab. The power glyph and the words say
+            // what it does.
+            addView(LinearLayout(this@DisplayActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                background = glassPill(DRAWER_BUTTON_FILL, DRAWER_BUTTON_PRESSED, cornerDp = MENU_CARD_RADIUS_DP)
+                isClickable = true
                 contentDescription = "Exit container and stop all Wine processes"
                 // onDestroy calls stopContainerInBackground, including for paused Wine.
                 setOnClickListener { finish() }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48f)).apply {
+                addView(ImageView(this@DisplayActivity).apply {
+                    setImageDrawable(menuIcon(R.drawable.ic_menu_power, DRAWER_TEXT_SOFT.toInt()))
+                }, LinearLayout.LayoutParams(dp(18f), dp(18f)).apply { marginEnd = dp(8f) })
+                addView(TextView(this@DisplayActivity).apply {
+                    text = "Exit Container"
+                    textSize = 15f
+                    typeface = fableFont(R.font.inter_medium)
+                    setTextColor(0xFFFFFFFF.toInt())
+                })
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46f)).apply {
                 topMargin = dp(12f)
-                bottomMargin = dp(8f)
             })
-            addView(menuCard(menuItem("Close menu", R.drawable.ic_menu_close, null) { setDrawerOpen(false) }))
         }
         drawerPanel = panel
         return FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            setBackgroundColor(DRAWER_SCRIM.toInt())
+            // A soft edge shade rather than a flat dim: darker behind the panel, clear on the left,
+            // so the game stays readable while the menu is up.
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(DRAWER_SCRIM_CLEAR.toInt(), DRAWER_SCRIM.toInt()),
+            )
             visibility = View.GONE
             // Swallows touches so they don't reach the X server; a tap outside the panel closes.
             isClickable = true
             setOnClickListener { setDrawerOpen(false) }
-            addView(panel, FrameLayout.LayoutParams(dp(DRAWER_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
+            addView(panel, FrameLayout.LayoutParams(dp(DRAWER_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply {
+                val m = dp(DRAWER_MARGIN_DP)
+                setMargins(m, m, m, m)
+            })
         }
     }
 
@@ -432,8 +462,22 @@ class DisplayActivity : Activity() {
         }.getOrNull()
     }
 
+    /** Translucent glass fill with a hairline rim that brightens while pressed. */
+    private fun glassPill(fill: Long, pressedFill: Long, cornerDp: Float): Drawable {
+        val density = resources.displayMetrics.density
+        fun shape(color: Long) = GradientDrawable().apply {
+            setColor(color.toInt())
+            cornerRadius = cornerDp * density
+            setStroke((0.75f * density).toInt().coerceAtLeast(1), DRAWER_RIM.toInt())
+        }
+        return StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), shape(pressedFill))
+            addState(intArrayOf(), shape(fill))
+        }
+    }
+
     /** Small grey uppercase caption above a card, like the Compose `SectionLabel`. */
-    private fun menuSectionLabel(label: String): TextView {
+    private fun menuSectionLabel(label: String, first: Boolean = false): TextView {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
         return TextView(this).apply {
@@ -444,11 +488,11 @@ class DisplayActivity : Activity() {
             letterSpacing = 0.04f
             isAllCaps = true
             text = label
-            setPadding(dp(16f), dp(20f), dp(16f), dp(6f))
+            setPadding(dp(12f), dp(if (first) 14f else 18f), dp(12f), dp(6f))
         }
     }
 
-    /** A grouped card: an opaque raised surface with rounded corners holding the given rows. */
+    /** A grouped card: a translucent glass surface with rounded corners holding the given rows. */
     private fun menuCard(vararg rows: View): View {
         val density = resources.displayMetrics.density
         return LinearLayout(this).apply {
@@ -457,20 +501,24 @@ class DisplayActivity : Activity() {
             background = GradientDrawable().apply {
                 setColor(DRAWER_CARD.toInt())
                 cornerRadius = MENU_CARD_RADIUS_DP * density
+                setStroke((0.75f * density).toInt().coerceAtLeast(1), DRAWER_CARD_RIM.toInt())
             }
             clipToOutline = true
             rows.forEach { addView(it) }
         }
     }
 
-    /** Icon tile + title (+ subtitle) shared by action and switch rows. */
-    private fun menuRowContent(label: String, subtitle: String?, iconRes: Int): View {
+    /**
+     * Gradient icon tile + title (+ subtitle) shared by action and switch rows. [tone] is the
+     * tile's two gradient stops, the same deep tones the Compose tiles use (TileTone).
+     */
+    private fun menuRowContent(label: String, subtitle: String?, iconRes: Int, tone: IntArray): View {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
         val tile = FrameLayout(this).apply {
-            background = GradientDrawable().apply {
-                setColor(DRAWER_ICON_TILE.toInt())
-                cornerRadius = 7f * density
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, tone).apply {
+                cornerRadius = 9f * density
+                setStroke((0.75f * density).toInt().coerceAtLeast(1), DRAWER_RIM.toInt())
             }
             addView(
                 ImageView(this@DisplayActivity).apply {
@@ -485,7 +533,7 @@ class DisplayActivity : Activity() {
             addView(TextView(this@DisplayActivity).apply {
                 id = ROW_TITLE_ID
                 setTextColor(0xFFFFFFFF.toInt())
-                textSize = 16f
+                textSize = 15f
                 typeface = fableFont(R.font.inter_regular)
                 letterSpacing = -0.01f
                 maxLines = 1
@@ -512,7 +560,7 @@ class DisplayActivity : Activity() {
     }
 
     /** A menu row: icon tile + label, highlighted while pressed. Its title view has [ROW_TITLE_ID]. */
-    private fun menuItem(label: String, iconRes: Int, subtitle: String?, onClick: () -> Unit): View {
+    private fun menuItem(label: String, iconRes: Int, subtitle: String?, tone: IntArray, onClick: () -> Unit): View {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
         return LinearLayout(this).apply {
@@ -520,18 +568,22 @@ class DisplayActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(MENU_ROW_MIN_DP)
-            setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
+            setPadding(dp(10f), dp(8f), dp(12f), dp(8f))
             background = menuRowBackground()
-            addView(menuRowContent(label, subtitle, iconRes), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(menuRowContent(label, subtitle, iconRes, tone), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             setOnClickListener { onClick() }
         }
     }
 
     /** A menu row with a switch on the right; [onChange] gets the new state. */
-    private fun menuSwitch(label: String, iconRes: Int, subtitle: String?, onChange: (Boolean) -> Unit): View {
+    private fun menuSwitch(label: String, iconRes: Int, subtitle: String?, tone: IntArray, onChange: (Boolean) -> Unit): View {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
+        val checkedState = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
         val toggle = Switch(this).apply {
+            // Fable's switch colours: blue track when on, a faint glass track when off.
+            thumbTintList = ColorStateList(checkedState, intArrayOf(0xFFFFFFFF.toInt(), 0xFFD1D1D6.toInt()))
+            trackTintList = ColorStateList(checkedState, intArrayOf(SWITCH_ON_TRACK.toInt(), SWITCH_OFF_TRACK.toInt()))
             setOnCheckedChangeListener { _, checked -> onChange(checked) }
         }
         return LinearLayout(this).apply {
@@ -539,9 +591,9 @@ class DisplayActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(MENU_ROW_MIN_DP)
-            setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
+            setPadding(dp(10f), dp(8f), dp(8f), dp(8f))
             background = menuRowBackground()
-            addView(menuRowContent(label, subtitle, iconRes), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(menuRowContent(label, subtitle, iconRes, tone), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(toggle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8f) })
             // The whole row flips the switch, not just the small knob.
             setOnClickListener { toggle.toggle() }
@@ -554,7 +606,7 @@ class DisplayActivity : Activity() {
         fun dp(v: Float) = (v * density).toInt()
         return View(this).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (0.75f * density).toInt().coerceAtLeast(1)).apply {
-                setMargins(dp(12f + MENU_TILE_DP + 12f), 0, 0, 0)
+                setMargins(dp(10f + MENU_TILE_DP + 12f), 0, 0, 0)
             }
             setBackgroundColor(DRAWER_DIVIDER.toInt())
         }
@@ -966,23 +1018,40 @@ class DisplayActivity : Activity() {
         private const val TAP_TIMEOUT_MS = 200L
         private const val HUD_INTERVAL_MS = 1000L
 
-        // Side menu: Fable's grouped-list palette (ui/theme/Color.kt) over the game. The panel
-        // is near-black and opaque enough to read on any frame; cards are one grey up, icon
-        // tiles one more, like FableCard / IconTile.
-        private const val DRAWER_WIDTH_DP = 320f
-        private const val DRAWER_RADIUS_DP = 24f
-        private const val DRAWER_ANIMATION_MS = 180L
-        private const val DRAWER_BACKGROUND = 0xF2000000L
-        private const val DRAWER_SCRIM = 0x66000000L
-        private const val DRAWER_CARD = 0xFF1C1C1EL
-        private const val DRAWER_ICON_TILE = 0xFF2C2C2EL
-        private const val DRAWER_DIVIDER = 0xFF38383AL
+        // Side menu: Fable's glass language (ui/theme/Color.kt) over the game. The panel is a
+        // translucent dark sheet with a light rim, cards are a faint white wash on it, and the
+        // icon tiles carry the same deep gradient tones as the Compose tiles (TileTone).
+        private const val DRAWER_WIDTH_DP = 300f
+        private const val DRAWER_MARGIN_DP = 12f
+        private const val DRAWER_RADIUS_DP = 22f
+        private const val DRAWER_ANIMATION_MS = 260L
+        private const val DRAWER_CLOSE_MS = 200L
+        private val DRAWER_EASE_OUT = PathInterpolator(0.16f, 1f, 0.3f, 1f)
+        private val DRAWER_EASE_IN = PathInterpolator(0.7f, 0f, 0.84f, 0f)
+        private const val DRAWER_GLASS_TOP = 0xB81C1C1EL
+        private const val DRAWER_GLASS_BOTTOM = 0x99101012L
+        private const val DRAWER_RIM = 0x33FFFFFFL
+        private const val DRAWER_SCRIM = 0x59000000L
+        private const val DRAWER_SCRIM_CLEAR = 0x0D000000L
+        private const val DRAWER_CARD = 0x14FFFFFFL
+        private const val DRAWER_CARD_RIM = 0x14FFFFFFL
+        private const val DRAWER_BUTTON_FILL = 0x1FFFFFFFL
+        private const val DRAWER_BUTTON_PRESSED = 0x38FFFFFFL
+        private const val DRAWER_DIVIDER = 0x1FFFFFFFL
         private const val DRAWER_ROW_PRESSED = 0x1AFFFFFFL
-        private const val DRAWER_TEXT_DIM = 0xFF8E8E93L
-        private const val MENU_CARD_RADIUS_DP = 12f
-        private const val MENU_ROW_MIN_DP = 52f
-        private const val MENU_TILE_DP = 32f
-        private const val MENU_ICON_DP = 20f
+        private const val DRAWER_TEXT_DIM = 0xFF9A9AA0L
+        private const val DRAWER_TEXT_SOFT = 0xFFE5E5EAL
+        private const val SWITCH_ON_TRACK = 0xFF4A9EFFL
+        private const val SWITCH_OFF_TRACK = 0x4DFFFFFFL
+        private const val MENU_CARD_RADIUS_DP = 14f
+        private const val MENU_ROW_MIN_DP = 50f
+        private const val MENU_TILE_DP = 30f
+        private const val MENU_ICON_DP = 18f
+
+        /** Icon tile gradients, matching TileTone.Blue / Indigo / Teal. */
+        private val TONE_BLUE = intArrayOf(0xFF1D4E8F.toInt(), 0xFF0E2340.toInt())
+        private val TONE_INDIGO = intArrayOf(0xFF3B3A8C.toInt(), 0xFF17163D.toInt())
+        private val TONE_TEAL = intArrayOf(0xFF14636A.toInt(), 0xFF072A2E.toInt())
         private val ROW_TITLE_ID = View.generateViewId()
         private val ROW_ICON_ID = View.generateViewId()
 

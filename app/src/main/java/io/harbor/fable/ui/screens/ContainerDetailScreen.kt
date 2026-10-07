@@ -450,7 +450,8 @@ private enum class ContainerTab(val label: String, val icon: ImageVector, val ac
 private fun ContainerTabRow(selected: ContainerTab, onSelect: (ContainerTab) -> Unit) {
     TabRow(
         selectedTabIndex = selected.ordinal,
-        containerColor = FableBg,
+        // Transparent: the tabs sit on the top bar's glass (FableScreen draws one sheet for both).
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentColor = FableText,
         indicator = { positions ->
             positions.getOrNull(selected.ordinal)?.let { position ->

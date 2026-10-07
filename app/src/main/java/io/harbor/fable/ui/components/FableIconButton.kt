@@ -12,6 +12,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -22,7 +23,15 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import io.harbor.fable.ui.theme.ControlHeight
 import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.GlassBorder
+import io.harbor.fable.ui.theme.GlassSurfaceRaised
 import io.harbor.fable.ui.theme.Motion
+
+/**
+ * True inside floating chrome (the top bar and the large-title row): icon buttons there default
+ * to the glass material instead of the solid grey disc.
+ */
+val LocalGlassControls = staticCompositionLocalOf { false }
 
 /**
  * Circular icon button for top-bar actions (back, refresh, add) and compact inline actions such
@@ -41,6 +50,7 @@ fun FableIconButton(
     containerColor: Color = SurfaceLevel.Control.fill,
     bordered: Boolean = true,
     enabled: Boolean = true,
+    glass: Boolean = LocalGlassControls.current,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -49,7 +59,11 @@ fun FableIconButton(
         animationSpec = Motion.inPlace(Motion.Fast),
         label = "iconButtonPress",
     )
-    val surface = if (bordered) {
+    val surface = if (glass && containerColor == SurfaceLevel.Control.fill) {
+        // Floating chrome (top bar): a frosted disc with a light-catching rim, so the button
+        // reads as glass lifted off whatever scrolls beneath the bar.
+        Modifier.glassSurface(shape = CircleShape, fill = GlassSurfaceRaised, border = GlassBorder, blurRadius = 20)
+    } else if (bordered) {
         Modifier.solidSurface(shape = CircleShape, level = SurfaceLevel.Control, fill = containerColor)
     } else {
         Modifier

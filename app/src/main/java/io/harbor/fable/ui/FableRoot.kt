@@ -24,9 +24,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -159,7 +156,6 @@ private fun NavHostController.navigateToTab(route: String) {
  */
 @Composable
 fun FableRoot() {
-    val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val fableUi = remember {
         // Work launched from screens (container launches above all) must never take the app
@@ -172,7 +168,6 @@ fun FableRoot() {
         }
         FableUi(
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + guard),
-            snackbarHostState = snackbarHostState,
         ).also { holder[0] = it }
     }
     val app = remember(context) { FableApp.from(context) }
@@ -215,7 +210,7 @@ fun FableRoot() {
                 modifier = Modifier.fillMaxSize(),
             ) { setupComplete ->
                 if (setupComplete) {
-                    MainShell(snackbarHostState = snackbarHostState)
+                    MainShell()
                 } else {
                     SetupScreen(onFinished = { app.settingsRepository.markSetupComplete() })
                 }
@@ -224,9 +219,12 @@ fun FableRoot() {
     }
 }
 
-/** Tabs, tab bar, snackbar and sheets: the app once setup is out of the way. */
+/**
+ * Tabs, tab bar and sheets: the app once setup is out of the way. Messages are shown by each
+ * screen's top bar (see `FableTopBar`), not by a snackbar host here.
+ */
 @Composable
-private fun MainShell(snackbarHostState: SnackbarHostState) {
+private fun MainShell() {
     val navController = rememberNavController()
 
     // Refresh the catalog once per app launch when the user has it enabled.
@@ -346,35 +344,6 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
 
         if (showAddApp) {
             AddAppSheet(onDismiss = { showAddApp = false })
-        }
-
-        // Floats above the tab bar on tabs and near the bottom edge on pushed screens.
-        val snackbarBottom by animateDpAsState(
-            targetValue = if (isTopLevel) TabBarMetrics.Clearance else Dp.Hairline,
-            animationSpec = Motion.settle(),
-            label = "snackbarBottom",
-        )
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = snackbarBottom + Spacing.sm, start = ScreenPadding, end = ScreenPadding),
-        ) { data ->
-            val shape = RoundedCornerShape(ControlRadius + 2.dp)
-            // Always dismissible: the close icon (withDismissAction) or a tap anywhere on it.
-            Snackbar(
-                snackbarData = data,
-                modifier = Modifier
-                    .border(HairlineStroke, FableBorder, shape)
-                    .clip(shape)
-                    .clickable(onClick = { data.dismiss() }),
-                shape = shape,
-                containerColor = SurfaceLevel.Sheet.fill,
-                contentColor = FableText,
-                actionColor = FableAccent,
-                dismissActionContentColor = FableTextDim,
-            )
         }
 
         // Tab bar — only on top-level tabs. It rises with the pushed screen's pop and drops away

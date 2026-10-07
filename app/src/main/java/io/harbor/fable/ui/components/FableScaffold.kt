@@ -1,9 +1,21 @@
 package io.harbor.fable.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,45 +32,70 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.harbor.fable.ui.icons.FableIcons
+import io.harbor.fable.ui.theme.BarGlassBottom
 import io.harbor.fable.ui.theme.FableBg
+import io.harbor.fable.ui.theme.FableBlue
 import io.harbor.fable.ui.theme.FableDivider
 import io.harbor.fable.ui.theme.Motion
+import io.harbor.fable.ui.theme.NotifyWash
 import io.harbor.fable.ui.theme.ScreenPadding
 import io.harbor.fable.ui.theme.Spacing
+import io.harbor.fable.ui.theme.notificationEnter
+import io.harbor.fable.ui.theme.notificationExit
 import kotlinx.coroutines.flow.filter
-import io.harbor.fable.ui.icons.FableIcons
+import kotlin.math.abs
 
 /**
  * iOS-style navigation bar used by every screen.
  *
  * Tab screens show their title large at the top of the list (see [FableScreen]); the bar then
- * carries only the actions, and a compact centred title fades in once the large one scrolls
- * away ([showInlineTitle]). Pushed screens pass [onBack] and always show the inline title. The
- * bar is the black canvas itself; a hairline appears under it once content scrolls beneath.
+ * carries only the actions, and a compact centred title takes over once the large one scrolls
+ * away ([showInlineTitle]). Pushed screens pass [onBack] and always show the inline title.
+ *
+ * The bar is glass: at rest it is the black canvas itself, and as content scrolls beneath it a
+ * translucent [glassSurface] fades in (with a hairline under it), so rows stay faintly visible
+ * through the chrome. The back button and the action buttons are frosted glass discs
+ * ([LocalGlassControls]). Messages from [FableUi.showMessage] appear just under the bar
+ * ([TopBarNotice]) unless [showNotice] is false.
+ *
+ * [drawGlass] is false when the caller ([FableScreen]) draws one glass layer behind the bar and
+ * a pinned header together.
  */
 @Composable
 fun FableTopBar(
@@ -68,6 +105,8 @@ fun FableTopBar(
     showDivider: Boolean = false,
     showInlineTitle: Boolean = true,
     collapseFraction: (() -> Float)? = null,
+    drawGlass: Boolean = true,
+    showNotice: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val animatedDivider by animateFloatAsState(if (showDivider) 1f else 0f, Motion.inPlace(), label = "topBarDivider")
@@ -78,56 +117,85 @@ fun FableTopBar(
     val dividerAlpha: () -> Float = collapseFraction?.let { f -> { f() } } ?: { animatedDivider }
     val actionsAlpha: () -> Float = collapseFraction?.let { f -> { barActionsAlpha(f()) } } ?: { 1f }
     val titleShiftPx = with(LocalDensity.current) { InlineTitleShift.toPx() }
-    Column(
-        modifier
-            .fillMaxWidth()
-            .background(FableBg)
-            .statusBarsPadding(),
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = 52.dp)
-                .padding(horizontal = ScreenPadding, vertical = Spacing.sm),
-            contentAlignment = Alignment.Center,
+
+    Column(modifier.fillMaxWidth()) {
+        GlassChrome(
+            glassAlpha = if (drawGlass) dividerAlpha else ({ 0f }),
+            dividerAlpha = if (drawGlass) dividerAlpha else ({ 0f }),
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .padding(horizontal = 96.dp)
-                    .graphicsLayer {
-                        val a = titleAlpha()
-                        alpha = a
-                        // Rises into place as it fades in, like the iOS hand-over.
-                        translationY = (1f - a) * titleShiftPx
-                    },
-            )
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .heightIn(min = TopBarHeight)
+                    .padding(horizontal = ScreenPadding, vertical = Spacing.sm),
+                contentAlignment = Alignment.Center,
             ) {
-                if (onBack != null) {
-                    FableIconButton(
-                        icon = FableIcons.Back,
-                        contentDescription = "Back",
-                        onClick = onBack,
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                Row(
-                    modifier = Modifier.graphicsLayer { alpha = actionsAlpha() },
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                    content = actions,
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .padding(horizontal = 96.dp)
+                        .graphicsLayer {
+                            val a = titleAlpha()
+                            alpha = a
+                            // Rises into place as it fades in, like the iOS hand-over.
+                            translationY = (1f - a) * titleShiftPx
+                        },
                 )
+                CompositionLocalProvider(LocalGlassControls provides true) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (onBack != null) {
+                            FableIconButton(
+                                icon = FableIcons.Back,
+                                contentDescription = "Back",
+                                onClick = onBack,
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Row(
+                            modifier = Modifier.graphicsLayer { alpha = actionsAlpha() },
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                            content = actions,
+                        )
+                    }
+                }
             }
         }
+        if (showNotice) TopBarNotice()
+    }
+}
+
+/**
+ * The bar's material: a [glassSurface] layer whose opacity follows [glassAlpha] (0 at rest, so
+ * the bar is the canvas; 1 once content is beneath it) and a hairline along the bottom edge.
+ */
+@Composable
+private fun GlassChrome(
+    glassAlpha: () -> Float,
+    dividerAlpha: () -> Float,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    // Rows scrolled beneath the bar must not be tappable through it.
+    Box(modifier.fillMaxWidth().pointerInput(Unit) { detectTapGestures { } }) {
         Box(
             Modifier
+                .matchParentSize()
+                .graphicsLayer { alpha = glassAlpha() }
+                .glassSurface(shape = RectangleShape, fill = BarGlassBottom, border = null, blurRadius = 32),
+        )
+        content()
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(0.5.dp)
                 .graphicsLayer { alpha = dividerAlpha() }
@@ -137,10 +205,109 @@ fun FableTopBar(
 }
 
 /**
- * Standard screen layout: the black canvas, [FableTopBar] and a lazy list with 16dp margins.
+ * The top bar's message line: [FableUi.notice] fades and slides down out of the bar in
+ * [FableBlue], with no card behind it — only a soft wash continuing the bar's glass so the text
+ * stays legible over rows, and a thin blue glint that grows out from the bar's centre.
+ *
+ * Drag it up (or tap it) to dismiss; a short drag springs back. The space it takes morphs
+ * open and closed with the text, so nothing below jumps.
+ */
+@Composable
+fun TopBarNotice(modifier: Modifier = Modifier) {
+    val ui = LocalFableUi.current
+    AnimatedContent(
+        targetState = ui.notice,
+        transitionSpec = {
+            notificationEnter<FableNotice?>()(this) togetherWith notificationExit<FableNotice?>()(this) using
+                SizeTransform(clip = false) { _, _ -> Motion.morph() }
+        },
+        contentKey = { it?.id },
+        label = "topBarNotice",
+        modifier = modifier.fillMaxWidth(),
+    ) { notice ->
+        if (notice == null) {
+            Spacer(Modifier.fillMaxWidth().height(0.dp))
+        } else {
+            NoticeLine(notice = notice, onDismiss = { ui.dismissNotice(notice.id) })
+        }
+    }
+}
+
+@Composable
+private fun NoticeLine(notice: FableNotice, onDismiss: () -> Unit) {
+    val density = LocalDensity.current
+    val dismissPx = with(density) { NoticeDismissDistance.toPx() }
+    val stretchPx = with(density) { NoticeStretch.toPx() }
+    var offset by remember(notice.id) { mutableFloatStateOf(0f) }
+    // The glint under the bar grows from the centre as the text arrives.
+    val glint = remember(notice.id) { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(notice.id) { glint.animateTo(1f, Motion.morph(Motion.Slow)) }
+
+    val dragState = rememberDraggableState { delta ->
+        // Upwards follows the finger; downwards gives a little, like a rubber band.
+        val next = offset + if (offset + delta > 0f) delta * 0.25f else delta
+        offset = next.coerceIn(-dismissPx * 1.5f, stretchPx)
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                translationY = offset
+                alpha = (1f - abs(offset.coerceAtMost(0f)) / dismissPx).coerceIn(0f, 1f)
+            }
+            .draggable(
+                state = dragState,
+                orientation = Orientation.Vertical,
+                onDragStopped = { velocity ->
+                    if (offset < -dismissPx * 0.35f || velocity < -NoticeFlingVelocity) {
+                        animate(offset, -dismissPx * 1.5f, animationSpec = Motion.slideOutToTop()) { v, _ -> offset = v }
+                        onDismiss()
+                    } else {
+                        animate(offset, 0f, animationSpec = Motion.dragSettle()) { v, _ -> offset = v }
+                    }
+                },
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            )
+            .drawBehind {
+                // Continues the bar's glass downwards and dissolves into the content.
+                drawRect(Brush.verticalGradient(listOf(Color(0xD9000000), NotifyWash, Color.Transparent)))
+                val w = size.width * 0.55f * glint.value
+                if (w > 0f) {
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            listOf(Color.Transparent, FableBlue.copy(alpha = 0.9f), Color.Transparent),
+                            startX = (size.width - w) / 2f,
+                            endX = (size.width + w) / 2f,
+                        ),
+                        topLeft = Offset((size.width - w) / 2f, 0f),
+                        size = Size(w, 1.dp.toPx()),
+                    )
+                }
+            }
+            .padding(horizontal = ScreenPadding * 2, vertical = Spacing.md),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = notice.message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = FableBlue,
+            textAlign = TextAlign.Center,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Standard screen layout: the black canvas, a glass [FableTopBar] and a lazy list with 16dp
+ * margins that scrolls *beneath* the bar, so the chrome has something to frost.
  *
  * Tab screens (no [onBack]) open with a large title as the first list item, which scrolls away
- * under the bar while the inline title fades in, as in iOS. [subtitle], when given, sits under
+ * under the bar while the inline title takes over, as in iOS. [subtitle], when given, sits under
  * the large title in grey.
  *
  * Bottom padding always includes the navigation-bar inset plus [LocalTabBarClearance], so
@@ -148,8 +315,8 @@ fun FableTopBar(
  * use `SectionLabel` to start a new group. Give items a stable `key` and apply
  * `Modifier.animateItem()` so insertions, removals and reordering animate.
  *
- * [header] is pinned between the bar and the list (a tab row); it draws its own bottom edge, so
- * the bar's scroll hairline stays off.
+ * [header] is pinned under the bar on the same glass (a tab row); it draws its own bottom edge,
+ * so the bar's scroll hairline stays off.
  */
 @Composable
 fun FableScreen(
@@ -163,6 +330,7 @@ fun FableScreen(
     content: LazyListScope.() -> Unit,
 ) {
     val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomPadding = LocalTabBarClearance.current + navigationBottom + Spacing.lg
     val largeTitle = onBack == null
     val density = LocalDensity.current
@@ -188,6 +356,9 @@ fun FableScreen(
             listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset >= collapsePx * ActionsHandOver
         }
     }
+    // Glass for pushed screens fades in on the first scroll; tab screens follow the collapse.
+    val animatedGlass by animateFloatAsState(if (scrolled) 1f else 0f, Motion.inPlace(), label = "chromeGlass")
+    val glassAlpha: () -> Float = if (largeTitle) collapse else ({ animatedGlass })
 
     // Like iOS, a scroll that stops part-way through the collapse settles to whichever end is
     // closer, so the screen never rests with a half-faded title.
@@ -209,103 +380,161 @@ fun FableScreen(
         }
     }
 
+    // Height of the bar (+ header) the list scrolls beneath; estimated until first measured.
+    var chromePx by remember { mutableIntStateOf(0) }
+    val chromeHeight = if (chromePx > 0) {
+        with(density) { chromePx.toDp() }
+    } else {
+        statusTop + TopBarHeight + Spacing.sm * 2 + if (header != null) HeaderEstimate else 0.dp
+    }
+
     Box(
         modifier
             .fillMaxSize()
             .background(FableBg),
     ) {
-        Column(
+        Box(
             Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         ) {
-            // Tab screens carry their actions on the large-title row, vertically centred on the
-            // title, so the + lines up with "Containers" instead of floating above it. Once the
-            // large title scrolls away the actions move up into the compact bar.
-            val actionsInBar = !largeTitle || pastLargeTitle
-            FableTopBar(
-                title = title,
-                onBack = onBack,
-                showDivider = scrolled && header == null,
-                showInlineTitle = actionsInBar,
-                collapseFraction = if (largeTitle) collapse else null,
-                actions = if (actionsInBar) actions else ({}),
-            )
-            header?.invoke()
             LazyColumn(
                 state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = ScreenPadding,
                     end = ScreenPadding,
                     // Breathing room so the first section never sits glued to the bar.
-                    top = if (largeTitle) 0.dp else Spacing.md,
+                    top = chromeHeight + if (largeTitle) 0.dp else Spacing.md,
                     bottom = bottomPadding,
                 ),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
                 if (largeTitle || !subtitle.isNullOrBlank()) {
                     item(key = LargeTitleKey) {
-                        Column(Modifier.fillMaxWidth().padding(bottom = Spacing.xs)) {
-                            if (largeTitle) {
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(min = LargeTitleRowHeight),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = title,
-                                        style = MaterialTheme.typography.headlineLarge,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .graphicsLayer {
-                                                val f = collapse()
-                                                // Shrinks from its leading edge, trails the scroll
-                                                // a little (parallax) and fades out as the inline
-                                                // title fades in.
-                                                transformOrigin = LargeTitleOrigin
-                                                val scale = 1f - LargeTitleShrink * f
-                                                scaleX = scale
-                                                scaleY = scale
-                                                translationY = f * collapsePx * LargeTitleParallax
-                                                alpha = largeTitleAlpha(f)
-                                            },
-                                    )
-                                    if (!pastLargeTitle) {
-                                        Row(
-                                            modifier = Modifier.graphicsLayer { alpha = rowActionsAlpha(collapse()) },
-                                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            content = actions,
-                                        )
-                                    }
-                                }
-                            }
-                            if (!subtitle.isNullOrBlank()) {
-                                Text(
-                                    subtitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    modifier = if (largeTitle) {
-                                        Modifier.graphicsLayer { alpha = largeTitleAlpha(collapse()) }
-                                    } else {
-                                        Modifier
-                                    },
-                                )
-                            }
-                        }
+                        LargeTitleBlock(
+                            title = title,
+                            subtitle = subtitle,
+                            largeTitle = largeTitle,
+                            collapse = collapse,
+                            collapsePx = collapsePx,
+                            showRowActions = !pastLargeTitle,
+                            actions = actions,
+                        )
                     }
                 }
                 content()
             }
+
+            // Bar + pinned header on one sheet of glass, then the message line under both.
+            Column(Modifier.fillMaxWidth()) {
+                // Tab screens carry their actions on the large-title row, vertically centred on
+                // the title, so the + lines up with "Containers" instead of floating above it.
+                // Once the large title scrolls away the actions move up into the compact bar.
+                val actionsInBar = !largeTitle || pastLargeTitle
+                GlassChrome(
+                    glassAlpha = glassAlpha,
+                    dividerAlpha = if (header == null) glassAlpha else ({ 0f }),
+                    modifier = Modifier.onSizeChanged { chromePx = it.height },
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        FableTopBar(
+                            title = title,
+                            onBack = onBack,
+                            showInlineTitle = actionsInBar,
+                            collapseFraction = if (largeTitle) collapse else null,
+                            drawGlass = false,
+                            showNotice = false,
+                            actions = if (actionsInBar) actions else ({}),
+                        )
+                        header?.invoke()
+                    }
+                }
+                TopBarNotice()
+            }
         }
     }
 }
+
+/** The large title (and subtitle) that opens a tab screen's list, with its own action row. */
+@Composable
+private fun LargeTitleBlock(
+    title: String,
+    subtitle: String?,
+    largeTitle: Boolean,
+    collapse: () -> Float,
+    collapsePx: Float,
+    showRowActions: Boolean,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(bottom = Spacing.xs)) {
+        if (largeTitle) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = LargeTitleRowHeight),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .graphicsLayer {
+                            val f = collapse()
+                            // Shrinks from its leading edge, trails the scroll a little
+                            // (parallax) and fades out as the inline title fades in.
+                            transformOrigin = LargeTitleOrigin
+                            val scale = 1f - LargeTitleShrink * f
+                            scaleX = scale
+                            scaleY = scale
+                            translationY = f * collapsePx * LargeTitleParallax
+                            alpha = largeTitleAlpha(f)
+                        },
+                )
+                if (showRowActions) {
+                    CompositionLocalProvider(LocalGlassControls provides true) {
+                        Row(
+                            modifier = Modifier.graphicsLayer { alpha = rowActionsAlpha(collapse()) },
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                            content = actions,
+                        )
+                    }
+                }
+            }
+        }
+        if (!subtitle.isNullOrBlank()) {
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                modifier = if (largeTitle) {
+                    Modifier.graphicsLayer { alpha = largeTitleAlpha(collapse()) }
+                } else {
+                    Modifier
+                },
+            )
+        }
+    }
+}
+
+/** Height of the bar's content row (title and icon buttons), above the status bar. */
+private val TopBarHeight = 52.dp
+
+/** First-frame guess for a pinned header (a tab row) before it has been measured. */
+private val HeaderEstimate = 48.dp
+
+/** How far a notice must be dragged up before it is dismissed; past it, it fades fully. */
+private val NoticeDismissDistance = 56.dp
+
+/** How far a notice gives when pulled down. */
+private val NoticeStretch = 16.dp
+
+/** Upward fling speed (px/s) that dismisses a notice regardless of distance. */
+private const val NoticeFlingVelocity = 900f
 
 /** Minimum height of the large-title row, so title and icon buttons share one centre line. */
 private val LargeTitleRowHeight = 44.dp

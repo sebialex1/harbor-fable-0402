@@ -95,3 +95,29 @@ val NotifyGradientEnd = Color(0x004A9EFF)
 val TabBarBg = GlassSurface
 val TabItemActive = FableText
 val TabItemIdle = FableTextDim
+
+// --- Phase 2+: frost, chrome glass and tile tones.
+
+/** Soft light pooled inside glass surfaces (see `Modifier.glassSurface`). */
+val GlassFrost = Color(0x14FFFFFF)
+
+/** Top-bar glass once content scrolls beneath it: near-black at the top, more see-through below. */
+val BarGlassTop = Color(0xF2000000)
+val BarGlassBottom = Color(0xC70B0B0D)
+
+/** Dim blue wash behind topbar notifications so the text stays legible over content. */
+val NotifyWash = Color(0x1A4A9EFF)
+
+/**
+ * Gradient tones that give tiles personality without turning the UI into a rainbow: every tone
+ * is a deep, desaturated two-stop gradient that sits quietly on black, with the glyph in a
+ * light tint of the same hue. Each tone pairs (start, end, glyph).
+ */
+enum class TileTone(val start: Color, val end: Color, val glyph: Color) {
+    Blue(Color(0xFF1D4E8F), Color(0xFF0E2340), Color(0xFFA9CDFF)),
+    Indigo(Color(0xFF3B3A8C), Color(0xFF17163D), Color(0xFFC3C1FF)),
+    Teal(Color(0xFF14636A), Color(0xFF072A2E), Color(0xFF9DE3E8)),
+    Violet(Color(0xFF5B2F86), Color(0xFF241237), Color(0xFFDCC2FF)),
+    Amber(Color(0xFF7A4A12), Color(0xFF2E1B06), Color(0xFFFFD49A)),
+    Graphite(Color(0xFF3A3A3F), Color(0xFF161618), Color(0xFFE5E5EA)),
+}
