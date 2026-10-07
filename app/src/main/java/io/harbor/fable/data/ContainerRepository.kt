@@ -328,6 +328,11 @@ class ContainerRepository internal constructor(
         return a.equals(b, ignoreCase = contentUri)
     }
 
+    /**
+     * Removes the shortcut [id]; the program's files are left alone. When it was the
+     * container's primary app, the next user app (if any) takes over. The icon file Fable
+     * extracted for it is deleted unless another entry still shows it.
+     */
     suspend fun removeExe(id: String): Boolean = mutex.withLock {
         withContext(Dispatchers.IO) {
             val removed = exesById.remove(id) ?: return@withContext false
@@ -340,6 +345,15 @@ class ContainerRepository internal constructor(
                 )
             }
             persistLocked()
+            removed.icon?.let { icon ->
+                if (exesById.values.none { it.icon == icon }) {
+                    val file = File(icon)
+                    // Only Fable's own extracted icons (ExeIcons.save) are ours to delete.
+                    if (file.parentFile?.name == "exe-icons" && !file.delete() && file.exists()) {
+                        Log.w(TAG, "Couldn't delete icon $icon")
+                    }
+                }
+            }
             true
         }
     }

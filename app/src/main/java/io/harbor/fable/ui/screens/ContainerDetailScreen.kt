@@ -47,6 +47,7 @@ import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.ui.components.*
+import io.harbor.fable.ui.theme.ControlHeight
 import io.harbor.fable.ui.theme.ControlRadiusCompact
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableBg
@@ -76,6 +77,8 @@ fun ContainerDetailScreen(
 
     var showAddExe by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    // The app whose trash button was tapped, while its confirmation is up.
+    var exeToRemove by remember { mutableStateOf<ExeEntry?>(null) }
     // Downloaded DXVK builds, re-read whenever the asset list changes (a download finished).
     val assetEntries by app.assetRepository.assets.collectAsStateWithLifecycle()
     var dxvkBuilds by remember { mutableStateOf<List<ComponentBuild>>(emptyList()) }
@@ -113,6 +116,7 @@ fun ContainerDetailScreen(
                 fableUi.showMessage("${exe.name} set as primary")
             }
         },
+        onRemoveExe = { exe -> exeToRemove = exe },
         onSelectResolution = { res ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(screenResolution = res)) } }
         },
@@ -156,6 +160,28 @@ fun ContainerDetailScreen(
             onDismiss = { showDeleteConfirm = false },
         )
     }
+
+    exeToRemove?.let { exe ->
+        // Only the shortcut goes; the program's files stay where they are. removeExe() hands
+        // the primary slot to the next app when the primary one is removed.
+        val wasPrimary = container?.exePath == exe.path
+        ConfirmDialog(
+            title = "Remove app?",
+            message = buildString {
+                append("\"${exe.name}\" will be removed from this container. Its files are not deleted.")
+                if (wasPrimary) append(" Another app becomes the primary one, if there is any.")
+            },
+            confirmLabel = "Remove",
+            destructive = true,
+            onConfirm = {
+                exeToRemove = null
+                fableUi.scope.launch {
+                    if (repository.removeExe(exe.id)) fableUi.showMessage("${exe.name} removed")
+                }
+            },
+            onDismiss = { exeToRemove = null },
+        )
+    }
 }
 
 /**
@@ -175,6 +201,7 @@ internal fun ContainerDetailContent(
     onLaunchTool: (ExeEntry) -> Unit,
     onLaunchDesktop: () -> Unit,
     onSetPrimary: (ExeEntry) -> Unit,
+    onRemoveExe: (ExeEntry) -> Unit,
     onSelectResolution: (String) -> Unit,
     onSelectTranslator: (String) -> Unit,
     onSelectDxvk: (String?) -> Unit,
@@ -265,6 +292,18 @@ internal fun ContainerDetailContent(
                                     // app, so a second launch control on every row was
                                     // redundant. "Primary" marks what will launch.
                                     onClick = { onSetPrimary(exe) },
+                                    // The only way to take an app off a container; a
+                                    // confirmation follows (the files themselves stay).
+                                    trailing = {
+                                        FableIconButton(
+                                            icon = FableIcons.Trash,
+                                            contentDescription = "Remove ${exe.name}",
+                                            tint = FableTextDim,
+                                            bordered = false,
+                                            size = ControlHeight.Compact,
+                                            onClick = { onRemoveExe(exe) },
+                                        )
+                                    },
                                 )
                             }
                         }
