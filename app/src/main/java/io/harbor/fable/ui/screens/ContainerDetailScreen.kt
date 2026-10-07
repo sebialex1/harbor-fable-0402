@@ -52,7 +52,11 @@ fun ContainerDetailScreen(
     // Downloaded DXVK builds, re-read whenever the asset list changes (a download finished).
     val assetEntries by app.assetRepository.assets.collectAsStateWithLifecycle()
     var dxvkBuilds by remember { mutableStateOf<List<ComponentBuild>>(emptyList()) }
-    LaunchedEffect(assetEntries) { dxvkBuilds = repository.availableDxvkBuilds() }
+    var vkd3dBuilds by remember { mutableStateOf<List<ComponentBuild>>(emptyList()) }
+    LaunchedEffect(assetEntries) {
+        dxvkBuilds = repository.availableDxvkBuilds()
+        vkd3dBuilds = repository.availableVkd3dBuilds()
+    }
 
     // Launching can take a while on first use, and a delete must finish even after the screen
     // is gone, so both run on the app-level scope.
@@ -67,6 +71,7 @@ fun ContainerDetailScreen(
         exes = containerExes,
         unavailableTools = containerExes.filter { it.isTool && !repository.toolAvailable(it) }.map { it.id }.toSet(),
         dxvkBuilds = dxvkBuilds,
+        vkd3dBuilds = vkd3dBuilds,
         onBack = onBack,
         onLaunchPrimary = { launchExe(null) },
         onLaunchTool = { tool -> launchExe(tool.id) },
@@ -89,6 +94,9 @@ fun ContainerDetailScreen(
         },
         onSelectDxvk = { dxvk ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(dxvkVersion = dxvk)) } }
+        },
+        onSelectVkd3d = { vkd3d ->
+            container?.let { fableUi.scope.launch { repository.update(it.copy(vkd3dVersion = vkd3d)) } }
         },
         onFullscreenChange = { fullscreen ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(isFullscreen = fullscreen)) } }
@@ -128,6 +136,7 @@ internal fun ContainerDetailContent(
     container: Container?,
     exes: List<ExeEntry>,
     dxvkBuilds: List<ComponentBuild>,
+    vkd3dBuilds: List<ComponentBuild>,
     onBack: () -> Unit,
     onLaunchPrimary: () -> Unit,
     onLaunchTool: (ExeEntry) -> Unit,
@@ -136,6 +145,7 @@ internal fun ContainerDetailContent(
     onSelectResolution: (String) -> Unit,
     onSelectTranslator: (String) -> Unit,
     onSelectDxvk: (String?) -> Unit,
+    onSelectVkd3d: (String?) -> Unit,
     onFullscreenChange: (Boolean) -> Unit,
     onBox64Change: (Box64Settings) -> Unit,
     onAddExe: () -> Unit,
@@ -217,6 +227,15 @@ internal fun ContainerDetailContent(
                     selected = container.dxvkVersion,
                     onSelect = onSelectDxvk,
                     hint = "Direct3D 8-11 through Vulkan. Applied on the next launch",
+                )
+                CardDivider()
+                // d3d12.dll / d3d12core.dll next to DXVK (DxWrappers); off = Wine's builtin d3d12.
+                OptionSelector(
+                    label = "VKD3D-Proton",
+                    options = vkd3dOptions(vkd3dBuilds),
+                    selected = container.vkd3dVersion,
+                    onSelect = onSelectVkd3d,
+                    hint = "Direct3D 12 through Vulkan. Applied on the next launch",
                 )
                 CardDivider()
                 OptionSelector(
@@ -403,6 +422,13 @@ private fun Box64OptionsSection(
             }
         }
     }
+}
+
+/** VKD3D-Proton choices: the newest download (null), each downloaded build, or off (Wine's d3d12). */
+private fun vkd3dOptions(builds: List<ComponentBuild>): List<SelectOption<String?>> = buildList {
+    add(SelectOption(null, "Newest", builds.firstOrNull()?.label ?: "None downloaded yet (Assets)"))
+    builds.forEach { add(SelectOption(it.id, it.label, it.archive.name)) }
+    add(SelectOption(ContainerDefaults.VKD3D_OFF, "Off", "Wine's builtin d3d12"))
 }
 
 /** DXVK choices: the newest download (null), each downloaded build, or off (WineD3D). */

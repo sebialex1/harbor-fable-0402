@@ -19,7 +19,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 
 /**
- * The packages setup knows about. The four [required] ones are needed before anything can run;
+ * The packages setup knows about. The [required] ones are needed before anything can run (and
+ * VKD3D-Proton before a Direct3D 12 game can);
  * FEX is an optional alternative to Box64 that containers can opt into, so it is tracked (the
  * Assets tab can show whether a build exists) but never blocks setup or is auto-downloaded.
  */
@@ -28,6 +29,7 @@ enum class RecommendedKind(val label: String, val required: Boolean = true) {
     BOX64("Box64"),
     DRIVER("RADV Xclipse"),
     DXVK("DXVK"),
+    VKD3D("VKD3D-Proton"),
     FEX("FEX", required = false),
 }
 
@@ -154,8 +156,8 @@ class SetupManager internal constructor(
     }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), SetupState())
 
     /**
-     * Refreshes the catalog, then downloads the latest bionic Wine (.wcp), Box64, RADV Xclipse and DXVK
-     * packages that are not on disk yet. The driver is installed as the active driver as soon as
+     * Refreshes the catalog, then downloads the latest bionic Wine (.wcp), Box64, RADV Xclipse, DXVK
+     * and VKD3D-Proton packages that are not on disk yet. The driver is installed as the active driver as soon as
      * its download completes.
      */
     suspend fun installRecommended(): SetupResult {
@@ -242,13 +244,18 @@ class SetupManager internal constructor(
     }
 
     /**
-     * "Installed" means usable: a package on disk for Wine, Box64 and DXVK, and an extracted,
-     * active driver for the graphics driver (a downloaded zip alone is not enough).
+     * "Installed" means usable: a package on disk for Wine, Box64, DXVK and VKD3D-Proton, and an
+     * extracted, active driver for the graphics driver (a downloaded zip alone is not enough).
+     * VKD3D-Proton packages downloaded before it had its own type (found by name among the DXVK
+     * and "other" downloads) count too.
      */
     private fun isInstalled(kind: RecommendedKind, installedDriver: InstalledDriver?): Boolean = when (kind) {
         RecommendedKind.WINE -> assets.downloadedFiles(AssetType.WINE).any { WineRuntime.isBionicWinePackageName(it.name) }
         RecommendedKind.BOX64 -> assets.downloadedFiles(AssetType.BOX64).isNotEmpty()
-        RecommendedKind.DXVK -> assets.downloadedFiles(AssetType.DXVK).isNotEmpty()
+        RecommendedKind.DXVK -> assets.downloadedFiles(AssetType.DXVK).any { WineRuntime.isDxvkPackageName(it.name) }
+        RecommendedKind.VKD3D -> assets.downloadedFiles(AssetType.VKD3D).isNotEmpty() ||
+            (assets.downloadedFiles(AssetType.DXVK) + assets.downloadedFiles(AssetType.OTHER))
+                .any { WineRuntime.isVkd3dPackageName(it.name) }
         RecommendedKind.DRIVER -> installedDriver != null
         RecommendedKind.FEX -> assets.downloadedFiles(AssetType.FEX).isNotEmpty()
     }
@@ -267,8 +274,10 @@ class SetupManager internal constructor(
         entries.filter { it.type == AssetType.BOX64 }
             .minByOrNull { box64Rank(it.name) }
             ?.let { picks[RecommendedKind.BOX64] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
-        entries.firstOrNull { it.type == AssetType.DXVK && !it.name.contains("native", ignoreCase = true) }
+        entries.firstOrNull { it.type == AssetType.DXVK && WineRuntime.isDxvkPackageName(it.name) }
             ?.let { picks[RecommendedKind.DXVK] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
+        entries.firstOrNull { it.type == AssetType.VKD3D && WineRuntime.isVkd3dPackageName(it.name) }
+            ?.let { picks[RecommendedKind.VKD3D] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
         entries.filter { it.type == AssetType.FEX }
             .minByOrNull { box64Rank(it.name) }
             ?.let { picks[RecommendedKind.FEX] = Pick(it.id, it.fileSizeBytes, isDriver = false) }

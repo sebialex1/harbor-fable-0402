@@ -38,7 +38,7 @@ class FableApp : Application() {
     val driverRepository: DriverRepository
         get() = DriverRepository.get(this)
 
-    /** First-run setup: downloads the recommended Wine, Box64, driver and DXVK packages. */
+    /** First-run setup: downloads the recommended Wine, Box64, driver, DXVK and VKD3D-Proton packages. */
     val setupManager: SetupManager
         get() = SetupManager.get(this)
 

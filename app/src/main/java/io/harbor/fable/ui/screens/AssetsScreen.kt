@@ -109,6 +109,7 @@ internal fun AssetsContent(
             AssetType.BOX64,
             AssetType.FEX,
             AssetType.DXVK,
+            AssetType.VKD3D,
             AssetType.VULKAN_DRIVER,
             AssetType.PROTON,
             AssetType.RUNTIME,
@@ -337,6 +338,7 @@ private fun typeDisplayName(type: AssetType): String = when (type) {
     AssetType.BOX64 -> "Box64"
     AssetType.FEX -> "FEX"
     AssetType.DXVK -> "DXVK"
+    AssetType.VKD3D -> "VKD3D-Proton"
     AssetType.VULKAN_DRIVER -> "Vulkan Drivers"
     AssetType.PROTON -> "Proton"
     AssetType.RUNTIME -> "Runtimes"

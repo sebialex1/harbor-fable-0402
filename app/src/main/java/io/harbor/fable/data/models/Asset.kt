@@ -3,7 +3,8 @@ package io.harbor.fable.data.models
 import java.util.UUID
 
 enum class AssetType {
-    WINE, BOX64, FEX, DXVK, VULKAN_DRIVER, PROTON, RUNTIME, OTHER
+    /** [VKD3D] is VKD3D-Proton (Direct3D 12 over Vulkan), installed into prefixes next to [DXVK]. */
+    WINE, BOX64, FEX, DXVK, VKD3D, VULKAN_DRIVER, PROTON, RUNTIME, OTHER
 }
 
 enum class AssetSource {

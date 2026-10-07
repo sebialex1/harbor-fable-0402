@@ -154,6 +154,14 @@ class ContainerRepository internal constructor(
         }
     }
 
+    /** Downloaded VKD3D-Proton packages a container can pick, newest first. Call off the main thread. */
+    suspend fun availableVkd3dBuilds(): List<ComponentBuild> = withContext(Dispatchers.IO) {
+        runCatching { runtime?.vkd3dBuilds().orEmpty() }.getOrElse { error ->
+            Log.w(TAG, "Could not list VKD3D-Proton builds", error)
+            emptyList()
+        }
+    }
+
     /** Prefix directory for [id]. Created on [create]. Safe to call before the directory exists. */
     fun directory(id: String): File = File(containersRoot, safeId(id))
 
@@ -165,6 +173,7 @@ class ContainerRepository internal constructor(
         isFullscreen: Boolean = false,
         envVars: Map<String, String> = emptyMap(),
         dxvkVersion: String? = null,
+        vkd3dVersion: String? = null,
         driverId: String? = null,
         translator: String = ContainerDefaults.TRANSLATOR,
         box64: Box64Settings = Box64Settings(),
@@ -180,6 +189,7 @@ class ContainerRepository internal constructor(
                 isFullscreen = isFullscreen,
                 envVars = envVars,
                 dxvkVersion = dxvkVersion,
+                vkd3dVersion = vkd3dVersion,
                 driverId = driverId,
                 translator = translator,
                 box64 = box64,
@@ -887,10 +897,11 @@ class ContainerRepository internal constructor(
     }
 
     /**
-     * Puts the container's DXVK and the newest downloaded VKD3D-Proton into its prefix
-     * ([DxWrappers]). [Container.dxvkVersion] picks the DXVK build: null for the newest one,
-     * [ContainerDefaults.DXVK_OFF] for none (WineD3D). A layer whose package can't be unpacked
-     * is left as it is in the prefix rather than removed.
+     * Puts the container's DXVK and VKD3D-Proton into its prefix ([DxWrappers]) on every launch
+     * (a no-op when they're already in place). [Container.dxvkVersion] / [Container.vkd3dVersion]
+     * pick the builds: null for the newest download, [ContainerDefaults.DXVK_OFF] /
+     * [ContainerDefaults.VKD3D_OFF] for none (WineD3D / Wine's builtin d3d12). A layer whose
+     * package can't be unpacked is left as it is in the prefix rather than removed.
      */
     private suspend fun installDxWrappers(
         runtime: WineRuntime,
@@ -907,8 +918,14 @@ class ContainerRepository internal constructor(
             resolveDxWrapper(runtime, DxWrappers.Kind.DXVK, runtime.dxvkArchives(), dxvkChoice, log)
                 .onSuccess { wanted[DxWrappers.Kind.DXVK] = it }
         }
-        resolveDxWrapper(runtime, DxWrappers.Kind.VKD3D, runtime.vkd3dArchives(), null, log)
-            .onSuccess { wanted[DxWrappers.Kind.VKD3D] = it }
+        val vkd3dChoice = container.vkd3dVersion?.trim()?.ifEmpty { null }
+        if (vkd3dChoice.equals(ContainerDefaults.VKD3D_OFF, ignoreCase = true)) {
+            log.line("VKD3D-Proton: off for this container; Direct3D 12 uses Wine's builtin d3d12")
+            wanted[DxWrappers.Kind.VKD3D] = null
+        } else {
+            resolveDxWrapper(runtime, DxWrappers.Kind.VKD3D, runtime.vkd3dArchives(), vkd3dChoice, log)
+                .onSuccess { wanted[DxWrappers.Kind.VKD3D] = it }
+        }
         return withContext(Dispatchers.IO) { DxWrappers.apply(prefix = dir, wineRoot = dir, wanted = wanted) }
     }
 
@@ -1280,6 +1297,7 @@ class ContainerRepository internal constructor(
                 exeName TEXT,
                 wineVersion TEXT NOT NULL,
                 dxvkVersion TEXT,
+                vkd3dVersion TEXT,
                 driverId TEXT,
                 status TEXT NOT NULL,
                 createdAt INTEGER NOT NULL,
@@ -1493,6 +1511,7 @@ class FileContainerStore(private val file: File) : ContainerDao {
         putNullable("exeName", exeName)
         put("wineVersion", wineVersion)
         putNullable("dxvkVersion", dxvkVersion)
+        putNullable("vkd3dVersion", vkd3dVersion)
         putNullable("driverId", driverId)
         put("status", status.name)
         put("createdAt", createdAt)
@@ -1513,6 +1532,7 @@ class FileContainerStore(private val file: File) : ContainerDao {
         exeName = stringOrNull("exeName"),
         wineVersion = optString("wineVersion", ContainerDefaults.WINE_VERSION),
         dxvkVersion = stringOrNull("dxvkVersion"),
+        vkd3dVersion = stringOrNull("vkd3dVersion"),
         driverId = stringOrNull("driverId"),
         status = runCatching { ContainerStatus.valueOf(optString("status")) }
             .getOrDefault(ContainerStatus.CREATED),

@@ -332,12 +332,17 @@ internal class WineRuntime(
         .filter { isDxvkPackageName(it.name) }
 
     /**
-     * Downloaded VKD3D-Proton packages, newest first. VKD3D has no catalog type of its own yet,
-     * so packages are recognised by name among the DXVK and "other" downloads.
+     * Downloaded VKD3D-Proton packages, newest first: the [AssetType.VKD3D] catalog downloads
+     * (`vkd3d-proton-3.0.1.tar.zst`), then any VKD3D package found by name among the DXVK and
+     * "other" downloads (Winlator `Vkd3d-*.wcp` from a user-added source, or files fetched before
+     * VKD3D had its own type).
      */
-    fun vkd3dArchives(): List<File> = (assets.downloadedFiles(AssetType.DXVK) + assets.downloadedFiles(AssetType.OTHER))
-        .filter { isVkd3dPackageName(it.name) }
-        .distinctBy { it.absolutePath }
+    fun vkd3dArchives(): List<File> {
+        val catalog = assets.downloadedFiles(AssetType.VKD3D).filter { isVkd3dPackageName(it.name) }
+        val byName = (assets.downloadedFiles(AssetType.DXVK) + assets.downloadedFiles(AssetType.OTHER))
+            .filter { isVkd3dPackageName(it.name) }
+        return (catalog + byName).distinctBy { it.absolutePath }
+    }
 
     fun dxvkBuilds(): List<ComponentBuild> = dxvkArchives().map { componentBuild(it, "DXVK") }
 

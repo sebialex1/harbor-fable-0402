@@ -25,6 +25,9 @@ object ContainerDefaults {
      */
     const val DXVK_OFF = "none"
 
+    /** [Container.vkd3dVersion] value that turns VKD3D-Proton off (Wine's builtin d3d12). */
+    const val VKD3D_OFF = "none"
+
     val RESOLUTION_PRESETS: List<String> = listOf(
         "800x600",
         "1024x768",
@@ -43,6 +46,8 @@ data class Container(
     val wineVersion: String = ContainerDefaults.WINE_VERSION,
     /** DXVK build installed into the prefix: null = newest downloaded, [ContainerDefaults.DXVK_OFF] = none. */
     val dxvkVersion: String? = null,
+    /** VKD3D-Proton build installed into the prefix: null = newest downloaded, [ContainerDefaults.VKD3D_OFF] = none. */
+    val vkd3dVersion: String? = null,
     val driverId: String? = null,
     val status: ContainerStatus = ContainerStatus.CREATED,
     val createdAt: Long = System.currentTimeMillis(),

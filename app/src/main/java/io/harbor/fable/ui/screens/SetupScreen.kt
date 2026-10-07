@@ -90,8 +90,8 @@ private enum class SetupStep { WELCOME, DOWNLOAD, READY }
 
 /**
  * First-open setup. Three steps on a plain black canvas: a welcome,
- * a download step that shows the real progress of the recommended Wine, Box64, RADV Xclipse and
- * DXVK packages (through [io.harbor.fable.data.SetupManager]), and a ready step that hands over
+ * a download step that shows the real progress of the recommended Wine, Box64, RADV Xclipse,
+ * DXVK and VKD3D-Proton packages (through [io.harbor.fable.data.SetupManager]), and a ready step that hands over
  * to the app. [onFinished] is called when the user continues or skips; the caller persists it.
  */
 @Composable

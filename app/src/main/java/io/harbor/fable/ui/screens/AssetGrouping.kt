@@ -55,7 +55,7 @@ private val Digits = Regex("""\d+""")
 
 /** Tokens that only restate the component or the (only supported) architecture. */
 private val NeutralTokens = setOf(
-    "wine", "box64", "dxvk", "fex", "proton", "amd64", "x86", "x86_64", "x64", "64", "bit",
+    "wine", "box64", "dxvk", "vkd3d", "fex", "proton", "amd64", "x86", "x86_64", "x64", "64", "bit",
 )
 
 /**

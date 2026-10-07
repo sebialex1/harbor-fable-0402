@@ -485,8 +485,10 @@ class AssetRepository internal constructor(
          *      (only x86 library bundles), to sources that ship Android bionic builds.
          * - 3: Wine moved off `Kron4ek/Wine-Builds` (glibc builds that cannot run without a glibc
          *      rootfs) to bionic `.wcp` packages from `StevenMXZ/Winlator-Contents`.
+         * - 4: VKD3D-Proton (`HansKristian-Work/vkd3d-proton`) added, so Direct3D 12 games get a
+         *      d3d12.dll next to DXVK.
          */
-        internal const val DEFAULTS_VERSION = 3
+        internal const val DEFAULTS_VERSION = 4
 
         /** Former default sources that are removed from persisted catalogs on migration. */
         internal val retiredDefaultSlugs: List<String> = listOf("ptitSeb/box64", "Kron4ek/Wine-Builds")
@@ -561,6 +563,19 @@ class AssetRepository internal constructor(
                 // Release tarballs for Windows (dxvk-3.1.1.tar.gz); not the dxvk-native-* Linux builds.
                 assetGlobs = listOf("regex:^dxvk-[0-9][0-9.]*\\.tar\\.(gz|zst)$"),
                 notes = "DirectX to Vulkan translation",
+            ),
+            // Direct3D 12 for the prefix, like the vkd3d packages Winlator installs next to DXVK.
+            // Upstream release tarballs: vkd3d-proton-3.0.1.tar.zst with x64/ and x86/ d3d12.dll +
+            // d3d12core.dll (DxWrappers copies them into system32 / syswow64).
+            CatalogSource(
+                owner = "HansKristian-Work",
+                repo = "vkd3d-proton",
+                displayName = "VKD3D-Proton",
+                type = AssetType.VKD3D,
+                // Versions such as 3.0b carry a letter; the setup_vkd3d_proton.sh script and
+                // source archives are not release assets.
+                assetGlobs = listOf("regex:^vkd3d-proton-[0-9][0-9a-z.]*\\.tar\\.(zst|gz|xz)$"),
+                notes = "Direct3D 12 to Vulkan translation",
             ),
             CatalogSource(
                 owner = "GGlessT",

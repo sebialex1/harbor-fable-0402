@@ -13,11 +13,11 @@ internal object CatalogPolicy {
     const val DEFAULT_RELEASES_PER_SOURCE = 5
 
     /**
-     * How many releases of a source of [type] the catalog lists, newest first. DXVK is a single
-     * drop-in package, so only the latest release is offered.
+     * How many releases of a source of [type] the catalog lists, newest first. DXVK and
+     * VKD3D-Proton are single drop-in packages, so only the latest release is offered.
      */
     fun releaseLimit(type: AssetType): Int = when (type) {
-        AssetType.DXVK -> 1
+        AssetType.DXVK, AssetType.VKD3D -> 1
         else -> DEFAULT_RELEASES_PER_SOURCE
     }
 
