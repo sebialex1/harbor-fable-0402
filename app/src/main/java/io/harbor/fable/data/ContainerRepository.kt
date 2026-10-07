@@ -448,7 +448,7 @@ class ContainerRepository internal constructor(
             log.line("X server: DISPLAY=${screen.display}, socket ${screen.socketPath}, screen ${screen.resolution}")
             log.line("X11 client libraries: ${screen.x11LibDir}")
             screen.nativeLibs?.let { report ->
-                // FreeType & co. that Android only has as libft2.so / versioned names (NativeLibResolver).
+                // Bundled FreeType & co. plus what NativeLibResolver copied from the system.
                 log.section("Native libraries (${report.dir.absolutePath})")
                 log.line(report.summary())
                 report.describe().forEach { log.line(it) }
@@ -876,10 +876,14 @@ class ContainerRepository internal constructor(
         screen?.nativeLibs?.let { report ->
             val missing = report.missing.map { it.target }
             log.line("native libraries not found on this device: ${missing.joinToString().ifEmpty { "none" }}")
-            if (diagnosis.freeTypeMissing || diagnosis.missingLibraries.any { it.contains("freetype") }) {
+            if (diagnosis.freeTypeMissing || diagnosis.freeTypeTooOld || diagnosis.missingLibraries.any { it.contains("freetype") }) {
                 log.line(
                     "libfreetype.so in ${report.dir.absolutePath}: " +
-                        (report.entries.firstOrNull { it.target == "libfreetype.so" }?.let { "${it.status} ${it.source.orEmpty()}" } ?: "unknown"),
+                        (
+                            report.entries.firstOrNull { it.target == "libfreetype.so" }
+                                ?.let { "${it.status} ${it.source.orEmpty()}${it.note?.let { note -> " ($note)" }.orEmpty()}".trim() }
+                                ?: "unknown"
+                            ),
                 )
             }
         }
@@ -981,8 +985,9 @@ class ContainerRepository internal constructor(
             val runtime = WineRuntime(app, AssetRepository.get(app), DriverRepository.get(app), File(app.filesDir, "runtime"))
             val display = DisplayProvider { resolution ->
                 val libDir = X11ClientLibs.install(app)
-                // Native deps Box64 wraps (libfreetype.so, …) that Android doesn't ship under the
-                // names Box64 asks for, copied next to the X11 libraries. Never throws.
+                // Native deps Box64 wraps that the APK doesn't bundle (the bundled FreeType, X
+                // extensions, … always win), copied from the system next to the X11 libraries.
+                // Never throws.
                 val nativeLibs = NativeLibResolver.resolveWithReport(app)
                 val ready = DisplayServer.ensureStarted(app, resolution).getOrThrow()
                 DisplayEnv(ready.display, ready.socketPath, ready.resolution, libDir.absolutePath, nativeLibs)
