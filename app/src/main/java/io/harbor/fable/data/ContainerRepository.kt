@@ -292,10 +292,17 @@ class ContainerRepository internal constructor(
         )
     }
 
+    /**
+     * Registers [entry]. Throws [IllegalArgumentException] when the container already has a
+     * user app at the same path, so the same game can't be added twice by picking it again.
+     */
     suspend fun addExe(entry: ExeEntry): ExeEntry = mutex.withLock {
         withContext(Dispatchers.IO) {
             val container = containersById[entry.containerId]
                 ?: throw NoSuchElementException("Unknown container ${entry.containerId}")
+            if (!entry.isTool && exesById.values.any { it.isDuplicateOf(entry) }) {
+                throw IllegalArgumentException("Already added")
+            }
             exesById[entry.id] = entry
             if (container.exePath.isNullOrBlank() && !entry.isTool) {
                 containersById[container.id] = container.copy(
@@ -306,6 +313,19 @@ class ContainerRepository internal constructor(
             persistLocked()
             entry
         }
+    }
+
+    /**
+     * Whether this entry and [other] are two registrations of the same user app in the same
+     * container. `content://` URIs are compared case-insensitively (providers differ in how they
+     * case the same document id); filesystem and Windows paths are compared as-is.
+     */
+    private fun ExeEntry.isDuplicateOf(other: ExeEntry): Boolean {
+        if (id == other.id || isTool || other.isTool || containerId != other.containerId) return false
+        val a = path.trim()
+        val b = other.path.trim()
+        val contentUri = a.startsWith("content://", ignoreCase = true) || b.startsWith("content://", ignoreCase = true)
+        return a.equals(b, ignoreCase = contentUri)
     }
 
     suspend fun removeExe(id: String): Boolean = mutex.withLock {
