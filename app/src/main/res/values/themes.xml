@@ -21,7 +21,6 @@
         <item name="android:colorControlActivated">@color/white</item>
         <item name="android:colorControlNormal">@color/white</item>
         <item name="android:colorControlHighlight">@color/fable_pressed</item>
-        <item name="android:colorSwitchThumbNormal">@color/fable_switch_thumb</item>
         <item name="android:colorForeground">@color/white</item>
         <item name="android:textColorPrimary">@color/white</item>
         <item name="android:textColorSecondary">@color/fable_text_dim</item>
