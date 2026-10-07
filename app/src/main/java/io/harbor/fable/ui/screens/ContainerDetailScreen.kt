@@ -12,7 +12,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
@@ -21,8 +20,6 @@ import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.ui.components.*
-import io.harbor.fable.ui.theme.ControlHeight
-import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableError
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
@@ -63,7 +60,6 @@ fun ContainerDetailScreen(
                 fableUi.showMessage(repository.launchDesktop(containerId).also { it.openDisplay(context, containerId) }.message(), long = true)
             }
         },
-        onLaunchExe = { exe -> launchExe(exe.id) },
         onSetPrimary = { exe ->
             fableUi.scope.launch {
                 repository.setPrimaryExe(exe.id)
@@ -113,7 +109,6 @@ internal fun ContainerDetailContent(
     onBack: () -> Unit,
     onLaunchPrimary: () -> Unit,
     onLaunchDesktop: () -> Unit,
-    onLaunchExe: (ExeEntry) -> Unit,
     onSetPrimary: (ExeEntry) -> Unit,
     onSelectResolution: (String) -> Unit,
     onSelectTranslator: (String) -> Unit,
@@ -223,17 +218,9 @@ internal fun ContainerDetailContent(
                         subtitle = if (container.exePath == exe.path) "Primary" else null,
                         leading = { ExeIcon(name = exe.name, iconPath = exe.icon) },
                         showChevron = false,
-                        trailing = {
-                            FableIconButton(
-                                icon = Icons.Outlined.PlayArrow,
-                                contentDescription = "Launch ${exe.name}",
-                                tint = Color.Black,
-                                containerColor = FableAccent,
-                                bordered = false,
-                                size = ControlHeight.Compact,
-                                onClick = { onLaunchExe(exe) },
-                            )
-                        },
+                        // No per-row play button: tapping a row makes it the primary app, and the
+                        // launch button at the top starts the primary app, so a second launch
+                        // control on every row was redundant. "Primary" marks what will launch.
                         onClick = { onSetPrimary(exe) },
                     )
                     CardDivider(afterIcon = true)
