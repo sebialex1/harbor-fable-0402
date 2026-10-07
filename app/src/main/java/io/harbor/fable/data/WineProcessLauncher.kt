@@ -152,7 +152,7 @@ internal object WineProcessLauncher {
                 if (key == "DISPLAY" || key.startsWith("WINE") || key.startsWith("BOX64") || key.startsWith("LD_") ||
                     key == "PATH" || key == "HOME" || key == "TMPDIR" || key.startsWith("VK_") || key.startsWith("FEX") ||
                     key == "USER" || key == "XDG_CACHE_HOME" || key.startsWith("ADRENOTOOLS") || key == "FABLE_VULKAN_DRIVER" ||
-                    key == "FONTCONFIG_FILE"
+                    key == "FONTCONFIG_FILE" || key.startsWith("ANDROID_")
                 ) {
                     append("[fable] env ").append(key).append('=').append(value).append('\n')
                 }

@@ -1,6 +1,7 @@
 package io.harbor.fable.data
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
@@ -13,6 +14,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.net.Inet4Address
 
 /** Result of looking for a usable `box64` executable. */
 internal sealed interface Box64Status {
@@ -312,6 +314,33 @@ internal class WineRuntime(
             dest.absolutePath
         }
 
+    // --- Wine process environment --------------------------------------------------------
+
+    /**
+     * Variables Winlator's bionic Wine builds read that a desktop Wine doesn't know about, set the
+     * way Winlator-Ludashi's GuestProgramLauncherComponent sets them on every launch:
+     *
+     * - `ANDROID_RESOLV_DNS`: Android has no `/etc/resolv.conf`, so the bionic `dnsapi.so` /
+     *   `ws2_32` take the resolver from this variable (the active network's first DNS server,
+     *   [DEFAULT_DNS] when it can't be read).
+     * - `WINE_NEW_NDIS=1`: `nsiproxy.so`'s Android interface enumeration (iphlpapi / network
+     *   adapters) instead of the netlink dumps app processes aren't allowed to do.
+     */
+    fun bionicWineEnvironment(): List<String> = listOf(
+        "ANDROID_RESOLV_DNS=${primaryDns()}",
+        "WINE_NEW_NDIS=1",
+    )
+
+    /** The active network's first DNS server (IPv4 preferred), or [DEFAULT_DNS]. Never throws. */
+    fun primaryDns(): String = runCatching {
+        val connectivity = appContext.getSystemService(ConnectivityManager::class.java) ?: return@runCatching null
+        val network = connectivity.activeNetwork ?: return@runCatching null
+        val servers = connectivity.getLinkProperties(network)?.dnsServers.orEmpty()
+        (servers.firstOrNull { it is Inet4Address } ?: servers.firstOrNull())
+            ?.hostAddress
+            ?.substringBefore('%')
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: DEFAULT_DNS
+
     /**
      * Library path of the active RADV Xclipse driver, or null when none is installed. There is a
      * single active driver for the whole app, so every container launches with the same one.
@@ -337,6 +366,9 @@ internal class WineRuntime(
         private const val COMPLETE_MARKER = ".fable-complete"
         private val WINE_BINARIES = listOf("bin/wine", "bin/wine64")
         private const val FEX_ROOTFS_SEARCH_DEPTH = 3
+
+        /** Winlator's fallback resolver when the active network reports none. */
+        const val DEFAULT_DNS = "8.8.4.4"
 
         /** Name of the file in the container directory that Wine/Box64/FEX output goes to. */
         const val LAUNCH_LOG = "fable-launch.log"

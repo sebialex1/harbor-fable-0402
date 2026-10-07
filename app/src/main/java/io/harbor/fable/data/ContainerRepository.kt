@@ -504,6 +504,8 @@ class ContainerRepository internal constructor(
             // Box64 reports native dlopen()/dlsym() failures instead of failing silently.
             add("BOX64_DLSYM_ERROR=1")
             addAll(translator.environment)
+            // What Winlator's bionic Wine reads instead of /etc/resolv.conf and netlink.
+            addAll(runtime.bionicWineEnvironment())
             if (screen != null) {
                 add("DISPLAY=${screen.display}")
                 // Native (aarch64 bionic) libX11/libxcb for Box64's wrapped libX11, then the system
