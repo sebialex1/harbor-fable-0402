@@ -6,7 +6,10 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
@@ -18,9 +21,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.winlator.widget.XServerView
@@ -29,6 +34,7 @@ import io.harbor.fable.data.WineFailure
 import com.winlator.xserver.Pointer
 import com.winlator.xserver.Window
 import com.winlator.xserver.WindowManager as XWindowManager
+import com.winlator.xserver.XKeycode
 import com.winlator.xserver.XServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,8 +53,15 @@ import kotlin.math.hypot
  * Input is deliberately minimal (Winlator's TouchpadView / input-controls overlay are not
  * vendored): the screen works like a laptop trackpad — dragging a finger moves the cursor
  * relatively, a quick tap is a left click, a second finger is a right click, and hardware keyboard events go through Winlator's
- * `Keyboard.onKeyEvent`. Leaving the screen (Back, or the activity finishing for any other
- * reason) stops the container: its Wine processes and the X server.
+ * `Keyboard.onKeyEvent`. The activity finishing (for any reason) stops the container: its Wine
+ * processes and the X server.
+ *
+ * Back doesn't finish the activity any more — a game that catches Escape on a phone's back
+ * gesture would otherwise be killed by every accidental swipe. It opens a side menu (see
+ * [createDrawer]) that slides in from the right edge over the X screen: on-screen controls
+ * (a d-pad and four action buttons that inject X key events), the Android soft keyboard,
+ * pausing / resuming Wine (SIGSTOP / SIGCONT on the prefix's processes) and Stop Wine, which is
+ * what Back used to do. A second Back closes the menu.
  *
  * A small performance HUD in the top-left corner shows the display's frame rate (frames the
  * renderer actually drew — it renders on demand, so an idle desktop reads low), the X screen
@@ -64,6 +77,16 @@ class DisplayActivity : Activity() {
     @Volatile private var server: XServer? = null
     private var leftDown = false
     private var containerId: String? = null
+
+    // Side menu (Back opens it) and the overlays it toggles.
+    private var root: FrameLayout? = null
+    private var drawer: View? = null
+    private var drawerPanel: View? = null
+    private var drawerOpen = false
+    private var controlsOverlay: View? = null
+    private var keyboardShown = false
+    private var winePaused = false
+    private var pauseItem: TextView? = null
 
     // Trackpad state (screen pixels).
     private var activePointerId = MotionEvent.INVALID_POINTER_ID
@@ -124,14 +147,26 @@ class DisplayActivity : Activity() {
         created.setOnTouchListener { _, event -> onTouch(xServer, created, event) }
         val hud = createHud(xServer)
         val status = createStatusText()
-        setContentView(FrameLayout(this).apply {
+        val controls = createControlsOverlay(xServer)
+        val menu = createDrawer()
+        val content = FrameLayout(this).apply {
+            // Takes focus so the soft keyboard has a target; its key events come in through
+            // dispatchKeyEvent like a hardware keyboard's.
+            isFocusable = true
+            isFocusableInTouchMode = true
             addView(created)
             addView(hud)
             addView(status)
-        })
+            addView(controls)
+            addView(menu)
+        }
+        setContentView(content)
+        root = content
         view = created
         hudText = hud
         statusText = status
+        controlsOverlay = controls
+        drawer = menu
         server = xServer
         hideSystemBars()
         watchFirstWindow(xServer)
@@ -167,8 +202,14 @@ class DisplayActivity : Activity() {
         hudText = null
         statusText = null
         errorPanel = null
+        root = null
+        drawer = null
+        drawerPanel = null
+        controlsOverlay = null
+        pauseItem = null
         // Only a real exit stops Wine; a recreate (config change not covered by the manifest)
-        // comes straight back to the same display.
+        // comes straight back to the same display. A paused Wine is killed just the same
+        // (SIGKILL is delivered to stopped processes).
         if (isFinishing && !isChangingConfigurations) stopContainer()
         super.onDestroy()
     }
@@ -187,9 +228,289 @@ class DisplayActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            // Back toggles the side menu and never reaches the framework (which would finish the
+            // activity and stop Wine). Acting on UP avoids re-triggering on key repeat.
+            if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) setDrawerOpen(!drawerOpen)
+            return true
+        }
         val handled = runCatching { server?.keyboard?.onKeyEvent(event) == true }.getOrDefault(false)
         return handled || super.dispatchKeyEvent(event)
+    }
+
+    // ---- Side menu ---------------------------------------------------------------------------
+
+    private fun setDrawerOpen(open: Boolean) {
+        val scrim = drawer ?: return
+        val panel = drawerPanel ?: return
+        if (open == drawerOpen) return
+        drawerOpen = open
+        if (open) {
+            scrim.visibility = View.VISIBLE
+            scrim.alpha = 0f
+            scrim.animate().alpha(1f).setDuration(DRAWER_ANIMATION_MS).start()
+            // Slide in from the right edge; the panel's width is known once it has been laid out,
+            // so start from its measured width or, before the first layout, the screen's.
+            val from = (panel.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels).toFloat()
+            panel.translationX = from
+            panel.animate().translationX(0f).setDuration(DRAWER_ANIMATION_MS).start()
+        } else {
+            val to = (panel.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels).toFloat()
+            panel.animate().translationX(to).setDuration(DRAWER_ANIMATION_MS).start()
+            scrim.animate().alpha(0f).setDuration(DRAWER_ANIMATION_MS)
+                .withEndAction { if (!drawerOpen) scrim.visibility = View.GONE }
+                .start()
+        }
+    }
+
+    private fun setControlsShown(shown: Boolean) {
+        controlsOverlay?.visibility = if (shown) View.VISIBLE else View.GONE
+    }
+
+    /**
+     * Shows or hides Android's soft keyboard over the X screen. The content view has no
+     * InputConnection, so the IME falls back to sending plain key events, which
+     * [dispatchKeyEvent] forwards to the X server like a hardware keyboard's. (Winlator does the
+     * same with `toggleSoftInput`.)
+     */
+    private fun setKeyboardShown(shown: Boolean) {
+        val target = root ?: return
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
+        keyboardShown = shown
+        if (shown) {
+            target.requestFocus()
+            @Suppress("DEPRECATION")
+            imm.showSoftInput(target, InputMethodManager.SHOW_FORCED)
+        } else {
+            imm.hideSoftInputFromWindow(target.windowToken, 0)
+        }
+    }
+
+    /** Freezes / thaws the container's Wine processes; the status label says so while paused. */
+    private fun setWinePaused(paused: Boolean) {
+        val id = containerId ?: return
+        val repository = runCatching { ContainerRepository.get(applicationContext) }.getOrNull() ?: return
+        winePaused = paused
+        repository.setPausedInBackground(id, paused)
+        pauseItem?.text = if (paused) "Resume Wine" else "Pause Wine"
+        pauseItem?.setCompoundDrawablesRelativeWithIntrinsicBounds(
+            menuIcon(if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause), null, null, null,
+        )
+        statusText?.let { label ->
+            if (paused) {
+                label.text = "Paused"
+                label.visibility = View.VISIBLE
+            } else {
+                label.visibility = View.GONE
+            }
+        }
+    }
+
+    /**
+     * The side menu: a tap-to-close scrim over the whole screen with a rounded, translucent panel
+     * on the right edge. Hidden until Back opens it ([setDrawerOpen]).
+     */
+    private fun createDrawer(): View {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16f), dp(20f), dp(16f), dp(16f))
+            background = GradientDrawable().apply {
+                setColor(DRAWER_BACKGROUND.toInt())
+                val r = 20f * density
+                // Rounded on the screen side only; the right edge is flush with the display's.
+                cornerRadii = floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r)
+            }
+            // Taps on the panel itself must not fall through to the scrim (which closes).
+            isClickable = true
+            addView(TextView(this@DisplayActivity).apply {
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 20f
+                typeface = Typeface.DEFAULT_BOLD
+                text = "Fable"
+                setPadding(dp(12f), 0, dp(12f), dp(4f))
+            })
+            addView(TextView(this@DisplayActivity).apply {
+                setTextColor(DRAWER_TEXT_DIM.toInt())
+                textSize = 12f
+                text = "Back closes this menu"
+                setPadding(dp(12f), 0, dp(12f), dp(12f))
+            })
+            addView(menuSwitch("On-screen controls", android.R.drawable.ic_menu_directions) { setControlsShown(it) })
+            addView(menuSwitch("On-screen keyboard", android.R.drawable.ic_menu_edit) { setKeyboardShown(it) })
+            addView(menuDivider())
+            addView(menuItem("Pause Wine", android.R.drawable.ic_media_pause) {
+                setWinePaused(!winePaused)
+                setDrawerOpen(false)
+            }.also { pauseItem = it })
+            addView(menuItem("Stop Wine", android.R.drawable.ic_lock_power_off) {
+                // Same as the old Back: finishing stops the container in onDestroy.
+                finish()
+            })
+            addView(menuDivider())
+            addView(menuItem("Close menu", android.R.drawable.ic_menu_close_clear_cancel) { setDrawerOpen(false) })
+        }
+        drawerPanel = panel
+        return FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundColor(DRAWER_SCRIM.toInt())
+            visibility = View.GONE
+            // Swallows touches so they don't reach the X server; a tap outside the panel closes.
+            isClickable = true
+            setOnClickListener { setDrawerOpen(false) }
+            addView(panel, FrameLayout.LayoutParams(dp(DRAWER_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
+        }
+    }
+
+    private fun menuIcon(resId: Int): Drawable? =
+        runCatching { getDrawable(resId)?.mutate()?.apply { setTint(0xFFFFFFFF.toInt()) } }.getOrNull()
+
+    /** A menu row: white icon + label, highlighted while pressed. */
+    private fun menuItem(label: String, iconRes: Int, onClick: () -> Unit): TextView {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        return TextView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 16f
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12f), dp(14f), dp(12f), dp(14f))
+            compoundDrawablePadding = dp(16f)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(menuIcon(iconRes), null, null, null)
+            background = menuRowBackground()
+            text = label
+            setOnClickListener { onClick() }
+        }
+    }
+
+    /** A menu row with a switch on the right; [onChange] gets the new state. */
+    private fun menuSwitch(label: String, iconRes: Int, onChange: (Boolean) -> Unit): View {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        val toggle = Switch(this).apply {
+            setOnCheckedChangeListener { _, checked -> onChange(checked) }
+        }
+        val text = TextView(this).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 16f
+            gravity = Gravity.CENTER_VERTICAL
+            compoundDrawablePadding = dp(16f)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(menuIcon(iconRes), null, null, null)
+            this.text = label
+        }
+        return LinearLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12f), dp(10f), dp(12f), dp(10f))
+            background = menuRowBackground()
+            addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(toggle)
+            // The whole row flips the switch, not just the small knob.
+            setOnClickListener { toggle.toggle() }
+        }
+    }
+
+    private fun menuDivider(): View {
+        val density = resources.displayMetrics.density
+        return View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (1f * density).toInt().coerceAtLeast(1)).apply {
+                setMargins((12f * density).toInt(), (8f * density).toInt(), (12f * density).toInt(), (8f * density).toInt())
+            }
+            setBackgroundColor(DRAWER_DIVIDER.toInt())
+        }
+    }
+
+    private fun menuRowBackground(): Drawable {
+        val density = resources.displayMetrics.density
+        val pressed = GradientDrawable().apply {
+            setColor(DRAWER_ROW_PRESSED.toInt())
+            cornerRadius = 10f * density
+        }
+        return StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), pressed)
+            addState(intArrayOf(), ColorDrawable(0))
+        }
+    }
+
+    // ---- On-screen controls ------------------------------------------------------------------
+
+    /**
+     * A translucent d-pad (bottom left) and four action buttons (bottom right) that inject X key
+     * presses while held — arrows and Enter / Escape / Space / Shift, what most games bind by
+     * default — so a keyboard-driven game is playable without a controller. The overlay itself
+     * is not clickable: touches between the buttons fall through to the trackpad underneath.
+     * Hidden until the side menu turns it on.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun createControlsOverlay(xServer: XServer): View {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        val size = dp(PAD_BUTTON_DP)
+        val gap = dp(4f)
+
+        fun padButton(label: String, keycode: XKeycode): View = TextView(this).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            // Two-line labels ("A" over the key it sends) need the smaller size to fit the circle.
+            textSize = if ('\n' in label) 11f else 18f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            text = label
+            background = GradientDrawable().apply {
+                setColor(PAD_BUTTON_COLOR.toInt())
+                setStroke(dp(1.5f), PAD_BUTTON_STROKE.toInt())
+                cornerRadius = size / 2f
+            }
+            isClickable = true
+            setOnTouchListener { v, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        v.alpha = 0.6f
+                        runCatching { xServer.injectKeyPress(keycode) }
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        v.alpha = 1f
+                        runCatching { xServer.injectKeyRelease(keycode) }
+                    }
+                }
+                true
+            }
+        }
+
+        // Places a button in a 3x3 grid (corners stay empty): up / left / right / down.
+        fun cell(col: Int, row: Int, button: View) = button.also {
+            it.layoutParams = FrameLayout.LayoutParams(size, size).apply {
+                leftMargin = col * (size + gap)
+                topMargin = row * (size + gap)
+            }
+        }
+        val dpad = FrameLayout(this).apply {
+            addView(cell(1, 0, padButton("\u25B2", XKeycode.KEY_UP)))
+            addView(cell(0, 1, padButton("\u25C0", XKeycode.KEY_LEFT)))
+            addView(cell(2, 1, padButton("\u25B6", XKeycode.KEY_RIGHT)))
+            addView(cell(1, 2, padButton("\u25BC", XKeycode.KEY_DOWN)))
+        }
+        // Diamond, like a controller's face buttons: Y top, X left, B right, A bottom.
+        val actions = FrameLayout(this).apply {
+            addView(cell(1, 0, padButton("Y\nShift", XKeycode.KEY_SHIFT_L)))
+            addView(cell(0, 1, padButton("X\nSpace", XKeycode.KEY_SPACE)))
+            addView(cell(2, 1, padButton("B\nEsc", XKeycode.KEY_ESC)))
+            addView(cell(1, 2, padButton("A\nEnter", XKeycode.KEY_ENTER)))
+        }
+        val clusterSize = 3 * size + 2 * gap
+        return FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            visibility = View.GONE
+            isClickable = false
+            isFocusable = false
+            addView(dpad, FrameLayout.LayoutParams(clusterSize, clusterSize, Gravity.BOTTOM or Gravity.START).apply {
+                setMargins(dp(24f), 0, 0, dp(24f))
+            })
+            addView(actions, FrameLayout.LayoutParams(clusterSize, clusterSize, Gravity.BOTTOM or Gravity.END).apply {
+                setMargins(0, 0, dp(24f), dp(24f))
+            })
+        }
     }
 
     private fun onTouch(xServer: XServer, view: XServerView, event: MotionEvent): Boolean {
@@ -510,6 +831,20 @@ class DisplayActivity : Activity() {
         private const val TOUCH_SLOP_DP = 10f
         private const val TAP_TIMEOUT_MS = 200L
         private const val HUD_INTERVAL_MS = 1000L
+
+        // Side menu: Fable's dark theme over the game (translucent black, white text, 0x8E8E93 dim).
+        private const val DRAWER_WIDTH_DP = 300f
+        private const val DRAWER_ANIMATION_MS = 180L
+        private const val DRAWER_BACKGROUND = 0xCC000000L
+        private const val DRAWER_SCRIM = 0x55000000L
+        private const val DRAWER_DIVIDER = 0xFF38383AL
+        private const val DRAWER_ROW_PRESSED = 0x33FFFFFFL
+        private const val DRAWER_TEXT_DIM = 0xFF8E8E93L
+
+        // On-screen controls.
+        private const val PAD_BUTTON_DP = 52f
+        private const val PAD_BUTTON_COLOR = 0x66000000L
+        private const val PAD_BUTTON_STROKE = 0x99FFFFFFL
 
         /** Opens the display for [containerId], which is stopped when the user leaves the screen. */
         fun open(context: Context, containerId: String) {

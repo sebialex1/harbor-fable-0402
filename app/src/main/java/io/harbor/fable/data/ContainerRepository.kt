@@ -3,6 +3,7 @@ package io.harbor.fable.data
 import android.content.Context
 import android.os.Environment
 import android.system.Os
+import android.system.OsConstants
 import android.util.Log
 import io.harbor.fable.data.models.Box64Preset
 import io.harbor.fable.data.models.Box64Settings
@@ -1314,20 +1315,44 @@ class ContainerRepository internal constructor(
     }
 
     /**
+     * Freezes ([paused] true, SIGSTOP) or thaws (SIGCONT) every Wine process of [containerId],
+     * for the display screen's Pause button. The whole prefix is signalled, not just the launcher
+     * pid: wineserver and the game's own children are re-parented away from it (see
+     * [killPrefixProcesses]) and a game whose server keeps running while it is stopped would
+     * time out on its own windows. Runs on the repository's scope; never throws.
+     */
+    fun setPausedInBackground(containerId: String, paused: Boolean) {
+        val signal = if (paused) OsConstants.SIGSTOP else OsConstants.SIGCONT
+        scope.launch {
+            runCatching {
+                val count = signalPrefixProcesses(directory(containerId), signal)
+                Log.i(TAG, "${if (paused) "Paused" else "Resumed"} $count Wine process(es) of $containerId")
+            }.onFailure { Log.w(TAG, "Couldn't ${if (paused) "pause" else "resume"} $containerId", it) }
+        }
+    }
+
+    /**
      * SIGKILLs this app's other processes whose WINEPREFIX is [prefix]. Wine daemonizes
      * wineserver and re-parents its helpers, so they aren't reachable from the launched process.
      */
     private fun killPrefixProcesses(prefix: File) {
+        signalPrefixProcesses(prefix, OsConstants.SIGKILL)
+    }
+
+    /** Sends [signal] to every other process of this uid whose WINEPREFIX is [prefix]; returns how many. */
+    private fun signalPrefixProcesses(prefix: File, signal: Int): Int {
         val self = android.os.Process.myPid()
         val marker = "WINEPREFIX=${prefix.absolutePath}"
+        var count = 0
         File("/proc").listFiles()?.forEach { entry ->
             val pid = entry.name.toIntOrNull() ?: return@forEach
             if (pid == self) return@forEach
             // environ is only readable for our own uid's processes; others fail and are skipped.
             val environ = runCatching { File(entry, "environ").readBytes() }.getOrNull() ?: return@forEach
             val matches = String(environ, Charsets.UTF_8).split('\u0000').any { it == marker }
-            if (matches) runCatching { android.os.Process.killProcess(pid) }
+            if (matches && runCatching { android.os.Process.sendSignal(pid, signal) }.isSuccess) count++
         }
+        return count
     }
 
     /**
