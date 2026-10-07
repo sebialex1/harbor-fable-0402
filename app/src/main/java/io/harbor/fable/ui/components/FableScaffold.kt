@@ -62,7 +62,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -107,6 +110,7 @@ fun FableTopBar(
     collapseFraction: (() -> Float)? = null,
     drawGlass: Boolean = true,
     showNotice: Boolean = true,
+    titleMorph: TitleMorph? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val animatedDivider by animateFloatAsState(if (showDivider) 1f else 0f, Motion.inPlace(), label = "topBarDivider")
@@ -137,13 +141,31 @@ fun FableTopBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
+                    onTextLayout = { layout -> titleMorph?.inlineTextWidth = layout.lineWidth() },
                     modifier = Modifier
                         .padding(horizontal = 96.dp)
+                        // Measured before the layer below, so the morph sees the resting spot.
+                        .onPlaced { titleMorph?.inline = it }
                         .graphicsLayer {
-                            val a = titleAlpha()
-                            alpha = a
-                            // Rises into place as it fades in, like the iOS hand-over.
-                            translationY = (1f - a) * titleShiftPx
+                            val f = collapseFraction?.invoke()
+                            val travel = if (f != null) titleMorph?.travel(f) else null
+                            if (f != null && travel != null) {
+                                // One title travels: from the large title's spot in the list
+                                // (scaled up to its size) up and across into the bar, tracking
+                                // the scroll, instead of two titles cross-fading.
+                                alpha = if (f > 0f) 1f else 0f
+                                transformOrigin = TransformOrigin(0f, 0f)
+                                scaleX = travel.scale
+                                scaleY = travel.scale
+                                translationX = travel.dx
+                                translationY = travel.dy
+                            } else {
+                                val a = titleAlpha()
+                                alpha = a
+                                // Fallback before the large title is measured: slides up from
+                                // below the bar as it fades in.
+                                translationY = (1f - a) * titleShiftPx
+                            }
                         },
                 )
                 CompositionLocalProvider(LocalGlassControls provides true) {
@@ -380,6 +402,9 @@ fun FableScreen(
         }
     }
 
+    // Geometry shared by the large title and the bar title, for the slide hand-over.
+    val titleMorph = remember { TitleMorph() }
+
     // Height of the bar (+ header) the list scrolls beneath; estimated until first measured.
     var chromePx by remember { mutableIntStateOf(0) }
     val chromeHeight = if (chromePx > 0) {
@@ -396,7 +421,8 @@ fun FableScreen(
         Box(
             Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .onPlaced { titleMorph.screen = it },
         ) {
             LazyColumn(
                 state = listState,
@@ -420,6 +446,7 @@ fun FableScreen(
                             collapsePx = collapsePx,
                             showRowActions = !pastLargeTitle,
                             actions = actions,
+                            titleMorph = titleMorph,
                         )
                     }
                 }
@@ -445,6 +472,7 @@ fun FableScreen(
                             collapseFraction = if (largeTitle) collapse else null,
                             drawGlass = false,
                             showNotice = false,
+                            titleMorph = if (largeTitle) titleMorph else null,
                             actions = if (actionsInBar) actions else ({}),
                         )
                         header?.invoke()
@@ -466,6 +494,7 @@ private fun LargeTitleBlock(
     collapsePx: Float,
     showRowActions: Boolean,
     actions: @Composable RowScope.() -> Unit,
+    titleMorph: TitleMorph,
 ) {
     Column(Modifier.fillMaxWidth().padding(bottom = Spacing.xs)) {
         if (largeTitle) {
@@ -480,18 +509,26 @@ private fun LargeTitleBlock(
                     style = MaterialTheme.typography.headlineLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { layout -> titleMorph.largeTextWidth = layout.lineWidth() },
                     modifier = Modifier
                         .weight(1f)
+                        .onPlaced { titleMorph.large = it }
                         .graphicsLayer {
                             val f = collapse()
-                            // Shrinks from its leading edge, trails the scroll a little
-                            // (parallax) and fades out as the inline title fades in.
-                            transformOrigin = LargeTitleOrigin
-                            val scale = 1f - LargeTitleShrink * f
-                            scaleX = scale
-                            scaleY = scale
-                            translationY = f * collapsePx * LargeTitleParallax
-                            alpha = largeTitleAlpha(f)
+                            if (titleMorph.travel(f) != null) {
+                                // The bar title takes over from the first pixel of scroll and
+                                // carries the hand-over itself; this copy only shows at rest.
+                                alpha = if (f > 0f) 0f else 1f
+                            } else {
+                                // Fallback: shrinks from its leading edge, trails the scroll a
+                                // little (parallax) and fades out as the inline title fades in.
+                                transformOrigin = LargeTitleOrigin
+                                val scale = 1f - LargeTitleShrink * f
+                                scaleX = scale
+                                scaleY = scale
+                                translationY = f * collapsePx * LargeTitleParallax
+                                alpha = largeTitleAlpha(f)
+                            }
                         },
                 )
                 if (showRowActions) {
@@ -520,6 +557,48 @@ private fun LargeTitleBlock(
         }
     }
 }
+
+/**
+ * Where the large title and the bar title sit, so the bar title can travel between the two.
+ * Plain fields, written during layout (onPlaced / onTextLayout) and read in the draw phase of
+ * the same frame, so the slide tracks the scroll with no lag and no recomposition.
+ *
+ * Positions are taken relative to the screen ([screen]) rather than the window, so navigation
+ * transitions (which translate the whole screen) don't skew them.
+ */
+class TitleMorph internal constructor() {
+    internal var screen: LayoutCoordinates? = null
+    internal var large: LayoutCoordinates? = null
+    internal var inline: LayoutCoordinates? = null
+    internal var largeTextWidth = 0f
+    internal var inlineTextWidth = 0f
+
+    /** Offset and scale for the bar title at collapse [f]; null until both titles are measured. */
+    internal fun travel(f: Float): Travel? {
+        val p = f.coerceIn(0f, 1f)
+        if (p >= 1f) return Travel(0f, 0f, 1f)
+        val root = screen?.takeIf { it.isAttached } ?: return null
+        val from = large?.takeIf { it.isAttached } ?: return null
+        val to = inline?.takeIf { it.isAttached } ?: return null
+        if (largeTextWidth <= 0f || inlineTextWidth <= 0f) return null
+        // The large title's live position: it scrolls with the list.
+        val start = root.localPositionOf(from, Offset.Zero)
+        val end = root.localPositionOf(to, Offset.Zero)
+        val ratio = (largeTextWidth / inlineTextWidth).coerceIn(1f, 3f)
+        val q = 1f - p
+        return Travel(
+            dx = q * (start.x - end.x),
+            dy = q * (start.y - end.y),
+            scale = 1f + (ratio - 1f) * q,
+        )
+    }
+
+    internal class Travel(val dx: Float, val dy: Float, val scale: Float)
+}
+
+/** Width of the first (only) line of a single-line title. */
+private fun TextLayoutResult.lineWidth(): Float =
+    if (lineCount > 0) getLineRight(0) - getLineLeft(0) else 0f
 
 /** Height of the bar's content row (title and icon buttons), above the status bar. */
 private val TopBarHeight = 52.dp

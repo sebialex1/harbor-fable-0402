@@ -5,6 +5,27 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
+import io.harbor.fable.data.models.VulkanProbeResult
+import io.harbor.fable.data.models.VulkanSource
+import io.harbor.fable.nativebridge.DeviceGpuInfo
+import io.harbor.fable.nativebridge.DeviceProbe
+import io.harbor.fable.nativebridge.VulkanProbe
+import io.harbor.fable.ui.theme.FableBlue
+import io.harbor.fable.ui.theme.FableBlueDim
+import io.harbor.fable.ui.theme.TileTone
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -191,38 +212,46 @@ private fun SetupContent(
     }
 }
 
-// --- Step 1: welcome --------------------------------------------------------------------------
+// --- Step 1: welcome -------------------------------------------------------------------------
 
+/**
+ * The first screen is about the device, not the brand: a small app mark, then what this phone
+ * can actually run — the GPU, the Vulkan version and driver the system ships, and a one-line
+ * verdict on whether DXVK 2.x / VKD3D-Proton (both need Vulkan 1.3) will work. The probe runs
+ * off the main thread; the card fills in as results arrive.
+ */
 @Composable
 private fun WelcomeStep(onStart: () -> Unit, onSkip: () -> Unit) {
+    var gpu by remember { mutableStateOf<DeviceGpuInfo?>(null) }
+    var vulkan by remember { mutableStateOf<VulkanProbeResult?>(null) }
+    LaunchedEffect(Unit) {
+        gpu = withContext(Dispatchers.IO) { DeviceProbe.read() }
+        vulkan = VulkanProbe.probe(VulkanSource.SYSTEM, null)
+    }
     SetupColumn {
-        Spacer(Modifier.weight(1f))
-        Staggered(index = 0) { AppMark() }
-        Spacer(Modifier.height(Spacing.xxxl))
+        Spacer(Modifier.weight(0.7f))
+        Staggered(index = 0) { AppMark(size = 64.dp) }
+        Spacer(Modifier.height(Spacing.xl))
         Staggered(index = 1) {
             Text(
-                text = "Fable",
-                style = MaterialTheme.typography.displaySmall.copy(
-                    fontFamily = MaterialTheme.typography.headlineLarge.fontFamily,
-                    fontWeight = MaterialTheme.typography.headlineLarge.fontWeight,
-                    letterSpacing = (-1).sp,
-                ),
-                color = FableText,
+                text = "Your Device",
+                style = MaterialTheme.typography.headlineLarge,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        Spacer(Modifier.height(Spacing.sm))
+        Spacer(Modifier.height(Spacing.xs))
         Staggered(index = 2) {
             Text(
-                text = "Windows apps and games on Android",
-                style = MaterialTheme.typography.bodyLarge,
-                color = FableTextDim,
+                text = "What this phone brings to Windows games",
+                style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),
             )
         }
-        Spacer(Modifier.weight(1.2f))
+        Spacer(Modifier.height(Spacing.xxl))
+        Staggered(index = 3) { DeviceCapabilityCard(gpu = gpu, vulkan = vulkan) }
+        Spacer(Modifier.weight(1f))
         Staggered(index = 4) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 FableButton(
@@ -236,6 +265,149 @@ private fun WelcomeStep(onStart: () -> Unit, onSkip: () -> Unit) {
             }
         }
         Spacer(Modifier.height(Spacing.lg))
+    }
+}
+
+/**
+ * GPU hero row, three capability stats on toned gradient tiles (Vulkan, driver, extensions)
+ * and a verdict line, on one glass card. Values morph in from a placeholder as the probe lands.
+ */
+@Composable
+private fun DeviceCapabilityCard(gpu: DeviceGpuInfo?, vulkan: VulkanProbeResult?) {
+    val device = vulkan?.primaryDevice
+    val shape = RoundedCornerShape(22.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .glassSurface(shape = shape)
+            .padding(Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ToneIconTile(icon = FableIcons.GpuInfo, tone = TileTone.Teal, size = 44.dp)
+            Spacer(Modifier.width(Spacing.md))
+            Column(Modifier.weight(1f)) {
+                MorphText(
+                    text = device?.name ?: gpu?.gpu?.takeIf { it != "Unknown" } ?: if (gpu == null) "Checking…" else "Unknown GPU",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = FableText,
+                )
+                MorphText(
+                    text = listOfNotNull(gpu?.device?.takeIf { it.isNotBlank() }, gpu?.abi?.takeIf { it.isNotBlank() }, gpu?.sdk?.let { "API $it" })
+                        .joinToString(" · ")
+                        .ifBlank { " " },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = FableTextDim,
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            StatTile(
+                label = "Vulkan",
+                value = when {
+                    device != null -> device.apiGeneration
+                    vulkan != null -> "—"
+                    else -> "…"
+                },
+                tone = TileTone.Blue,
+                shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp, topEnd = 6.dp, bottomEnd = 6.dp),
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "Driver",
+                value = when {
+                    device != null -> driverShortName(device.driverName, device.driverInfo, device.vendorName)
+                    vulkan != null -> "—"
+                    else -> "…"
+                },
+                tone = TileTone.Indigo,
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "Extensions",
+                value = when {
+                    vulkan == null -> "…"
+                    vulkan.ok -> vulkan.totalCount.toString()
+                    else -> "—"
+                },
+                tone = TileTone.Violet,
+                shape = RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp, topEnd = 16.dp, bottomEnd = 16.dp),
+                modifier = Modifier.weight(1f),
+            )
+        }
+        val verdict = vulkanVerdict(vulkan)
+        AnimatedContent(
+            targetState = verdict,
+            transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit(Motion.Fast)) },
+            label = "deviceVerdict",
+        ) { (good, line) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = if (good) FableIcons.Check else FableIcons.Warning,
+                    contentDescription = null,
+                    tint = if (good) FableBlue else FableWarn,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(Spacing.sm))
+                Text(line, style = MaterialTheme.typography.bodySmall, color = if (good) FableText else FableTextDim)
+            }
+        }
+    }
+}
+
+/** One capability on its tone: a small grey label over a large value that morphs in. */
+@Composable
+private fun StatTile(label: String, value: String, tone: TileTone, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .gradientTile(shape = shape, start = tone.start, end = tone.end)
+            .padding(horizontal = Spacing.md, vertical = Spacing.md),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = tone.glyph.copy(alpha = 0.8f), maxLines = 1)
+        Spacer(Modifier.height(Spacing.xxs))
+        MorphText(text = value, style = MaterialTheme.typography.titleMedium, color = FableText)
+    }
+}
+
+/** Text that slides up and fades when it changes, so probe results arrive with motion. */
+@Composable
+private fun MorphText(text: String, style: androidx.compose.ui.text.TextStyle, color: Color) {
+    AnimatedContent(
+        targetState = text,
+        transitionSpec = {
+            (fadeIn(Motion.enter()) + slideInVertically(Motion.enter()) { it / 2 }) togetherWith
+                (fadeOut(Motion.exit(Motion.Fast)) + slideOutVertically(Motion.exit(Motion.Fast)) { -it / 2 }) using
+                SizeTransform(clip = false) { _, _ -> Motion.morph() }
+        },
+        label = "morphText",
+    ) { current ->
+        Text(current, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** "radv" / "Mesa 24.1" / vendor, short enough for a stat tile. */
+private fun driverShortName(driverName: String?, driverInfo: String?, vendor: String): String {
+    val name = driverName?.trim().orEmpty()
+    return when {
+        name.isNotEmpty() && name.length <= 10 -> name.uppercase().takeIf { it == "RADV" } ?: name.replaceFirstChar { it.uppercase() }
+        !driverInfo.isNullOrBlank() -> driverInfo.trim().substringBefore(' ').take(10)
+        else -> vendor
+    }
+}
+
+/** True with a positive line when DXVK 2.x / VKD3D-Proton can run (Vulkan 1.3), else a caution. */
+private fun vulkanVerdict(vulkan: VulkanProbeResult?): Pair<Boolean, String> {
+    val device = vulkan?.primaryDevice
+    if (vulkan == null) return true to "Checking Vulkan…"
+    if (device == null) return false to "No Vulkan device found. Games will need WineD3D"
+    val parts = device.apiGeneration.split('.')
+    val major = parts.getOrNull(0)?.toIntOrNull() ?: 0
+    val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    return if (major > 1 || (major == 1 && minor >= 3)) {
+        true to "Vulkan ${device.apiGeneration}: ready for DXVK 2.x and VKD3D-Proton"
+    } else {
+        false to "Vulkan ${device.apiGeneration}: a RADV driver unlocks DXVK 2.x"
     }
 }
 
@@ -282,7 +454,7 @@ private fun DownloadStep(
 
     SetupColumn {
         Spacer(Modifier.weight(0.6f))
-        Staggered(index = 0) {
+        Staggered(index = 1) {
             Text(
                 text = if (allDone) "Almost Done" else "Setting Up",
                 style = MaterialTheme.typography.headlineLarge,
@@ -290,50 +462,45 @@ private fun DownloadStep(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (allDone && setup.unavailable.isNotEmpty()) {
-            Spacer(Modifier.height(Spacing.xs))
-            Text(
-                text = "Some packages have no build",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        Spacer(Modifier.height(Spacing.xxl))
-        Staggered(index = 2) {
-            val requiredCount = items.size.coerceAtLeast(RecommendedKind.entries.count { it.required })
-            val indeterminate = preparing && tracked.isEmpty()
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                // The ring scales with the screen instead of sitting as a small fixed badge.
-                BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    val ringSize = (maxWidth * 0.62f).coerceIn(RingMinSize, RingMaxSize)
-                    ProgressRing(
-                        progress = setup.progress,
-                        indeterminate = indeterminate,
-                        label = "$readyCount of $requiredCount",
-                        modifier = Modifier.size(ringSize),
-                    )
-                }
-                Spacer(Modifier.height(Spacing.xl))
-                // Overall progress across the full width of the column.
-                OverallProgressBar(
-                    progress = if (indeterminate) null else setup.progress,
-                    modifier = Modifier.fillMaxWidth(),
+        Spacer(Modifier.height(Spacing.lg))
+        val requiredCount = items.size.coerceAtLeast(RecommendedKind.entries.count { it.required })
+        val indeterminate = preparing && tracked.isEmpty()
+        // The status pill drops in from the top, and the ring grows out of it: a thin line runs
+        // down from the pill to the top of the ring, where the arc starts, so the progress reads
+        // as an extension of the pill rather than a separate widget.
+        StatusPill(
+            text = when {
+                allDone && setup.unavailable.isNotEmpty() -> "Some packages have no build"
+                allDone -> "All set"
+                preparing && tracked.isEmpty() -> "Preparing"
+                else -> items.firstOrNull { it.status == RecommendedStatus.DOWNLOADING }?.let { "Downloading ${it.kind.label}" } ?: "Setting up"
+            },
+            active = !allDone,
+        )
+        PillExtension()
+        RingFromPill {
+            // The ring scales with the screen instead of sitting as a small fixed badge.
+            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val ringSize = (maxWidth * 0.62f).coerceIn(RingMinSize, RingMaxSize)
+                ProgressRing(
+                    progress = setup.progress,
+                    indeterminate = indeterminate,
+                    label = "$readyCount of $requiredCount",
+                    modifier = Modifier.size(ringSize),
                 )
-                Spacer(Modifier.height(Spacing.sm))
-                Row(Modifier.fillMaxWidth()) {
-                    Text(
-                        text = if (allDone) "Downloaded" else "Downloading",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        text = if (setup.pendingBytes > 0) "${formatBytes(setup.pendingBytes)} left" else "",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
             }
         }
+        Spacer(Modifier.height(Spacing.lg))
+        Text(
+            text = when {
+                setup.pendingBytes > 0 -> "${formatBytes(setup.pendingBytes)} left"
+                allDone -> "Downloaded"
+                else -> " "
+            },
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
         Spacer(Modifier.height(Spacing.xxl))
         AnimatedVisibility(visible = message != null, enter = fadeIn(Motion.enter()), exit = fadeOut(Motion.exit())) {
             Column {
@@ -410,7 +577,7 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
             val start = if (indeterminate) spin.value - 90f else -90f
             if (sweep > 0f) {
                 drawArc(
-                    color = FableText,
+                    brush = Brush.sweepGradient(listOf(FableBlueDim, FableBlue, FableText, FableBlueDim)),
                     startAngle = start,
                     sweepAngle = sweep,
                     useCenter = false,
@@ -434,17 +601,89 @@ private fun ProgressRing(progress: Float, indeterminate: Boolean, label: String,
 private val RingMinSize = 168.dp
 private val RingMaxSize = 240.dp
 
-/** Full-width overall progress: a 4dp white bar on the dark track. Null runs indeterminate. */
+/**
+ * Glass status capsule at the top of the download step. It drops in from the top edge and
+ * unfolds from a dot to its full width; its text morphs (size and content) as the step moves
+ * from package to package. A blue dot pulses inside while work is running.
+ */
 @Composable
-private fun OverallProgressBar(progress: Float?, modifier: Modifier = Modifier) {
-    LineProgressBar(
-        progress = progress,
-        modifier = modifier.clip(RoundedCornerShape(percent = 50)),
-        color = FableText,
-        trackColor = FableTrack,
-        thickness = 4.dp,
-        rounded = false,
+private fun StatusPill(text: String, active: Boolean) {
+    val unfold = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { unfold.animateTo(1f, Motion.slideInFromTop(Motion.Slow)) }
+    val pulse = rememberInfiniteTransition(label = "statusPulse")
+    val pulseAlpha by pulse.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(800, easing = Motion.EaseInOut), RepeatMode.Reverse),
+        label = "statusPulseAlpha",
     )
+    val density = LocalDensity.current
+    Row(
+        Modifier
+            .graphicsLayer {
+                val u = unfold.value
+                alpha = u
+                translationY = (1f - u) * with(density) { -24.dp.toPx() }
+                // Unfolds sideways from a dot into the capsule.
+                scaleX = 0.35f + 0.65f * u
+            }
+            .glassSurface(shape = RoundedCornerShape(PillRadius))
+            .animateContentSize(Motion.morph())
+            .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .graphicsLayer { alpha = if (active) pulseAlpha else 1f }
+                .clip(CircleShape)
+                .background(FableBlue),
+        )
+        Spacer(Modifier.width(Spacing.sm))
+        AnimatedContent(
+            targetState = text,
+            transitionSpec = {
+                (fadeIn(Motion.enter()) + slideInVertically(Motion.enter()) { it / 2 }) togetherWith
+                    (fadeOut(Motion.exit(Motion.Fast)) + slideOutVertically(Motion.exit(Motion.Fast)) { -it / 2 }) using
+                    SizeTransform(clip = false) { _, _ -> Motion.morph() }
+            },
+            label = "statusPillText",
+        ) { current ->
+            Text(current, style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp), color = FableText, maxLines = 1)
+        }
+    }
+}
+
+/** The thin blue line that draws down from the status pill to the top of the ring. */
+@Composable
+private fun PillExtension() {
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { grow.animateTo(1f, Motion.morph(Motion.Slow, delay = 220)) }
+    Box(
+        Modifier
+            .size(width = 2.dp, height = 28.dp)
+            .graphicsLayer {
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                scaleY = grow.value
+            }
+            .background(Brush.verticalGradient(listOf(FableBlue.copy(alpha = 0f), FableBlue.copy(alpha = 0.7f)))),
+    )
+}
+
+/** Grows its content (the ring) out of the line above it: from the top centre, after the line. */
+@Composable
+private fun RingFromPill(content: @Composable () -> Unit) {
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { grow.animateTo(1f, Motion.morph(Motion.Entrance, delay = 380)) }
+    Box(
+        Modifier.graphicsLayer {
+            val g = grow.value
+            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+            alpha = g
+            scaleX = 0.6f + 0.4f * g
+            scaleY = 0.6f + 0.4f * g
+        },
+    ) { content() }
 }
 
 // --- Step 3: ready ----------------------------------------------------------------------------
