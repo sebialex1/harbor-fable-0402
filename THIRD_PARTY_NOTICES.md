@@ -192,6 +192,17 @@ the same file ships under both names.
 | libbz2.so.1.0, libbz2.so | libbz2 1.0.8-8 | bzip2 license (BSD-style, `libbz2.txt`) |
 | libbrotlidec.so, libbrotlicommon.so | brotli 1.2.0 | MIT (`brotli.txt`) |
 
+### Fontconfig and its dependencies (Termux builds)
+
+Wine's `win32u` loads `libfontconfig.so.1` through Box64's wrapped Fontconfig; without a native
+aarch64 build Box64 reports "Error initializing native libfontconfig.so" and `kernel32.dll` fails
+to load (status c0000135). Fontconfig needs FreeType (above) and expat.
+
+| Library (file names) | Termux package | License |
+|---|---|---|
+| libfontconfig.so, libfontconfig.so.1 | fontconfig 2.18.3 | MIT/X11-style (`fontconfig.txt`) |
+| libexpat.so.1, libexpat.so | libexpat 2.9.0 | MIT (`libexpat.txt`) |
+
 The full license texts ship in the APK under `assets/x11/licenses/`. At install time Fable
 patches one string in its copy of libxcb (the compiled-in socket directory
 `/data/data/com.termux/files/usr/tmp/.X11-unix/X` -> `<filesDir>/.X11-unix/X`); no other change.

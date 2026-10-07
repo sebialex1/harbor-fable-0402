@@ -38,7 +38,7 @@ internal object NativeLibResolver {
     private const val TAG = "NativeLibResolver"
 
     /** Bump when [SPECS] or the copy logic changes so existing installs re-resolve. */
-    private const val VERSION = "native-libs-2"
+    private const val VERSION = "native-libs-3"
     private const val MARKER = ".fable-native-libs"
 
     /** Where Android keeps 64-bit shared libraries, in search order. */
@@ -95,6 +95,18 @@ internal object NativeLibResolver {
         Spec("libbz2.so", listOf("libbz2.so", "libbz2.so.1.0", "libbz2.so.1"), "bzip2 (FreeType)", aliases = listOf("libbz2.so.1.0"), required = true),
         Spec("libbrotlidec.so", listOf("libbrotlidec.so", "libbrotlidec.so.1"), "Brotli / WOFF2 (FreeType)", required = true),
         Spec("libbrotlicommon.so", listOf("libbrotlicommon.so", "libbrotlicommon.so.1"), "Brotli (libbrotlidec)", required = true),
+        // Bundled (Termux Fontconfig 2.18.3). Without it Box64 reports "Error initializing native
+        // libfontconfig.so" and kernel32.dll fails to load (status c0000135).
+        Spec(
+            target = "libfontconfig.so",
+            candidates = listOf("libfontconfig.so", "libfontconfig.so.1"),
+            purpose = "Fontconfig (win32u font enumeration)",
+            aliases = listOf("libfontconfig.so.1"),
+            required = true,
+            systemFallback = false,
+        ),
+        // Fontconfig's DT_NEEDED closure beyond FreeType (libexpat.so.1): bundled alongside it.
+        Spec("libexpat.so", listOf("libexpat.so", "libexpat.so.1"), "Expat XML (Fontconfig)", aliases = listOf("libexpat.so.1"), required = true, systemFallback = false),
         // X extensions winex11 loads; bundled (Termux), system copies only as a fallback.
         Spec("libXrender.so", listOf("libXrender.so", "libXrender.so.1"), "X Render (winex11)"),
         Spec("libXcursor.so", listOf("libXcursor.so", "libXcursor.so.1"), "X cursors (winex11)"),
