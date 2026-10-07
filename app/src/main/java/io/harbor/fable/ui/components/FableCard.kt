@@ -82,7 +82,7 @@ internal fun Modifier.cardSurface(shape: Shape, level: SurfaceLevel, fill: Color
 internal fun Modifier.toneGlow(tone: TileTone): Modifier = drawBehind {
     drawRect(
         Brush.radialGradient(
-            colors = listOf(tone.start.copy(alpha = 0.45f), Color.Transparent),
+            colors = listOf(tone.start.copy(alpha = 0.22f), Color.Transparent),
             center = Offset(0f, 0f),
             radius = size.maxDimension * 0.75f,
         ),

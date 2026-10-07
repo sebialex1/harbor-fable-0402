@@ -7,30 +7,34 @@ import androidx.compose.ui.graphics.Color
 //
 // Phase 1 overhaul: added glass/translucency support, a blue accent for topbar notifications, and
 // gradient surface colours for depth that replaces the old opaque-only philosophy.
+//
+// OLED pass: surfaces sit much closer to black (cards ~#111, controls ~#1A, pressed ~#24) and every
+// tint / gradient wash runs at roughly half its former alpha, so the UI reads as black with faint
+// structure rather than grey slabs. Text stays white / #8E8E93 for contrast.
 
 /** True black canvas, so OLED pixels are off behind the content. */
 val FableBg = Color(0xFF000000)
 
 /** Grouped-list surface (iOS secondarySystemGroupedBackground). */
-val FableSurface = Color(0xFF1C1C1E)
+val FableSurface = Color(0xFF111112)
 
 /** One step above a grouped surface: controls, chips and tiles on a card (iOS tertiary). */
-val FableSurfaceRaised = Color(0xFF2C2C2E)
+val FableSurfaceRaised = Color(0xFF1A1A1C)
 
 /** Pressed and selected state of a raised control. */
-val FableSurfaceHigh = Color(0xFF3A3A3C)
+val FableSurfaceHigh = Color(0xFF242426)
 
 /** Subtle hairline edge around solid surfaces. */
-val FableBorder = Color(0x1AFFFFFF)
+val FableBorder = Color(0x12FFFFFF)
 
 /** Hairline between rows that share a section (iOS separator). */
-val FableDivider = Color(0xFF38383A)
+val FableDivider = Color(0xFF262628)
 
 /** Outline for text fields and other controls that must read as interactive. */
 val FableOutline = Color(0x33FFFFFF)
 
 /** Track of switches and progress lines when off or empty. */
-val FableTrack = Color(0xFF39393D)
+val FableTrack = Color(0xFF2C2C2F)
 
 /** Material components that take a flat container/border pair (switch tracks). */
 val FableControl = FableTrack
@@ -67,12 +71,12 @@ val FableError = FableText
 // On API 31+ these get a real RenderEffect blur; on older versions the higher alpha compensates.
 
 /** Translucent panel fill for glass surfaces (drawn over content with blur). */
-val GlassSurface = Color(0xCC1C1C1E)
-val GlassSurfaceRaised = Color(0xCC2C2C2E)
-val GlassBorder = Color(0x33FFFFFF)
+val GlassSurface = Color(0xB3111112)
+val GlassSurfaceRaised = Color(0xB31A1A1C)
+val GlassBorder = Color(0x1AFFFFFF)
 
 /** Lighter glass for floating elements (topbar depth, notification overlays). */
-val GlassLight = Color(0x801C1C1E)
+val GlassLight = Color(0x66111112)
 
 /** Scrim behind glass overlays. */
 val GlassScrim = Color(0x99000000)
@@ -80,15 +84,15 @@ val GlassScrim = Color(0x99000000)
 // --- Gradient stops for depth and blending.
 
 /** Vertical gradient that fades from a surface colour to transparent, for tile backgrounds. */
-val GradientTopStop = Color(0x18FFFFFF)
+val GradientTopStop = Color(0x0CFFFFFF)
 val GradientBottomStop = Color(0x00000000)
 
 /** White gradient for the play button's hollow glass effect. */
-val PlayGradientTop = Color(0x22FFFFFF)
-val PlayGradientBottom = Color(0x08FFFFFF)
+val PlayGradientTop = Color(0x11FFFFFF)
+val PlayGradientBottom = Color(0x04FFFFFF)
 
 /** Blue gradient for notification text glow. */
-val NotifyGradientStart = Color(0x4D4A9EFF)
+val NotifyGradientStart = Color(0x264A9EFF)
 val NotifyGradientEnd = Color(0x004A9EFF)
 
 // Tab bar: a floating, glass pill over the black canvas.
@@ -99,14 +103,14 @@ val TabItemIdle = FableTextDim
 // --- Phase 2+: frost, chrome glass and tile tones.
 
 /** Soft light pooled inside glass surfaces (see `Modifier.glassSurface`). */
-val GlassFrost = Color(0x14FFFFFF)
+val GlassFrost = Color(0x0AFFFFFF)
 
 /** Top-bar glass once content scrolls beneath it: near-black at the top, more see-through below. */
 val BarGlassTop = Color(0xF2000000)
-val BarGlassBottom = Color(0xC70B0B0D)
+val BarGlassBottom = Color(0xD9050506)
 
 /** Dim blue wash behind topbar notifications so the text stays legible over content. */
-val NotifyWash = Color(0x1A4A9EFF)
+val NotifyWash = Color(0x0D4A9EFF)
 
 /**
  * Gradient tones that give tiles personality without turning the UI into a rainbow: every tone
@@ -114,10 +118,12 @@ val NotifyWash = Color(0x1A4A9EFF)
  * light tint of the same hue. Each tone pairs (start, end, glyph).
  */
 enum class TileTone(val start: Color, val end: Color, val glyph: Color) {
-    Blue(Color(0xFF1D4E8F), Color(0xFF0E2340), Color(0xFFA9CDFF)),
-    Indigo(Color(0xFF3B3A8C), Color(0xFF17163D), Color(0xFFC3C1FF)),
-    Teal(Color(0xFF14636A), Color(0xFF072A2E), Color(0xFF9DE3E8)),
-    Violet(Color(0xFF5B2F86), Color(0xFF241237), Color(0xFFDCC2FF)),
-    Amber(Color(0xFF7A4A12), Color(0xFF2E1B06), Color(0xFFFFD49A)),
-    Graphite(Color(0xFF3A3A3F), Color(0xFF161618), Color(0xFFE5E5EA)),
+    // Darker, desaturated stops (roughly half the old brightness and chroma); glyphs keep their
+    // light tints so icons on a tile stay readable.
+    Blue(Color(0xFF15263D), Color(0xFF090F18), Color(0xFFA9CDFF)),
+    Indigo(Color(0xFF1E1E3A), Color(0xFF0C0C18), Color(0xFFC3C1FF)),
+    Teal(Color(0xFF112B2E), Color(0xFF061112), Color(0xFF9DE3E8)),
+    Violet(Color(0xFF261A33), Color(0xFF100A16), Color(0xFFDCC2FF)),
+    Amber(Color(0xFF33240F), Color(0xFF140E06), Color(0xFFFFD49A)),
+    Graphite(Color(0xFF232326), Color(0xFF0E0E10), Color(0xFFE5E5EA)),
 }

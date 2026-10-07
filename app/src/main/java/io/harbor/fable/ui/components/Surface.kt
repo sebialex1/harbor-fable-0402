@@ -140,7 +140,7 @@ fun Modifier.gradientTile(
 ): Modifier {
     val base = clip(shape)
         .background(Brush.linearGradient(listOf(start, end)), shape)
-        .background(Brush.verticalGradient(listOf(Color(0x24FFFFFF), Color.Transparent)), shape)
+        .background(Brush.verticalGradient(listOf(Color(0x12FFFFFF), Color.Transparent)), shape)
     return if (border != null) {
         base.border(HairlineStroke, Brush.verticalGradient(listOf(border, Color.Transparent)), shape)
     } else {

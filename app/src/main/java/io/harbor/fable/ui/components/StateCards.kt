@@ -84,7 +84,7 @@ fun EmptyState(
                 .drawBehind {
                     drawCircle(
                         Brush.radialGradient(
-                            listOf(tone.start.copy(alpha = 0.55f), Color.Transparent),
+                            listOf(tone.start.copy(alpha = 0.28f), Color.Transparent),
                             radius = size.minDimension / 2f,
                         ),
                     )
