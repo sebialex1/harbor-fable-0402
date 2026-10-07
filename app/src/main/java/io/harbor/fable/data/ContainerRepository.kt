@@ -1,6 +1,8 @@
 package io.harbor.fable.data
 
 import android.content.Context
+import android.os.Environment
+import android.system.Os
 import android.util.Log
 import io.harbor.fable.data.models.Box64Preset
 import io.harbor.fable.data.models.Box64Settings
@@ -620,12 +622,15 @@ class ContainerRepository internal constructor(
         //    Winlator's guest command, so every app runs inside a virtual desktop the size of the
         //    X screen. Winlator names the desktop "nogui" when it launches a shortcut (its
         //    explorer.exe skips the taskbar/start menu for that name, so the game owns the whole
-        //    screen) and "shell" for desktop mode, which opens a file browser at C:\ so the user
-        //    sees something instead of a black screen.
+        //    screen) and "shell" for desktop mode, which opens a file browser so the user sees
+        //    something instead of a black screen. That browser starts in the phone's Downloads
+        //    folder (mapped as D:), where installers and games people copy over actually are;
+        //    C:\ (the prefix's Windows tree) only when Downloads can't be reached.
         val program = "explorer"
         val arguments: List<String>
         if (exe == null) {
-            arguments = listOf("/desktop=$DESKTOP_SHELL,$desktopSize", "/root,C:\\")
+            val root = downloadsDrive(dir, log) ?: "C:\\"
+            arguments = listOf("/desktop=$DESKTOP_SHELL,$desktopSize", "/root,$root")
         } else {
             val path = runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
                 ?: run {
@@ -1177,7 +1182,60 @@ class ContainerRepository internal constructor(
         }
     }
 
-    /** `/data/x/game.exe` -> `Z:\\data\\x\\game.exe` (the prefix maps Z: to /); Windows paths pass through. */
+    /**
+     * Points the prefix's `dosdevices/d:` at the device's public Downloads folder and returns
+     * `D:\` when that folder exists and is readable, null otherwise (no shared storage, or the
+     * storage permission wasn't granted, in which case explorer would open an empty drive).
+     *
+     * The link is (re)written on every desktop launch rather than once: Wine reads `dosdevices`
+     * at start-up, the Downloads path can differ per user profile, and a stale link costs nothing
+     * to replace. `Os.symlink` rather than `java.nio.file.Files`: it reports `EEXIST` and friends
+     * through plain errno values, and Android's `Files` implementation has been flaky with links
+     * pointing outside the app's sandbox. Never throws.
+     */
+    private fun downloadsDrive(prefix: File, log: LaunchLog): String? {
+        val downloads = runCatching {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        }.getOrNull()?.takeIf { it.isDirectory && it.canRead() }
+            ?: File("/sdcard/Download").takeIf { it.isDirectory && it.canRead() }
+        if (downloads == null) {
+            log.line("Downloads folder not readable (no storage permission?); desktop opens at C:\\")
+            return null
+        }
+        val dosDevices = File(prefix, "dosdevices")
+        if (!dosDevices.isDirectory && !dosDevices.mkdirs()) {
+            log.line("couldn't create ${dosDevices.absolutePath}; desktop opens at C:\\")
+            return null
+        }
+        val link = File(dosDevices, "d:")
+        val target = downloads.absolutePath
+        try {
+            val current = runCatching { Os.readlink(link.absolutePath) }.getOrNull()
+            if (current != target) {
+                // A regular file or directory named d: would be user data; only links are replaced.
+                if (current != null || !link.exists()) {
+                    runCatching { Os.remove(link.absolutePath) }
+                    Os.symlink(target, link.absolutePath)
+                } else {
+                    log.line("${link.absolutePath} exists and isn't a link; desktop opens at C:\\")
+                    return null
+                }
+            }
+        } catch (error: Exception) {
+            // Fall back to a shell, same as the existing extraction fallback: the link is just a
+            // convenience and must never stop the launch.
+            val fallback = runCatching {
+                Runtime.getRuntime().exec(arrayOf("ln", "-sfn", target, link.absolutePath)).waitFor() == 0
+            }.getOrDefault(false)
+            if (!fallback) {
+                log.line("couldn't link D: to $target (${error.message ?: error.javaClass.simpleName}); desktop opens at C:\\")
+                return null
+            }
+        }
+        log.line("D: -> $target (desktop opens there)")
+        return "D:\\"
+    }
+
     /**
      * Converts a host path to a Windows path Wine can open. Paths inside the container's
      * `drive_c` directory map to `C:\\...` (where the Wine prefix's C: drive is); everything
