@@ -30,6 +30,13 @@ import java.io.IOException
  * bundled-only as well (`native-libs-3`): Android has none of them, so a system lookup could only
  * ever report them missing.
  *
+ * The Vulkan loader is the opposite case (`native-libs-4`): Android ships it, but only as
+ * `/system/lib64/libvulkan.so`. Wine's `winevulkan.so` does `dlopen("libvulkan.so.1")` — the
+ * SONAME on every Linux distribution — and Box64 doesn't strip the version suffix, so without a
+ * `libvulkan.so.1` on `LD_LIBRARY_PATH` DXVK can't create a Vulkan instance (Direct3D 11 apps never
+ * open) and WineD3D falls back to an OpenGL that isn't there either (Direct3D 9 shows a black
+ * screen). The system loader is therefore copied in under both names.
+ *
  * For the rest, once per [VERSION], system build and bundled set, each [Spec] missing from the
  * library directory is looked up in [SYSTEM_LIB_DIRS] under its candidate names and the first
  * aarch64 ELF found is **copied** (not symlinked; links across Android's partitions are
@@ -43,7 +50,7 @@ internal object NativeLibResolver {
     private const val TAG = "NativeLibResolver"
 
     /** Bump when [SPECS] or the copy logic changes so existing installs re-resolve. */
-    private const val VERSION = "native-libs-3"
+    private const val VERSION = "native-libs-4"
     private const val MARKER = ".fable-native-libs"
 
     /** Where Android keeps 64-bit shared libraries, in search order. */
@@ -155,6 +162,16 @@ internal object NativeLibResolver {
         Spec("libwayland-egl.so", listOf("libwayland-egl.so", "libwayland-egl.so.1"), "Wayland EGL (SDL2)", systemFallback = false),
         Spec("libxkbcommon.so", listOf("libxkbcommon.so", "libxkbcommon.so.0"), "xkbcommon (SDL2)", systemFallback = false),
         Spec("libdecor-0.so", listOf("libdecor-0.so", "libdecor-0.so.0"), "libdecor (SDL2)", systemFallback = false),
+        // Android's own Vulkan loader. winevulkan dlopens the Linux SONAME "libvulkan.so.1", which
+        // Android never provides, so the system copy is installed under that alias too (see the
+        // class comment). Not required: Wine starts without Vulkan, only DXVK / D3D don't.
+        Spec(
+            target = "libvulkan.so",
+            candidates = listOf("libvulkan.so", "libvulkan.so.1"),
+            purpose = "Vulkan loader (DXVK / winevulkan)",
+            aliases = listOf("libvulkan.so.1"),
+            systemFallback = true,
+        ),
     )
 
     enum class Status {
@@ -255,7 +272,17 @@ internal object NativeLibResolver {
         if (previous != null && previous.first == stamp) {
             val entries = previous.second
             // A copy (or bundled file) that vanished (storage cleanup, X11 reinstall) means resolving again.
-            val intact = entries.all { it.status == Status.MISSING || File(dir, it.target).isFile }
+            // For copies this resolver made, the aliases it wrote next to the target (the versioned
+            // name Box64 / dlopen actually asks for, e.g. libvulkan.so.1) must be there as well;
+            // bundled libraries only get aliases the APK ships, so those are judged by the target alone.
+            val intact = entries.all { entry ->
+                when (entry.status) {
+                    Status.MISSING -> true
+                    Status.BUNDLED -> File(dir, entry.target).isFile
+                    Status.RESOLVED -> File(dir, entry.target).isFile &&
+                        SPECS.firstOrNull { it.target == entry.target }?.aliases.orEmpty().all { File(dir, it).isFile }
+                }
+            }
             if (intact) return Report(dir, entries, cached = true)
         }
         purgeStaleSystemCopies(dir, previous?.second.orEmpty(), searchDirs, bundled)
