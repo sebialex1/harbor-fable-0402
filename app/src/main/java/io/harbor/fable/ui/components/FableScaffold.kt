@@ -227,12 +227,8 @@ private fun GlassChrome(
 }
 
 /**
- * The top bar's message line: [FableUi.notice] fades and slides down out of the bar in
- * [FableBlue], with no card behind it — only a soft wash continuing the bar's glass so the text
- * stays legible over rows, and a thin blue glint that grows out from the bar's centre.
- *
- * Drag it up (or tap it) to dismiss; a short drag springs back. The space it takes morphs
- * open and closed with the text, so nothing below jumps.
+ * The top bar's message line: [FableUi.notice] fades in as simple blue text just under the bar.
+ * No card, no glint, no gradient wash — just text. Tap to dismiss.
  */
 @Composable
 fun TopBarNotice(modifier: Modifier = Modifier) {
@@ -240,7 +236,7 @@ fun TopBarNotice(modifier: Modifier = Modifier) {
     AnimatedContent(
         targetState = ui.notice,
         transitionSpec = {
-            notificationEnter<FableNotice?>()(this) togetherWith notificationExit<FableNotice?>()(this) using
+            fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) using
                 SizeTransform(clip = false) { _, _ -> Motion.morph() }
         },
         contentKey = { it?.id },
@@ -250,7 +246,22 @@ fun TopBarNotice(modifier: Modifier = Modifier) {
         if (notice == null) {
             Spacer(Modifier.fillMaxWidth().height(0.dp))
         } else {
-            NoticeLine(notice = notice, onDismiss = { ui.dismissNotice(notice.id) })
+            Text(
+                text = notice.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = FableBlue,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { ui.dismissNotice(notice.id) },
+                    )
+                    .padding(horizontal = ScreenPadding * 2, vertical = Spacing.sm),
+            )
         }
     }
 }

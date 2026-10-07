@@ -402,7 +402,7 @@ internal fun ContainerDetailContent(
                         expanded = expansion.isExpanded(GRAPHICS_KEY, default = false),
                         onToggle = { expansion.toggle(GRAPHICS_KEY, default = false) },
                         modifier = Modifier.animateItem().entrance(appear, 0),
-                        leading = { ToneIconTile(icon = FableIcons.GpuInfo, tone = TileTone.Blue) },
+                        leading = null,
                         badge = { Pill(text = graphicsSummary(container)) },
                     ) {
                         OptionSelector(
@@ -454,7 +454,7 @@ internal fun ContainerDetailContent(
                         expanded = expansion.isExpanded(SYSTEM_KEY, default = false),
                         onToggle = { expansion.toggle(SYSTEM_KEY, default = false) },
                         modifier = Modifier.animateItem().entrance(appear, 1),
-                        leading = { MonogramTile(text = "Wi", tone = TileTone.Violet) },
+                        leading = null,
                         badge = { Pill(text = translatorLabel(container.translator)) },
                     ) {
                         InfoRow(label = "Wine", value = container.wineVersion)
@@ -975,7 +975,7 @@ private fun Box64PresetSection(
         expanded = expanded,
         onToggle = onToggle,
         modifier = modifier,
-        leading = { MonogramTile(text = "64", tone = TileTone.Amber) },
+        leading = null,
         badge = { Pill(text = settings.preset.label) },
     ) {
         OptionSelector(
@@ -1021,7 +1021,7 @@ private fun Box64OptionsSection(
         expanded = expanded,
         onToggle = onToggle,
         modifier = modifier,
-        leading = { ToneIconTile(icon = FableIcons.Checklist, tone = TileTone.Amber) },
+        leading = null,
         badge = { if (settings.isCustomized) Pill(text = "${settings.overrides.size} changed") },
     ) {
         Box64Options.all.forEachIndexed { index, option ->
@@ -1100,7 +1100,7 @@ private fun PerformanceOverlaySection(
         expanded = expanded,
         onToggle = onToggle,
         modifier = modifier,
-        leading = { MonogramTile(text = "fps", tone = TileTone.Teal) },
+        leading = null,
         badge = { Pill(text = if (!hud.enabled || hud.isEmpty) "Off" else hudSummary(hud)) },
     ) {
         HudPreview(hud = hud, resolution = resolution)

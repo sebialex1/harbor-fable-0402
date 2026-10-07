@@ -283,23 +283,19 @@ private fun DeviceCapabilityCard(gpu: DeviceGpuInfo?, vulkan: VulkanProbeResult?
             .padding(Spacing.lg),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ToneIconTile(icon = FableIcons.GpuInfo, tone = TileTone.Teal, size = 44.dp)
-            Spacer(Modifier.width(Spacing.md))
-            Column(Modifier.weight(1f)) {
-                MorphText(
-                    text = device?.name ?: gpu?.gpu?.takeIf { it != "Unknown" } ?: if (gpu == null) "Checking…" else "Unknown GPU",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = FableText,
-                )
-                MorphText(
-                    text = listOfNotNull(gpu?.device?.takeIf { it.isNotBlank() }, gpu?.abi?.takeIf { it.isNotBlank() }, gpu?.sdk?.let { "API $it" })
-                        .joinToString(" · ")
-                        .ifBlank { " " },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = FableTextDim,
-                )
-            }
+        Column {
+            MorphText(
+                text = device?.name ?: gpu?.gpu?.takeIf { it != "Unknown" } ?: if (gpu == null) "Checking…" else "Unknown GPU",
+                style = MaterialTheme.typography.titleMedium,
+                color = FableText,
+            )
+            MorphText(
+                text = listOfNotNull(gpu?.device?.takeIf { it.isNotBlank() }, gpu?.abi?.takeIf { it.isNotBlank() }, gpu?.sdk?.let { "API $it" })
+                    .joinToString(" · ")
+                    .ifBlank { " " },
+                style = MaterialTheme.typography.bodySmall,
+                color = FableTextDim,
+            )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             StatTile(
@@ -309,8 +305,6 @@ private fun DeviceCapabilityCard(gpu: DeviceGpuInfo?, vulkan: VulkanProbeResult?
                     vulkan != null -> "—"
                     else -> "…"
                 },
-                tone = TileTone.Blue,
-                shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp, topEnd = 6.dp, bottomEnd = 6.dp),
                 modifier = Modifier.weight(1f),
             )
             StatTile(
@@ -320,8 +314,6 @@ private fun DeviceCapabilityCard(gpu: DeviceGpuInfo?, vulkan: VulkanProbeResult?
                     vulkan != null -> "—"
                     else -> "…"
                 },
-                tone = TileTone.Indigo,
-                shape = RoundedCornerShape(6.dp),
                 modifier = Modifier.weight(1f),
             )
             StatTile(
@@ -331,8 +323,6 @@ private fun DeviceCapabilityCard(gpu: DeviceGpuInfo?, vulkan: VulkanProbeResult?
                     vulkan.ok -> vulkan.totalCount.toString()
                     else -> "—"
                 },
-                tone = TileTone.Violet,
-                shape = RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp, topEnd = 16.dp, bottomEnd = 16.dp),
                 modifier = Modifier.weight(1f),
             )
         }
@@ -342,29 +332,21 @@ private fun DeviceCapabilityCard(gpu: DeviceGpuInfo?, vulkan: VulkanProbeResult?
             transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit(Motion.Fast)) },
             label = "deviceVerdict",
         ) { (good, line) ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = if (good) FableIcons.Check else FableIcons.Warning,
-                    contentDescription = null,
-                    tint = if (good) FableBlue else FableWarn,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(Spacing.sm))
-                Text(line, style = MaterialTheme.typography.bodySmall, color = if (good) FableText else FableTextDim)
-            }
+            Text(line, style = MaterialTheme.typography.bodySmall, color = if (good) FableText else FableTextDim)
         }
     }
 }
 
-/** One capability on its tone: a small grey label over a large value that morphs in. */
+/** One capability on a plain card: a small grey label over a large value that morphs in. */
 @Composable
-private fun StatTile(label: String, value: String, tone: TileTone, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier = Modifier) {
+private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
     Column(
         modifier
-            .gradientTile(shape = shape, start = tone.start, end = tone.end)
+            .fillMaxWidth()
+            .glassSurface(shape = RoundedCornerShape(12.dp))
             .padding(horizontal = Spacing.md, vertical = Spacing.md),
     ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = tone.glyph.copy(alpha = 0.8f), maxLines = 1)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = FableTextDim, maxLines = 1)
         Spacer(Modifier.height(Spacing.xxs))
         MorphText(text = value, style = MaterialTheme.typography.titleMedium, color = FableText)
     }
@@ -465,30 +447,16 @@ private fun DownloadStep(
         Spacer(Modifier.height(Spacing.lg))
         val requiredCount = items.size.coerceAtLeast(RecommendedKind.entries.count { it.required })
         val indeterminate = preparing && tracked.isEmpty()
-        // The status pill drops in from the top, and the ring grows out of it: a thin line runs
-        // down from the pill to the top of the ring, where the arc starts, so the progress reads
-        // as an extension of the pill rather than a separate widget.
-        StatusPill(
-            text = when {
-                allDone && setup.unavailable.isNotEmpty() -> "Some packages have no build"
-                allDone -> "All set"
-                preparing && tracked.isEmpty() -> "Preparing"
-                else -> items.firstOrNull { it.status == RecommendedStatus.DOWNLOADING }?.let { "Downloading ${it.kind.label}" } ?: "Setting up"
-            },
-            active = !allDone,
-        )
-        PillExtension()
-        RingFromPill {
-            // The ring scales with the screen instead of sitting as a small fixed badge.
-            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val ringSize = (maxWidth * 0.62f).coerceIn(RingMinSize, RingMaxSize)
-                ProgressRing(
-                    progress = setup.progress,
-                    indeterminate = indeterminate,
-                    label = "$readyCount of $requiredCount",
-                    modifier = Modifier.size(ringSize),
-                )
-            }
+        // Just the ring — no status pill above it. The ring's own percentage and count label
+        // are enough; the pill was clutter that clipped on narrow screens.
+        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val ringSize = (maxWidth * 0.62f).coerceIn(RingMinSize, RingMaxSize)
+            ProgressRing(
+                progress = setup.progress,
+                indeterminate = indeterminate,
+                label = "$readyCount of $requiredCount",
+                modifier = Modifier.size(ringSize),
+            )
         }
         Spacer(Modifier.height(Spacing.lg))
         Text(
