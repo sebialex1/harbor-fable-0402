@@ -1,9 +1,23 @@
 package io.harbor.fable.ui.screens
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LeadingIconTab
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -11,9 +25,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.ComponentBuild
@@ -27,7 +47,14 @@ import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.ui.components.*
+import io.harbor.fable.ui.theme.ControlRadiusCompact
+import io.harbor.fable.ui.theme.FableAccent
+import io.harbor.fable.ui.theme.FableBg
 import io.harbor.fable.ui.theme.FableError
+import io.harbor.fable.ui.theme.FableText
+import io.harbor.fable.ui.theme.FableTextDim
+import io.harbor.fable.ui.theme.FableTextFaint
+import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
 import io.harbor.fable.ui.icons.FableIcons
@@ -131,6 +158,12 @@ fun ContainerDetailScreen(
     }
 }
 
+/**
+ * The container screen in two tabs pinned under the bar. **Apps**: the launch buttons, the
+ * container's apps and the built-in tools as one compact row. **Settings**: Wine, driver,
+ * DXVK, VKD3D-Proton, resolution, translator, fullscreen, Box64 and Delete. Each tab keeps its
+ * own scroll position.
+ */
 @Composable
 internal fun ContainerDetailContent(
     container: Container?,
@@ -153,19 +186,28 @@ internal fun ContainerDetailContent(
     unavailableTools: Set<String> = emptySet(),
 ) {
     val appear = rememberEntrance()
+    var tab by rememberSaveable { mutableStateOf(ContainerTab.Apps) }
+    val appsListState = rememberLazyListState()
+    val settingsListState = rememberLazyListState()
     var box64Expanded by rememberSaveable { mutableStateOf(false) }
 
     FableScreen(
         title = container?.name ?: "Container",
         onBack = onBack,
+        listState = if (tab == ContainerTab.Apps) appsListState else settingsListState,
         actions = {
-            if (container != null) {
+            if (container != null && tab == ContainerTab.Apps) {
                 FableIconButton(
                     icon = FableIcons.Add,
                     contentDescription = "Add app",
                     onClick = onAddExe,
                 )
             }
+        },
+        header = if (container != null) {
+            { ContainerTabRow(selected = tab, onSelect = { tab = it }) }
+        } else {
+            null
         },
     ) {
         if (container == null) {
@@ -179,167 +221,257 @@ internal fun ContainerDetailContent(
             return@FableScreen
         }
 
-        // Launch controls: the primary app and the desktop side by side.
-        item(key = "launch") {
-            val primaryName = container.exeName?.takeIf { !container.exePath.isNullOrBlank() }
-            Row(
-                Modifier.fillMaxWidth().animateItem().entrance(appear, 0),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-            ) {
-                if (primaryName != null) {
-                    FableButton(
-                        text = primaryName,
-                        icon = FableIcons.Play,
-                        primary = true,
-                        modifier = Modifier.weight(1f),
-                        onClick = onLaunchPrimary,
-                    )
+        when (tab) {
+            ContainerTab.Apps -> {
+                // Launch controls: the primary app and the desktop side by side.
+                item(key = "launch") {
+                    val primaryName = container.exeName?.takeIf { !container.exePath.isNullOrBlank() }
+                    Row(
+                        Modifier.fillMaxWidth().animateItem().entrance(appear, 0),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
+                        if (primaryName != null) {
+                            FableButton(
+                                text = primaryName,
+                                icon = FableIcons.Play,
+                                primary = true,
+                                modifier = Modifier.weight(1f),
+                                onClick = onLaunchPrimary,
+                            )
+                        }
+                        FableButton(
+                            text = if (primaryName != null) "Desktop" else "Launch Desktop",
+                            icon = FableIcons.Desktop,
+                            primary = primaryName == null,
+                            modifier = Modifier.weight(1f),
+                            onClick = onLaunchDesktop,
+                        )
+                    }
                 }
-                FableButton(
-                    text = if (primaryName != null) "Desktop" else "Launch Desktop",
-                    icon = FableIcons.Desktop,
-                    primary = primaryName == null,
-                    modifier = Modifier.weight(1f),
-                    onClick = onLaunchDesktop,
-                )
-            }
-        }
 
-        // Everything about the container itself is one section: what it runs, then how.
-        item(key = "settings") {
-            FableCard(Modifier.animateItem().entrance(appear, 1)) {
-                if (container.status == ContainerStatus.ERROR) {
-                    InfoRow(
-                        label = "Status",
-                        value = container.status.name.lowercase(),
-                        valueContent = { StatusPill(container.status) },
-                    )
-                    CardDivider()
+                val apps = exes.filter { !it.isTool }
+                if (apps.isNotEmpty()) {
+                    item(key = "apps") {
+                        FableCard(Modifier.animateItem().entrance(appear, 1)) {
+                            apps.forEachIndexed { index, exe ->
+                                if (index > 0) CardDivider(afterIcon = true)
+                                ListRow(
+                                    title = exe.name,
+                                    subtitle = if (container.exePath == exe.path) "Primary" else null,
+                                    leading = { ExeIcon(name = exe.name, iconPath = exe.icon) },
+                                    showChevron = false,
+                                    // No per-row play button: tapping a row makes it the primary
+                                    // app, and the launch button at the top starts the primary
+                                    // app, so a second launch control on every row was
+                                    // redundant. "Primary" marks what will launch.
+                                    onClick = { onSetPrimary(exe) },
+                                )
+                            }
+                        }
+                    }
                 }
-                InfoRow(label = "Wine", value = container.wineVersion)
-                CardDivider()
-                InfoRow(label = "Driver", value = container.graphicsDriver)
-                CardDivider()
-                // DXVK goes into the prefix on the next launch (DxWrappers); off = WineD3D.
-                OptionSelector(
-                    label = "DXVK",
-                    options = dxvkOptions(dxvkBuilds),
-                    selected = container.dxvkVersion,
-                    onSelect = onSelectDxvk,
-                    hint = "Direct3D 8-11 through Vulkan. Applied on the next launch",
-                )
-                CardDivider()
-                // d3d12.dll / d3d12core.dll next to DXVK (DxWrappers); off = Wine's builtin d3d12.
-                OptionSelector(
-                    label = "VKD3D-Proton",
-                    options = vkd3dOptions(vkd3dBuilds),
-                    selected = container.vkd3dVersion,
-                    onSelect = onSelectVkd3d,
-                    hint = "Direct3D 12 through Vulkan. Applied on the next launch",
-                )
-                CardDivider()
-                OptionSelector(
-                    label = "Resolution",
-                    options = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) },
-                    selected = container.screenResolution,
-                    onSelect = onSelectResolution,
-                )
-                CardDivider()
-                OptionSelector(
-                    label = "Translator",
-                    options = TRANSLATOR_OPTIONS,
-                    selected = container.translator,
-                    onSelect = onSelectTranslator,
-                )
-                CardDivider()
-                ToggleRow(
-                    title = "Fullscreen",
-                    checked = container.isFullscreen,
-                    onCheckedChange = onFullscreenChange,
-                )
-            }
-        }
 
-        // Box64 presets (Winlator's Box64PresetManager) and the individual BOX64_* switches. FEX
-        // containers don't run Box64, so the section is hidden for them.
-        if (!ContainerRepository.usesFex(container)) {
-            item(key = "box64-label") { SectionLabel("Box64", Modifier.animateItem().entrance(appear, 2)) }
-            item(key = "box64") {
-                Box64PresetCard(
-                    settings = container.box64,
-                    onChange = onBox64Change,
-                    modifier = Modifier.animateItem().entrance(appear, 2),
-                )
+                // Built-in checks every container gets (ContainerTools), in ContainerTools order:
+                // GPU Info first, then the Direct3D tests.
+                val tools = exes.filter { it.isTool }.sortedBy { exe ->
+                    ContainerTools.all.indexOfFirst { it.id == exe.toolId }.let { if (it < 0) Int.MAX_VALUE else it }
+                }
+                if (tools.isNotEmpty()) {
+                    item(key = "tools-label") { SectionLabel("Tools", Modifier.animateItem().entrance(appear, 2)) }
+                    item(key = "tools") {
+                        ToolTiles(
+                            tools = tools,
+                            unavailable = unavailableTools,
+                            onLaunch = onLaunchTool,
+                            modifier = Modifier.animateItem().entrance(appear, 2),
+                        )
+                    }
+                }
             }
-            item(key = "box64-options") {
-                Box64OptionsSection(
-                    settings = container.box64,
-                    expanded = box64Expanded,
-                    onToggle = { box64Expanded = !box64Expanded },
-                    onChange = onBox64Change,
-                    modifier = Modifier.animateItem().entrance(appear, 2),
-                )
-            }
-        }
 
-        val apps = exes.filter { !it.isTool }
-        // Tools in ContainerTools order: GPU Info first, then the Direct3D tests.
-        val tools = exes.filter { it.isTool }
-            .sortedBy { exe -> ContainerTools.all.indexOfFirst { it.id == exe.toolId }.let { if (it < 0) Int.MAX_VALUE else it } }
+            ContainerTab.Settings -> {
+                // Everything about the container itself is one section: what it runs, then how.
+                item(key = "settings") {
+                    FableCard(Modifier.animateItem().entrance(appear, 0)) {
+                        if (container.status == ContainerStatus.ERROR) {
+                            InfoRow(
+                                label = "Status",
+                                value = container.status.name.lowercase(),
+                                valueContent = { StatusPill(container.status) },
+                            )
+                            CardDivider()
+                        }
+                        InfoRow(label = "Wine", value = container.wineVersion)
+                        CardDivider()
+                        InfoRow(label = "Driver", value = container.graphicsDriver)
+                        CardDivider()
+                        // DXVK goes into the prefix on the next launch (DxWrappers); off = WineD3D.
+                        OptionSelector(
+                            label = "DXVK",
+                            options = dxvkOptions(dxvkBuilds),
+                            selected = container.dxvkVersion,
+                            onSelect = onSelectDxvk,
+                            hint = "Direct3D 8-11 through Vulkan. Applied on the next launch",
+                        )
+                        CardDivider()
+                        // d3d12.dll / d3d12core.dll next to DXVK (DxWrappers); off = Wine's builtin d3d12.
+                        OptionSelector(
+                            label = "VKD3D-Proton",
+                            options = vkd3dOptions(vkd3dBuilds),
+                            selected = container.vkd3dVersion,
+                            onSelect = onSelectVkd3d,
+                            hint = "Direct3D 12 through Vulkan. Applied on the next launch",
+                        )
+                        CardDivider()
+                        OptionSelector(
+                            label = "Resolution",
+                            options = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) },
+                            selected = container.screenResolution,
+                            onSelect = onSelectResolution,
+                        )
+                        CardDivider()
+                        OptionSelector(
+                            label = "Translator",
+                            options = TRANSLATOR_OPTIONS,
+                            selected = container.translator,
+                            onSelect = onSelectTranslator,
+                        )
+                        CardDivider()
+                        ToggleRow(
+                            title = "Fullscreen",
+                            checked = container.isFullscreen,
+                            onCheckedChange = onFullscreenChange,
+                        )
+                    }
+                }
 
-        if (apps.isNotEmpty()) {
-            item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().entrance(appear, 2)) }
-            item(key = "apps") {
-                FableCard(Modifier.animateItem().entrance(appear, 2)) {
-                    apps.forEachIndexed { index, exe ->
-                        if (index > 0) CardDivider(afterIcon = true)
+                // Box64 presets (Winlator's Box64PresetManager) and the individual BOX64_*
+                // switches. FEX containers don't run Box64, so the section is hidden for them.
+                if (!ContainerRepository.usesFex(container)) {
+                    item(key = "box64-label") { SectionLabel("Box64", Modifier.animateItem().entrance(appear, 1)) }
+                    item(key = "box64") {
+                        Box64PresetCard(
+                            settings = container.box64,
+                            onChange = onBox64Change,
+                            modifier = Modifier.animateItem().entrance(appear, 1),
+                        )
+                    }
+                    item(key = "box64-options") {
+                        Box64OptionsSection(
+                            settings = container.box64,
+                            expanded = box64Expanded,
+                            onToggle = { box64Expanded = !box64Expanded },
+                            onChange = onBox64Change,
+                            modifier = Modifier.animateItem().entrance(appear, 1),
+                        )
+                    }
+                }
+
+                item(key = "delete") {
+                    FableCard(Modifier.animateItem().entrance(appear, 2).padding(top = Spacing.xl)) {
                         ListRow(
-                            title = exe.name,
-                            subtitle = if (container.exePath == exe.path) "Primary" else null,
-                            leading = { ExeIcon(name = exe.name, iconPath = exe.icon) },
+                            title = "Delete Container",
+                            titleColor = FableError,
                             showChevron = false,
-                            // No per-row play button: tapping a row makes it the primary app, and the
-                            // launch button at the top starts the primary app, so a second launch
-                            // control on every row was redundant. "Primary" marks what will launch.
-                            onClick = { onSetPrimary(exe) },
+                            onClick = onDelete,
                         )
                     }
                 }
             }
         }
+    }
+}
 
-        // Built-in checks every container gets (ContainerTools): tap to launch.
-        if (tools.isNotEmpty()) {
-            item(key = "tools-label") { SectionLabel("Tools", Modifier.animateItem().entrance(appear, 3)) }
-            item(key = "tools") {
-                FableCard(Modifier.animateItem().entrance(appear, 3)) {
-                    tools.forEachIndexed { index, exe ->
-                        if (index > 0) CardDivider(afterIcon = true)
-                        val available = exe.id !in unavailableTools
-                        ListRow(
-                            title = exe.name,
-                            subtitle = if (available) {
-                                ContainerTools.byId(exe.toolId)?.description
-                            } else {
-                                "Not included in this build"
-                            },
-                            icon = toolIcon(exe.toolId),
-                            showChevron = false,
-                            onClick = { onLaunchTool(exe) },
-                        )
-                    }
-                }
-            }
-        }
+/** The container screen's tabs, in order: idle glyph, and its filled weight for the active tab. */
+private enum class ContainerTab(val label: String, val icon: ImageVector, val activeIcon: ImageVector) {
+    Apps("Apps", FableIcons.Apps, FableIcons.AppsFill),
+    Settings("Settings", FableIcons.Settings, FableIcons.SettingsFill),
+}
 
-        item(key = "delete") {
-            FableCard(Modifier.animateItem().entrance(appear, 3).padding(top = Spacing.xl)) {
-                ListRow(
-                    title = "Delete Container",
-                    titleColor = FableError,
-                    showChevron = false,
-                    onClick = onDelete,
+/**
+ * Apps | Settings on the black bar, in the tab bar's idiom: white over grey, the outline glyph
+ * while idle and its filled weight once selected, plus a short white bar under the active tab.
+ */
+@Composable
+private fun ContainerTabRow(selected: ContainerTab, onSelect: (ContainerTab) -> Unit) {
+    TabRow(
+        selectedTabIndex = selected.ordinal,
+        containerColor = FableBg,
+        contentColor = FableText,
+        indicator = { positions ->
+            positions.getOrNull(selected.ordinal)?.let { position ->
+                // Same 250 ms ease as TabRow's own slide, so the bar resizes as it moves.
+                val width by animateDpAsState(position.contentWidth, Motion.inPlace(250), label = "tabIndicatorWidth")
+                TabRowDefaults.PrimaryIndicator(
+                    modifier = Modifier.tabIndicatorOffset(position),
+                    width = width,
+                    color = FableAccent,
                 )
+            }
+        },
+        divider = { CardDivider(inset = false) },
+    ) {
+        ContainerTab.entries.forEach { tab ->
+            val active = tab == selected
+            LeadingIconTab(
+                selected = active,
+                onClick = { onSelect(tab) },
+                text = {
+                    // Fable's text styles carry a colour; use the tab's animated one instead.
+                    Text(
+                        text = tab.label,
+                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp),
+                        color = LocalContentColor.current,
+                        maxLines = 1,
+                    )
+                },
+                icon = {
+                    Icon(
+                        imageVector = if (active) tab.activeIcon else tab.icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                },
+                selectedContentColor = FableText,
+                unselectedContentColor = FableTextDim,
+            )
+        }
+    }
+}
+
+/**
+ * The built-in tools as a single row of tiles instead of a list, so they stay out of the apps'
+ * way: tap one to launch it. A tool this build doesn't bundle is dimmed; launching it says so.
+ */
+@Composable
+private fun ToolTiles(
+    tools: List<ExeEntry>,
+    unavailable: Set<String>,
+    onLaunch: (ExeEntry) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FableCard(modifier) {
+        Row(Modifier.fillMaxWidth().padding(Spacing.xs)) {
+            tools.forEach { exe ->
+                val tint = if (exe.id in unavailable) FableTextFaint else FableText
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(ControlRadiusCompact))
+                        .clickable(role = Role.Button, onClick = { onLaunch(exe) })
+                        .padding(vertical = Spacing.sm),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                ) {
+                    IconTile(icon = toolIcon(exe.toolId), tint = tint)
+                    Text(
+                        text = toolLabel(exe),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = tint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -438,8 +570,16 @@ private fun dxvkOptions(builds: List<ComponentBuild>): List<SelectOption<String?
     add(SelectOption(ContainerDefaults.DXVK_OFF, "Off", "WineD3D: needs OpenGL, most games won't render"))
 }
 
-/** Leading glyph for a built-in tool row. */
+/** Glyph for a built-in tool's tile. */
 private fun toolIcon(toolId: String?): ImageVector = when (toolId) {
     ContainerTools.GPU_INFO.id -> FableIcons.GpuInfo
     else -> FableIcons.Test3d
+}
+
+/** Caption for a built-in tool's tile, short enough for four tiles in a row. */
+private fun toolLabel(exe: ExeEntry): String = when (exe.toolId) {
+    ContainerTools.D3D9_TEST.id -> "D3D9"
+    ContainerTools.D3D11_TEST.id -> "D3D11"
+    ContainerTools.D3D12_TEST.id -> "D3D12"
+    else -> exe.name
 }

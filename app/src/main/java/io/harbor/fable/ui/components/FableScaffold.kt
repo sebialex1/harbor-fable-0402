@@ -147,6 +147,9 @@ fun FableTopBar(
  * the last item is never hidden behind the floating tab bar. Items are spaced by [Spacing.sm];
  * use `SectionLabel` to start a new group. Give items a stable `key` and apply
  * `Modifier.animateItem()` so insertions, removals and reordering animate.
+ *
+ * [header] is pinned between the bar and the list (a tab row); it draws its own bottom edge, so
+ * the bar's scroll hairline stays off.
  */
 @Composable
 fun FableScreen(
@@ -156,6 +159,7 @@ fun FableScreen(
     onBack: (() -> Unit)? = null,
     listState: LazyListState = rememberLazyListState(),
     actions: @Composable RowScope.() -> Unit = {},
+    header: (@Composable () -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
     val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -222,11 +226,12 @@ fun FableScreen(
             FableTopBar(
                 title = title,
                 onBack = onBack,
-                showDivider = scrolled,
+                showDivider = scrolled && header == null,
                 showInlineTitle = actionsInBar,
                 collapseFraction = if (largeTitle) collapse else null,
                 actions = if (actionsInBar) actions else ({}),
             )
+            header?.invoke()
             LazyColumn(
                 state = listState,
                 modifier = Modifier
