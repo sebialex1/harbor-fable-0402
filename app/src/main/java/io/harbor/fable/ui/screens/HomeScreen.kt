@@ -1,7 +1,5 @@
 package io.harbor.fable.ui.screens
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -17,6 +15,7 @@ import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.ControlHeight
 import io.harbor.fable.ui.theme.FableAccent
 import kotlinx.coroutines.launch
+import io.harbor.fable.ui.icons.FableIcons
 
 @Composable
 fun HomeScreen(
@@ -63,7 +62,7 @@ internal fun HomeContent(
         title = "Fable",
         actions = {
             FableIconButton(
-                icon = Icons.Outlined.Add,
+                icon = FableIcons.Add,
                 contentDescription = "Add app",
                 onClick = onAddApp,
             )
@@ -83,7 +82,7 @@ internal fun HomeContent(
                             showChevron = false,
                             trailing = {
                                 FableIconButton(
-                                    icon = Icons.Outlined.PlayArrow,
+                                    icon = FableIcons.Play,
                                     contentDescription = "Launch ${exe.name}",
                                     tint = Color.Black,
                                     containerColor = FableAccent,
@@ -116,7 +115,7 @@ internal fun HomeContent(
                             modifier = Modifier.entrance(appear, index + 4),
                             title = container.name,
                             subtitle = container.wineVersion,
-                            icon = Icons.Outlined.Inventory2,
+                            icon = FableIcons.Containers,
                             onClick = { onContainerClick(container.id) },
                         )
                     }

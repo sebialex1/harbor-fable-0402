@@ -27,8 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +67,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import io.harbor.fable.ui.icons.FableIcons
 
 private object Routes {
     const val HOME = "home"
@@ -248,11 +247,12 @@ private fun MainShell(snackbarHostState: SnackbarHostState) {
 
     val tabs = remember {
         listOf(
-            TabBarTab("Home", Icons.Outlined.Home),
-            TabBarTab("Containers", Icons.Outlined.Apps),
-            TabBarTab("Drivers", Icons.Outlined.Memory),
-            TabBarTab("Assets", Icons.Outlined.Download),
-            TabBarTab("Settings", Icons.Outlined.Settings),
+            // Outline glyph when idle, the filled weight of the same glyph when active.
+            TabBarTab("Home", FableIcons.Home, FableIcons.HomeFill),
+            TabBarTab("Containers", FableIcons.Containers, FableIcons.ContainersFill),
+            TabBarTab("Drivers", FableIcons.Drivers, FableIcons.DriversFill),
+            TabBarTab("Assets", FableIcons.Assets, FableIcons.AssetsFill),
+            TabBarTab("Settings", FableIcons.Settings, FableIcons.SettingsFill),
         )
     }
 

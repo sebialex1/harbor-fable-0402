@@ -14,10 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +38,7 @@ import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
 import java.text.DateFormat
 import java.util.Date
+import io.harbor.fable.ui.icons.FableIcons
 
 /** Where a release stands on this device. Drives the trailing control of [DriverReleaseRow]. */
 enum class ReleaseUiState { AVAILABLE, QUEUED, DOWNLOADING, VERIFYING, DOWNLOADED, INSTALLING, INSTALLED }
@@ -123,7 +120,7 @@ fun DriverReleaseRow(
                 ) { current ->
                     when (current) {
                         ReleaseUiState.AVAILABLE -> FableIconButton(
-                            icon = Icons.Outlined.Download,
+                            icon = FableIcons.Download,
                             contentDescription = "Download ${release.tag}",
                             size = 32.dp,
                             onClick = onDownload,
@@ -168,7 +165,7 @@ fun DriverSummaryRow(
     title: String,
     lines: List<String>,
     modifier: Modifier = Modifier,
-    icon: ImageVector = Icons.Outlined.Memory,
+    icon: ImageVector = FableIcons.Drivers,
     iconTint: Color = FableText,
     titleMaxLines: Int = 2,
     trailing: (@Composable () -> Unit)? = null,

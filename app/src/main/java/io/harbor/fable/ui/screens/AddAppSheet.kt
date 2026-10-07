@@ -40,8 +40,6 @@ import io.harbor.fable.ui.theme.HairlineStroke
 import io.harbor.fable.ui.theme.Motion
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +55,7 @@ import io.harbor.fable.ui.theme.FableText
 import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
+import io.harbor.fable.ui.icons.FableIcons
 
 /**
  * Adds an app/game: pick a file, name it and assign it to a container.
@@ -200,7 +199,7 @@ private fun AddAppBanner(
                 if (hasFile) {
                     ExeIcon(name = name.ifBlank { fileName }, bitmap = icon, size = BannerIconSize)
                 } else {
-                    IconTile(icon = Icons.Outlined.FileOpen, size = BannerIconSize, tint = FableTextDim)
+                    IconTile(icon = FableIcons.OpenFile, size = BannerIconSize, tint = FableTextDim)
                 }
             }
             Spacer(Modifier.height(Spacing.md))

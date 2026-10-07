@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,6 +52,7 @@ import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import io.harbor.fable.ui.icons.FableIcons
 
 @Composable
 fun AssetsScreen() {
@@ -134,7 +133,7 @@ internal fun AssetsContent(
         actions = {
             // "Download recommended" lives in the setup row below, which only shows when needed.
             FableIconButton(
-                icon = Icons.Outlined.Refresh,
+                icon = FableIcons.Refresh,
                 contentDescription = "Refresh assets",
                 enabled = !isRefreshing,
                 onClick = onRefresh,
@@ -164,7 +163,7 @@ internal fun AssetsContent(
         if (assets.isEmpty() && !isRefreshing) {
             item(key = "empty") {
                 EmptyState(
-                    icon = Icons.Outlined.Download,
+                    icon = FableIcons.Download,
                     title = "No assets",
                     modifier = Modifier.animateItem().entrance(appear, 1),
                 )
@@ -237,7 +236,7 @@ private fun AssetVersionRow(
                 {
                     val rotation by animateFloatAsState(if (open) 180f else 0f, Motion.inPlace(), label = "buildsChevron")
                     Icon(
-                        imageVector = Icons.Outlined.ExpandMore,
+                        imageVector = FableIcons.ExpandMore,
                         contentDescription = if (open) "Hide builds" else "Show builds",
                         tint = FableTextDim,
                         modifier = Modifier.size(16.dp).rotate(rotation),

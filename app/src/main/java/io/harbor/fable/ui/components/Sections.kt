@@ -21,8 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -49,6 +47,7 @@ import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
+import io.harbor.fable.ui.icons.FableIcons
 
 private val LabelTopPadding = 18.dp
 
@@ -153,7 +152,7 @@ fun CollapsibleSection(
             badge?.invoke()
             Spacer(Modifier.width(Spacing.sm))
             Icon(
-                imageVector = Icons.Outlined.ExpandMore,
+                imageVector = FableIcons.ExpandMore,
                 contentDescription = if (expanded) "Collapse $title" else "Expand $title",
                 tint = FableTextDim,
                 modifier = Modifier

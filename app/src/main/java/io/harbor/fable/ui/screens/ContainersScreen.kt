@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +27,7 @@ import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.ui.components.*
 import kotlinx.coroutines.launch
+import io.harbor.fable.ui.icons.FableIcons
 
 /** Selectable x86 translation layers. Values match [Container.translator]. */
 internal val TRANSLATOR_OPTIONS = listOf(SelectOption("box64", "Box64"), SelectOption("fex", "FEX"))
@@ -105,7 +104,7 @@ internal fun ContainersContent(
         title = "Containers",
         actions = {
             FableIconButton(
-                icon = Icons.Outlined.Add,
+                icon = FableIcons.Add,
                 contentDescription = "New container",
                 onClick = onCreateClick,
             )
@@ -119,7 +118,7 @@ internal fun ContainersContent(
                         ListRow(
                             title = container.name,
                             subtitle = container.wineVersion.ifBlank { "No Wine chosen" },
-                            icon = Icons.Outlined.Inventory2,
+                            icon = FableIcons.Containers,
                             trailing = { StatusPill(container.status) },
                             onClick = { onContainerClick(container.id) },
                         )

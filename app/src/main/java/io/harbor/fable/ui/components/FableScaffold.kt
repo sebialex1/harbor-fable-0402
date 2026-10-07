@@ -28,8 +28,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +50,7 @@ import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.ScreenPadding
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.flow.filter
+import io.harbor.fable.ui.icons.FableIcons
 
 /**
  * iOS-style navigation bar used by every screen.
@@ -113,7 +112,7 @@ fun FableTopBar(
             ) {
                 if (onBack != null) {
                     FableIconButton(
-                        icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                        icon = FableIcons.Back,
                         contentDescription = "Back",
                         onClick = onBack,
                     )

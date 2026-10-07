@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +42,7 @@ import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
+import io.harbor.fable.ui.icons.FableIcons
 
 /**
  * The RADV Xclipse driver: device, the one active driver (with the latest release as the install
@@ -174,7 +173,7 @@ internal fun DriversContent(
         title = "Drivers",
         actions = {
             FableIconButton(
-                icon = Icons.Outlined.Refresh,
+                icon = FableIcons.Refresh,
                 contentDescription = "Refresh releases",
                 enabled = !isRefreshing,
                 onClick = onRefresh,
@@ -214,7 +213,7 @@ internal fun DriversContent(
         if (refreshError != null && releases.isEmpty()) {
             item(key = "error") {
                 NoticeCard(
-                    icon = Icons.Outlined.CloudOff,
+                    icon = FableIcons.Offline,
                     title = "Couldn't load releases",
                     lines = listOf(refreshError),
                     modifier = Modifier.animateItem().entrance(appear, 3),
@@ -223,7 +222,7 @@ internal fun DriversContent(
         } else if (stale) {
             item(key = "stale") {
                 NoticeCard(
-                    icon = Icons.Outlined.CloudOff,
+                    icon = FableIcons.Offline,
                     title = "Offline",
                     lines = emptyList(),
                     modifier = Modifier.animateItem().entrance(appear, 3),
@@ -270,7 +269,7 @@ internal fun DriversContent(
         if (releases.isEmpty() && !isRefreshing && refreshError == null) {
             item(key = "empty") {
                 EmptyState(
-                    icon = Icons.Outlined.Memory,
+                    icon = FableIcons.Drivers,
                     title = "No releases",
                     
                     modifier = Modifier.animateItem().entrance(appear, 3),
@@ -329,7 +328,7 @@ internal fun ActiveDriverCard(
                             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconTile(icon = Icons.Outlined.Memory)
+                        IconTile(icon = FableIcons.Drivers)
                         Column(Modifier.weight(1f).padding(start = Spacing.md)) {
                             Text("Installing ${installing ?: lastInstalling[0].orEmpty()}", style = MaterialTheme.typography.titleSmall)
                             Text(

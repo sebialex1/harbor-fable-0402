@@ -26,9 +26,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -76,6 +73,7 @@ import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.SheetRadius
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
+import io.harbor.fable.ui.icons.FableIcons
 
 /** Outlined text field with the Fable palette. */
 @Composable
@@ -177,7 +175,7 @@ fun <T> OptionSelector(
             )
             Spacer(Modifier.width(Spacing.xs))
             Icon(
-                imageVector = Icons.Outlined.ExpandMore,
+                imageVector = FableIcons.ExpandMore,
                 contentDescription = if (expanded) "Hide options" else "Show options",
                 tint = FableTextDim,
                 modifier = Modifier
@@ -235,7 +233,7 @@ private fun <T> OptionRow(option: SelectOption<T>, selected: Boolean, onClick: (
             }
         }
         if (selected) {
-            Icon(Icons.Outlined.Check, contentDescription = "Selected", tint = FableText, modifier = Modifier.size(18.dp))
+            Icon(FableIcons.Check, contentDescription = "Selected", tint = FableText, modifier = Modifier.size(18.dp))
         }
     }
 }

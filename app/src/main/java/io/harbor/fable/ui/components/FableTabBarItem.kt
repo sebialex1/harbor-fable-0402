@@ -1,5 +1,6 @@
 package io.harbor.fable.ui.components
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -50,7 +51,8 @@ private fun tabLabelStyle(): TextStyle {
 
 /**
  * Tab bar item: icon over a small label, white when active and gray otherwise. The pill bar
- * draws the sliding grey capsule behind the active item; the item itself only changes tint.
+ * draws the sliding grey capsule behind the active item; the item crossfades from the outline
+ * glyph ([icon]) to its filled weight ([activeIcon]) and changes tint.
  */
 @Composable
 fun FableTabBarItem(
@@ -59,6 +61,7 @@ fun FableTabBarItem(
     active: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    activeIcon: ImageVector = icon,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val tint by animateColorAsState(
@@ -80,12 +83,18 @@ fun FableTabBarItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(TabIconSize),
-        )
+        Crossfade(
+            targetState = active,
+            animationSpec = Motion.inPlace(Motion.Fast),
+            label = "tabGlyph",
+        ) { selected ->
+            Icon(
+                imageVector = if (selected) activeIcon else icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(TabIconSize),
+            )
+        }
         Spacer(Modifier.height(TabIconLabelGap))
         Text(
             text = label,

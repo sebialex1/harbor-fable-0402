@@ -85,6 +85,7 @@ fun FableTabBar(
                 items.forEachIndexed { index, tab ->
                     FableTabBarItem(
                         icon = tab.icon,
+                        activeIcon = tab.activeIcon,
                         label = tab.label,
                         active = index == activeIndex,
                         onClick = { onTabSelected(index) },
@@ -98,7 +99,9 @@ fun FableTabBar(
 
 private val Spacing4 = 4.dp
 
+/** A tab: [icon] while idle, [activeIcon] (the filled weight of the same glyph) while selected. */
 data class TabBarTab(
     val label: String,
     val icon: ImageVector,
+    val activeIcon: ImageVector = icon,
 )

@@ -15,9 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.FactCheck
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -52,6 +49,7 @@ import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.Spacing
+import io.harbor.fable.ui.icons.FableIcons
 
 /**
  * Vulkan extensions as the driver reports them on this device, read with
@@ -116,7 +114,7 @@ internal fun VulkanExtensionsContent(
         onBack = onBack,
         actions = {
             FableIconButton(
-                icon = Icons.Outlined.Refresh,
+                icon = FableIcons.Refresh,
                 contentDescription = "Probe again",
                 enabled = !probing,
                 onClick = onRefresh,
@@ -155,7 +153,7 @@ internal fun VulkanExtensionsContent(
         if (result != null && !result.ok) {
             item(key = "error") {
                 NoticeCard(
-                    icon = Icons.Outlined.ErrorOutline,
+                    icon = FableIcons.Error,
                     title = if (source == VulkanSource.INSTALLED_DRIVER) "Couldn't read the driver" else "Couldn't read the system driver",
                     lines = listOfNotNull(result.error),
                     tint = FableError,
@@ -165,7 +163,7 @@ internal fun VulkanExtensionsContent(
         } else if (result?.deviceError != null) {
             item(key = "device-error") {
                 NoticeCard(
-                    icon = Icons.Outlined.WarningAmber,
+                    icon = FableIcons.Warning,
                     title = "No device extensions",
                     lines = listOf(result.deviceError),
                     modifier = Modifier.animateItem(),
@@ -230,7 +228,7 @@ internal fun VulkanExtensionsContent(
         } else if (result?.ok == true) {
             item(key = "empty") {
                 EmptyState(
-                    icon = Icons.Outlined.Extension,
+                    icon = FableIcons.Extension,
                     title = "No extensions reported",
                     modifier = Modifier.animateItem(),
                 )

@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -52,6 +50,7 @@ import io.harbor.fable.ui.theme.PillRadius
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
+import io.harbor.fable.ui.icons.FableIcons
 
 /**
  * Leading visual of list rows: a small grey rounded square with a white glyph, like the icons in
@@ -79,7 +78,7 @@ fun IconTile(
 @Composable
 fun Chevron(modifier: Modifier = Modifier) {
     Icon(
-        imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+        imageVector = FableIcons.Chevron,
         contentDescription = null,
         tint = FableTextDim,
         modifier = modifier.size(20.dp),

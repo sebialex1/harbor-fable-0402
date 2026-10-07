@@ -9,9 +9,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Download
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
@@ -24,6 +21,7 @@ import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
+import io.harbor.fable.ui.icons.FableIcons
 
 private enum class DownloadUi { AVAILABLE, QUEUED, DOWNLOADING, VERIFYING, DONE }
 
@@ -99,7 +97,7 @@ fun DownloadRow(
                 ) { current ->
                     when (current) {
                         DownloadUi.AVAILABLE -> FableIconButton(
-                            icon = Icons.Outlined.Download,
+                            icon = FableIcons.Download,
                             contentDescription = "Download $title",
                             size = 32.dp,
                             onClick = onDownload,

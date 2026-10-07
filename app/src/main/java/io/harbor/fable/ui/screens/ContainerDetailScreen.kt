@@ -4,8 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,6 +30,7 @@ import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableError
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.launch
+import io.harbor.fable.ui.icons.FableIcons
 
 @Composable
 fun ContainerDetailScreen(
@@ -152,7 +151,7 @@ internal fun ContainerDetailContent(
         actions = {
             if (container != null) {
                 FableIconButton(
-                    icon = Icons.Outlined.Add,
+                    icon = FableIcons.Add,
                     contentDescription = "Add app",
                     onClick = onAddExe,
                 )
@@ -162,7 +161,7 @@ internal fun ContainerDetailContent(
         if (container == null) {
             item(key = "missing") {
                 EmptyState(
-                    icon = Icons.Outlined.ErrorOutline,
+                    icon = FableIcons.Error,
                     title = "Container not found",
                     modifier = Modifier.animateItem().entrance(appear, 0),
                 )
@@ -180,7 +179,7 @@ internal fun ContainerDetailContent(
                 if (primaryName != null) {
                     FableButton(
                         text = primaryName,
-                        icon = Icons.Outlined.PlayArrow,
+                        icon = FableIcons.Play,
                         primary = true,
                         modifier = Modifier.weight(1f),
                         onClick = onLaunchPrimary,
@@ -188,7 +187,7 @@ internal fun ContainerDetailContent(
                 }
                 FableButton(
                     text = if (primaryName != null) "Desktop" else "Launch Desktop",
-                    icon = Icons.Outlined.DesktopWindows,
+                    icon = FableIcons.Desktop,
                     primary = primaryName == null,
                     modifier = Modifier.weight(1f),
                     onClick = onLaunchDesktop,
@@ -415,6 +414,6 @@ private fun dxvkOptions(builds: List<ComponentBuild>): List<SelectOption<String?
 
 /** Leading glyph for a built-in tool row. */
 private fun toolIcon(toolId: String?): ImageVector = when (toolId) {
-    ContainerTools.GPU_INFO.id -> Icons.Outlined.Memory
-    else -> Icons.Outlined.ViewInAr
+    ContainerTools.GPU_INFO.id -> FableIcons.GpuInfo
+    else -> FableIcons.Test3d
 }
