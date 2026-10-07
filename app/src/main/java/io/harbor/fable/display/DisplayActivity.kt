@@ -27,6 +27,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -317,17 +318,8 @@ class DisplayActivity : Activity() {
     private fun createDrawer(): View {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
-        val panel = LinearLayout(this).apply {
+        val sections = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16f), dp(24f), dp(16f), dp(16f))
-            background = GradientDrawable().apply {
-                setColor(DRAWER_BACKGROUND.toInt())
-                val r = DRAWER_RADIUS_DP * density
-                // Rounded on the screen side only; the right edge is flush with the display's.
-                cornerRadii = floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r)
-            }
-            // Taps on the panel itself must not fall through to the scrim (which closes).
-            isClickable = true
 
             // Header: the app name and what Back does now.
             addView(TextView(this@DisplayActivity).apply {
@@ -362,15 +354,43 @@ class DisplayActivity : Activity() {
                     pauseItem = it.findViewById(ROW_TITLE_ID)
                     pauseIcon = it.findViewById(ROW_ICON_ID)
                 },
-                menuDivider(),
-                menuItem("Stop Wine", R.drawable.ic_menu_power, "Ends the session and returns to the app") {
-                    // Same as the old Back: finishing stops the container in onDestroy.
-                    finish()
-                },
             ))
-
-            // Spacer pushes Close to the bottom, where the thumb is on a landscape phone.
-            addView(View(this@DisplayActivity), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16f), dp(24f), dp(16f), dp(16f))
+            background = GradientDrawable().apply {
+                setColor(DRAWER_BACKGROUND.toInt())
+                val r = DRAWER_RADIUS_DP * density
+                cornerRadii = floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r)
+            }
+            isClickable = true
+            // Landscape screens can be shorter than the grouped rows. Keep Exit outside the
+            // scrollable content so it never gets clipped or pushed off the bottom.
+            addView(ScrollView(this@DisplayActivity).apply {
+                isFillViewport = false
+                addView(sections)
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(Button(this@DisplayActivity).apply {
+                text = "Exit Container"
+                isAllCaps = false
+                textSize = 16f
+                typeface = fableFont(R.font.inter_medium)
+                setTextColor(0xFFFFFFFF.toInt())
+                background = GradientDrawable().apply {
+                    setColor(0xFFB53838.toInt())
+                    cornerRadius = MENU_CARD_RADIUS_DP * density
+                }
+                setCompoundDrawablesRelative(menuIcon(R.drawable.ic_menu_power), null, null, null)
+                compoundDrawablePadding = dp(10f)
+                setPadding(dp(16f), 0, dp(16f), 0)
+                contentDescription = "Exit container and stop all Wine processes"
+                // onDestroy calls stopContainerInBackground, including for paused Wine.
+                setOnClickListener { finish() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48f)).apply {
+                topMargin = dp(12f)
+                bottomMargin = dp(8f)
+            })
             addView(menuCard(menuItem("Close menu", R.drawable.ic_menu_close, null) { setDrawerOpen(false) }))
         }
         drawerPanel = panel
