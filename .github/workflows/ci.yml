@@ -1,12 +1,10 @@
 name: CI
 
-# Build-only check for every push to main and every pull request. Unlike
-# build-and-release.yml (manual, publishes a pre-release), this never creates a
-# tag or a release.
+# Build-only check, run on demand only (workflow_dispatch). Pushing to main no
+# longer triggers it — use the Actions tab to run it when you want a build
+# check, or use build-and-release.yml to publish a pre-release APK.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   assemble:
