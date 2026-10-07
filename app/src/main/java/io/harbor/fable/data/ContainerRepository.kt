@@ -723,6 +723,7 @@ class ContainerRepository internal constructor(
             }
             if (screen != null) {
                 add("DISPLAY=${screen.display}")
+                add("FABLE_VULKAN_SOCKET=${File(screen.socketPath).parent}/V0")
                 // Native (aarch64 bionic) libX11/libxcb for Box64's wrapped libX11, then the system
                 // libraries, as Winlator's LD_LIBRARY_PATH={imagefs}/usr/lib:/system/lib64.
                 // Libraries NativeLibResolver copied from /vendor or /system_ext keep their own

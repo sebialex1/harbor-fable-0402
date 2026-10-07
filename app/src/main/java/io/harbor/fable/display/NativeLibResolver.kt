@@ -48,8 +48,10 @@ import java.util.zip.ZipFile
  * the Xlib query itself. It also makes `VK_KHR_xlib_surface` look like an instance extension:
  * winevulkan rewrites DXVK's `VK_KHR_win32_surface` into the X11 driver's host extension and the
  * Android loader rejects it (`wine_vkCreateInstance ... res=-7`), so the shim advertises it in
- * `vkEnumerateInstanceExtensionProperties` and strips it again in `vkCreateInstance`. When the
- * shim isn't in the APK the alias falls back to the plain copy.
+ * `vkEnumerateInstanceExtensionProperties` and translates it to Android WSI in `vkCreateInstance`.
+ * Its ImageReader-backed ANativeWindow lives in Wine's process; presented frames update the
+ * app's X drawable over the display bridge. When the shim isn't in the APK the alias falls
+ * back to the plain copy.
  *
  * For the rest, once per [VERSION], system build and bundled set, each [Spec] missing from the
  * library directory is looked up in [SYSTEM_LIB_DIRS] under its candidate names and the first
@@ -64,7 +66,7 @@ internal object NativeLibResolver {
     private const val TAG = "NativeLibResolver"
 
     /** Bump when [SPECS] or the copy logic changes so existing installs re-resolve. */
-    private const val VERSION = "native-libs-5"
+    private const val VERSION = "native-libs-6"
     private const val MARKER = ".fable-native-libs"
 
     /** The ABI this app builds its JNI libraries for (`ndk.abiFilters` in app/build.gradle.kts). */

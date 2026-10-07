@@ -39,6 +39,9 @@ object DisplayServer {
 
     private var connector: XConnectorEpoll? = null
     private var socketPath: String? = null
+    private var vulkanBridge: VulkanDisplayBridge? = null
+
+    fun vulkanSocketPath(context: Context): String = File(X11ClientLibs.socketDir(context), "V0").absolutePath
 
     /** Screen size of the running server, e.g. `1280x720`. */
     val resolution: String? get() = xServer?.screenInfo?.toString()
@@ -72,6 +75,7 @@ object DisplayServer {
         connector = epoll
         socketPath = config.path
         probe(config.path)
+        vulkanBridge = VulkanDisplayBridge(server, File(vulkanSocketPath(context))).also { it.start() }
         Log.i(TAG, "X server listening on ${config.path} ($screen)")
         Ready(DISPLAY, config.path, screen.toString())
     }.onFailure { error ->
@@ -83,6 +87,8 @@ object DisplayServer {
     fun stop() = stopLocked()
 
     private fun stopLocked() {
+        runCatching { vulkanBridge?.stop() }
+        vulkanBridge = null
         runCatching { connector?.stop() }
         connector = null
         xServer = null

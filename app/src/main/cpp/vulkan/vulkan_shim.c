@@ -41,15 +41,16 @@
  *   vkEnumerateInstanceExtensionProperties  appends VK_KHR_xlib_surface to the
  *                                           real loader's list so winevulkan
  *                                           advertises VK_KHR_win32_surface
- *   vkCreateInstance                        strips VK_KHR_xlib_surface (and the
- *                                           xcb spelling) from
- *                                           ppEnabledExtensionNames before
- *                                           forwarding to the real loader
+ *   vkCreateInstance                        replaces X11 WSI with Android WSI
+ *   vkCreateXlibSurfaceKHR                   creates an ImageReader ANativeWindow
+ *                                           in the Wine process and a real
+ *                                           VK_KHR_android_surface; presents
+ *                                           its frames to the app's X drawable
  *
  * vkGetInstanceProcAddr hands out the shim's versions of both so the wrap holds
  * whether Wine reaches them by dlsym or by procaddr. Every other Vulkan
  * function is reached through the forwarded vkGetInstanceProcAddr /
- * vkGetDeviceProcAddr, so nothing else is wrapped.
+ * vkGetDeviceProcAddr. Surface queries and destruction also stay behind the shim.
  *
  * Only vk* symbols are exported (-fvisibility=hidden + VK_SHIM_EXPORT).
  */
@@ -61,9 +62,13 @@
 #include <string.h>
 
 #include <android/log.h>
+#include <android/native_window.h>
 
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan_android.h>
+
+#include "android_surface_bridge.h"
 
 #define VK_SHIM_EXPORT __attribute__((visibility("default")))
 
@@ -201,20 +206,98 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkCreateXlibSurfaceKHR(VkInstance instance,
                                                          const VkAllocationCallbacks *pAllocator,
                                                          VkSurfaceKHR *pSurface) {
     ensure_init();
-    PFN_vkCreateXlibSurfaceKHR fn = real.vkCreateXlibSurfaceKHR;
-    if (!fn) fn = (PFN_vkCreateXlibSurfaceKHR)real_instance_proc(instance, "vkCreateXlibSurfaceKHR");
-    if (!fn) {
-        LOGE("vkCreateXlibSurfaceKHR: the Vulkan loader has no VK_KHR_xlib_surface");
-        return VK_ERROR_EXTENSION_NOT_PRESENT;
+    if (!pCreateInfo || !pSurface) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSurface = VK_NULL_HANDLE;
+    PFN_vkCreateAndroidSurfaceKHR fn =
+        (PFN_vkCreateAndroidSurfaceKHR)real_instance_proc(instance, "vkCreateAndroidSurfaceKHR");
+    if (!fn) return VK_ERROR_EXTENSION_NOT_PRESENT;
+    struct AndroidSurfaceBridge *bridge = android_bridge_create((uint32_t)pCreateInfo->window);
+    if (!bridge) {
+        LOGE("vkCreateXlibSurfaceKHR: cannot connect window %lu to the display bridge",
+             pCreateInfo->window);
+        return VK_ERROR_SURFACE_LOST_KHR;
     }
-    return fn(instance, pCreateInfo, pAllocator, pSurface);
+    const VkAndroidSurfaceCreateInfoKHR info = {
+        .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
+        .window = android_bridge_window(bridge),
+    };
+    VkResult result = fn(instance, &info, pAllocator, pSurface);
+    if (result == VK_SUCCESS) android_bridge_attach(bridge, *pSurface);
+    else android_bridge_delete(bridge);
+    return result;
+}
+
+VK_SHIM_EXPORT VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+    VkPhysicalDevice device, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR *caps) {
+    ensure_init();
+    if (!android_bridge_refresh(surface)) return VK_ERROR_SURFACE_LOST_KHR;
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR fn =
+        (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)load_real("vkGetPhysicalDeviceSurfaceCapabilitiesKHR", 1);
+    return fn ? fn(device, surface, caps) : VK_ERROR_INITIALIZATION_FAILED;
+}
+
+VK_SHIM_EXPORT VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2KHR(
+    VkPhysicalDevice device, const VkPhysicalDeviceSurfaceInfo2KHR *info, VkSurfaceCapabilities2KHR *caps) {
+    ensure_init();
+    /* Android WSI has no extra capabilities to append; retain the caller's output chain. */
+    if (!info || !caps) return VK_ERROR_INITIALIZATION_FAILED;
+    return vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, info->surface, &caps->surfaceCapabilities);
+}
+
+VK_SHIM_EXPORT VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
+    VkPhysicalDevice device, VkSurfaceKHR surface, uint32_t *count, VkSurfaceFormatKHR *formats) {
+    ensure_init();
+    PFN_vkGetPhysicalDeviceSurfaceFormatsKHR fn =
+        (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR)load_real("vkGetPhysicalDeviceSurfaceFormatsKHR", 1);
+    if (!fn || !count) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!android_bridge_contains(surface)) return fn(device, surface, count, formats);
+    /* ImageReader's consumer is RGBA_8888. A BGRA swapchain would change the producer's HAL
+     * format and ImageReader would reject every buffer, despite a successful present. */
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        uint32_t n = 0;
+        VkResult result = fn(device, surface, &n, NULL);
+        if (result != VK_SUCCESS) return result;
+        VkSurfaceFormatKHR *all = calloc(n ? n : 1, sizeof(*all));
+        if (!all) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        result = fn(device, surface, &n, all);
+        if (result == VK_INCOMPLETE) { free(all); continue; }
+        if (result != VK_SUCCESS) { free(all); return result; }
+        uint32_t available = 0, written = 0, capacity = formats ? *count : 0;
+        for (uint32_t i = 0; i < n; ++i) {
+            if (all[i].format != VK_FORMAT_R8G8B8A8_UNORM &&
+                all[i].format != VK_FORMAT_R8G8B8A8_SRGB) continue;
+            ++available;
+            if (formats && written < capacity) formats[written++] = all[i];
+        }
+        free(all);
+        *count = formats ? written : available;
+        if (!available) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+        return formats && written < available ? VK_INCOMPLETE : VK_SUCCESS;
+    }
+    return VK_ERROR_INITIALIZATION_FAILED;
+}
+
+VK_SHIM_EXPORT VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormats2KHR(
+    VkPhysicalDevice device, const VkPhysicalDeviceSurfaceInfo2KHR *info, uint32_t *count,
+    VkSurfaceFormat2KHR *formats) {
+    if (!info || !count) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!formats) return vkGetPhysicalDeviceSurfaceFormatsKHR(device, info->surface, count, NULL);
+    uint32_t capacity = *count;
+    VkSurfaceFormatKHR *plain = calloc(capacity ? capacity : 1, sizeof(*plain));
+    if (!plain) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    VkResult result = vkGetPhysicalDeviceSurfaceFormatsKHR(device, info->surface, count, plain);
+    if (result == VK_SUCCESS || result == VK_INCOMPLETE) {
+        for (uint32_t i = 0; i < *count; ++i) formats[i].surfaceFormat = plain[i];
+    }
+    free(plain);
+    return result;
 }
 
 /* --- Instance extension masquerade -------------------------------------------------------- */
 
 /* Extension names winevulkan's X11 driver asks the host for and Android's loader lacks. The
  * shim advertises the first (the one winex11 reports as its host surface extension) and
- * swallows both at instance creation. */
+ * replaces both with Android WSI at instance creation. */
 #define XLIB_SURFACE_EXTENSION_NAME "VK_KHR_xlib_surface"
 #define XCB_SURFACE_EXTENSION_NAME "VK_KHR_xcb_surface"
 #define XLIB_SURFACE_SPEC_VERSION 6
@@ -309,7 +392,7 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const 
     return written < total ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
-/* Forwards instance creation without the X11 surface extensions the real loader can't
+/* Forwards instance creation with Android WSI in place of the X11 surface extensions.
  * satisfy. If the loader still rejects the request, names the extensions it is missing so the
  * Wine log says *which* one, not just res=-7. */
 VK_SHIM_EXPORT VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *pCreateInfo,
@@ -333,16 +416,21 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *
     VkInstanceCreateInfo info = *pCreateInfo;
     const char **filtered = NULL;
     if (stripped) {
-        filtered = calloc(requested - stripped ? requested - stripped : 1, sizeof(*filtered));
+        filtered = calloc(requested + 2, sizeof(*filtered));
         if (!filtered) return VK_ERROR_OUT_OF_HOST_MEMORY;
         uint32_t n = 0;
+        int has_android = 0, has_surface = 0;
         for (uint32_t i = 0; i < requested; i++) {
             if (is_x11_surface_extension(names[i])) {
                 LOGI("vkCreateInstance: dropping %s (not an Android loader extension; the shim provides it)", names[i]);
                 continue;
             }
+            if (strcmp(names[i], VK_KHR_ANDROID_SURFACE_EXTENSION_NAME) == 0) has_android = 1;
+            if (strcmp(names[i], VK_KHR_SURFACE_EXTENSION_NAME) == 0) has_surface = 1;
             filtered[n++] = names[i];
         }
+        if (!has_android) filtered[n++] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
+        if (!has_surface) filtered[n++] = VK_KHR_SURFACE_EXTENSION_NAME;
         info.enabledExtensionCount = n;
         info.ppEnabledExtensionNames = filtered;
     }
@@ -386,6 +474,19 @@ VK_SHIM_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance in
     if (strcmp(pName, "vkGetInstanceProcAddr") == 0) {
         return (PFN_vkVoidFunction)vkGetInstanceProcAddr;
     }
+    /* Always return our WSI functions, including the real loader's otherwise valid surface
+     * queries/destructor. Returning its destructor first leaks the ImageReader and socket. */
+#define SHIM_PROC(name) if (strcmp(pName, #name) == 0) return (PFN_vkVoidFunction)name
+    SHIM_PROC(vkCreateXlibSurfaceKHR);
+    SHIM_PROC(vkGetPhysicalDeviceXlibPresentationSupportKHR);
+    SHIM_PROC(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
+    SHIM_PROC(vkGetPhysicalDeviceSurfaceCapabilities2KHR);
+    SHIM_PROC(vkGetPhysicalDeviceSurfaceFormatsKHR);
+    SHIM_PROC(vkGetPhysicalDeviceSurfaceFormats2KHR);
+    /* Defined below, also needed by Wine's direct dlsym lookup. */
+    extern VK_SHIM_EXPORT void VKAPI_CALL vkDestroySurfaceKHR(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
+    SHIM_PROC(vkDestroySurfaceKHR);
+#undef SHIM_PROC
     PFN_vkVoidFunction fn = real_instance_proc(instance, pName);
     if (fn) return fn;
     /* The real loader doesn't know the Xlib entry points; hand out this shim's. */
@@ -414,6 +515,7 @@ VK_SHIM_EXPORT void VKAPI_CALL vkDestroySurfaceKHR(VkInstance instance, VkSurfac
         return;
     }
     fn(instance, surface, pAllocator);
+    android_bridge_destroy_surface(surface);
 }
 
 VK_SHIM_EXPORT VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
