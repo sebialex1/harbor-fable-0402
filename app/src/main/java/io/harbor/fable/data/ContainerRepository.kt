@@ -531,8 +531,13 @@ class ContainerRepository internal constructor(
         log.section("Direct3D (DXVK / VKD3D-Proton)")
         val direct3d = installDxWrappers(runtime, configured, dir, log)
         direct3d.describe().forEach { log.line(it) }
-        val dxvkConf = if (direct3d.installed[DxWrappers.Kind.DXVK] != null) DxWrappers.ensureDxvkConf(dir) else null
+        checkDxvk(direct3d, configured, exe, dir, log)
+        val dxvkInstalled = direct3d.installed[DxWrappers.Kind.DXVK] != null
+        val dxvkConf = if (dxvkInstalled) DxWrappers.ensureDxvkConf(dir) else null
         dxvkConf?.let { log.line("dxvk.conf: ${it.absolutePath}") }
+        if (dxvkInstalled && dxvkConf == null) {
+            log.error("dxvk.conf couldn't be written in ${dir.absolutePath}; DXVK_CONFIG_FILE won't be set (DXVK uses its defaults)")
+        }
 
         // 2d. GPU Info and the Direct3D tests in C:\fable\tools (Winlator puts its test programs
         //     into every container the same way); refreshed after an app update.
@@ -688,6 +693,7 @@ class ContainerRepository internal constructor(
         log.line("launcher: ${if (useNative) "native JNI fork/execve ($LAUNCHER_ENV=$LAUNCHER_NATIVE)" else "ProcessBuilder"}")
         log.section("Environment (Fable additions; the launcher also sets WINEPREFIX, HOME, TMPDIR, PATH, BOX64_*)")
         environment.forEach { log.line(it) }
+        checkDirect3dEnvironment(direct3d, environment, log)
         // Optional `wineboot -u` for a freshly extracted prefix, only when the container asks for
         // it ($WINEBOOT_ENV=1). Winlator-Ludashi never runs it: prefixPack.txz plus the DLL copy
         // (WinePrefix) is a complete prefix, and Wine runs `wineboot --init` by itself on every
@@ -930,8 +936,94 @@ class ContainerRepository internal constructor(
     }
 
     /**
+     * After [installDxWrappers]: warns when an app is about to start without DXVK (Direct3D
+     * would go through WineD3D, which needs OpenGL Android doesn't have, so the game stays
+     * black), and when DXVK is installed checks that its `d3d11.dll` and `dxgi.dll` really are
+     * in the prefix's system32, where Wine loads the native DLLs WINEDLLOVERRIDES asks for.
+     * Logging only: the launch goes on either way.
+     */
+    private fun checkDxvk(direct3d: DxWrappers.Report, container: Container, exe: ExeEntry?, dir: File, log: LaunchLog) {
+        val dxvk = direct3d.installed[DxWrappers.Kind.DXVK]
+        if (dxvk == null) {
+            // The Wine desktop and the built-in tools are useful without DXVK; a game isn't.
+            if (exe == null || exe.isTool) return
+            val off = container.dxvkVersion?.trim().equals(ContainerDefaults.DXVK_OFF, ignoreCase = true)
+            val warning = if (off) {
+                "DXVK is off for this container — Direct3D games will not render. Pick a DXVK build in the container's Settings."
+            } else {
+                "DXVK is not installed — Direct3D games will not render. Go to the Assets tab to download DXVK."
+            }
+            log.line("WARNING $warning")
+            Log.w(TAG, "${container.name}: $warning")
+            return
+        }
+        val system32 = File(dir, SYSTEM32_DIR)
+        val native = direct3d.nativeDlls[DxWrappers.Kind.DXVK].orEmpty()
+        var allThere = true
+        for (name in DXVK_REQUIRED_DLLS) {
+            val file = File(system32, name)
+            if (!file.isFile) {
+                allThere = false
+                log.error("DXVK check: $name is NOT in ${system32.absolutePath}; Wine will use its builtin (WineD3D) instead")
+                continue
+            }
+            // DXVK's DLL replaced the copy of Wine's builtin WinePrefix put there; an identical
+            // size means the replacement didn't happen.
+            val builtin = listOf("lib/wine/x86_64-windows", "lib64/wine/x86_64-windows")
+                .map { File(dir, "$it/$name") }
+                .firstOrNull { it.isFile }
+            val looksBuiltin = builtin != null && builtin.length() == file.length()
+            log.line(
+                "DXVK check: $name in system32: yes (${file.length()} bytes" +
+                    (if (looksBuiltin) ", same size as Wine's builtin: probably NOT DXVK's" else "") +
+                    (if (name in native) ", loaded as native" else ", NOT in WINEDLLOVERRIDES") + ")",
+            )
+            if (looksBuiltin || name !in native) allThere = false
+        }
+        if (allThere) {
+            log.line("DXVK check: $dxvk ok, ${DXVK_REQUIRED_DLLS.joinToString(" and ")} are DXVK's and load as native")
+        } else {
+            Log.w(TAG, "${container.name}: DXVK $dxvk is recorded as installed but its DLLs aren't all in place")
+        }
+    }
+
+    /**
+     * Confirms from the exact list handed to the launcher that Wine will load DXVK and
+     * VKD3D-Proton as native: `WINEDLLOVERRIDES` has to be there and must not end up with a
+     * builtin-first mode for d3d11/dxgi/d3d12 (the container's own value is merged after
+     * Fable's and wins), and `DXVK_CONFIG_FILE` has to point at dxvk.conf.
+     */
+    private fun checkDirect3dEnvironment(direct3d: DxWrappers.Report, environment: List<String>, log: LaunchLog) {
+        val wanted = buildList {
+            if (direct3d.installed[DxWrappers.Kind.DXVK] != null) addAll(listOf("d3d11", "dxgi"))
+            if (direct3d.installed[DxWrappers.Kind.VKD3D] != null) add("d3d12")
+        }
+        if (wanted.isEmpty()) return
+        val overrides = environment.lastOrNull { it.startsWith("$DLL_OVERRIDES_ENV=") }?.substringAfter('=')
+        if (overrides == null) {
+            log.error("$DLL_OVERRIDES_ENV isn't in the launch environment; Wine will load its builtin Direct3D DLLs")
+        } else {
+            val modes = parseDllOverrides(overrides)
+            val notNative = wanted.filter { modes[it]?.startsWith("n") != true }
+            if (notNative.isEmpty()) {
+                log.line("$DLL_OVERRIDES_ENV check: ${wanted.joinToString()} load as native")
+            } else {
+                log.error(
+                    "$DLL_OVERRIDES_ENV check: ${notNative.joinToString { "$it=${modes[it] ?: "(not listed)"}" }}: " +
+                        "these won't load DXVK / VKD3D-Proton (the container's own $DLL_OVERRIDES_ENV may override them)",
+                )
+            }
+        }
+        if (direct3d.installed[DxWrappers.Kind.DXVK] != null) {
+            val config = environment.lastOrNull { it.startsWith("DXVK_CONFIG_FILE=") }
+            log.line("DXVK_CONFIG_FILE check: ${config?.substringAfter('=') ?: "NOT set"}")
+        }
+    }
+
+    /**
      * The unpacked package for one layer: success(null) when nothing is downloaded (Wine's
-     * builtin is used), failure when the chosen package couldn't be unpacked.
+     * builtin is used, which the log flags as an error), failure when the chosen package
+     * couldn't be unpacked.
      */
     private suspend fun resolveDxWrapper(
         runtime: WineRuntime,
@@ -941,7 +1033,18 @@ class ContainerRepository internal constructor(
         log: LaunchLog,
     ): Result<DxWrappers.Package?> {
         if (archives.isEmpty()) {
-            log.line("${kind.label}: no package downloaded (Assets); Wine's builtin DLLs stay in place")
+            // Not a launch failure (the Wine desktop and non-D3D programs still work), but the
+            // reason a game stays black, so it has to stand out in the log and in logcat.
+            val message = when (kind) {
+                DxWrappers.Kind.DXVK ->
+                    "DXVK: no package downloaded! Games will show a black screen (WineD3D needs OpenGL). " +
+                        "Download DXVK from the Assets tab."
+                DxWrappers.Kind.VKD3D ->
+                    "VKD3D-Proton: no package downloaded! Direct3D 12 games will likely show a black screen " +
+                        "(they fall back to Wine's builtin d3d12). Download VKD3D-Proton from the Assets tab."
+            }
+            log.error(message)
+            Log.e(TAG, message)
             return Result.success(null)
         }
         val archive = WineRuntime.pickComponent(archives, preferred) ?: archives.first().also {
@@ -1277,6 +1380,30 @@ class ContainerRepository internal constructor(
 
         /** Wine's DLL load-order variable; Fable's and the container's values are merged. */
         private const val DLL_OVERRIDES_ENV = "WINEDLLOVERRIDES"
+
+        /** The prefix's 64-bit system directory, where DXVK's DLLs go. */
+        private const val SYSTEM32_DIR = "drive_c/windows/system32"
+
+        /** What a Direct3D 11 game (ULTRAKILL) loads first; both must be DXVK's for it to render. */
+        private val DXVK_REQUIRED_DLLS = listOf("d3d11.dll", "dxgi.dll")
+
+        /**
+         * `d3d11,dxgi=n,b;d3d12=n` -> {d3d11: "n,b", dxgi: "n,b", d3d12: "n"}, names lower case
+         * without `.dll`. Later entries replace earlier ones, as in Wine.
+         */
+        internal fun parseDllOverrides(value: String): Map<String, String> {
+            val modes = LinkedHashMap<String, String>()
+            value.split(';').forEach { entry ->
+                val eq = entry.indexOf('=')
+                if (eq <= 0) return@forEach
+                val mode = entry.substring(eq + 1).trim().lowercase()
+                entry.substring(0, eq).split(',').forEach { dll ->
+                    val name = dll.trim().lowercase().removeSuffix(".dll")
+                    if (name.isNotEmpty()) modes[name] = mode
+                }
+            }
+            return modes
+        }
 
         /** Disables Wine Mono and Gecko so `wineboot -u` doesn't stop on their install prompts. */
         private const val NO_MONO_GECKO = "mscoree,mshtml="
