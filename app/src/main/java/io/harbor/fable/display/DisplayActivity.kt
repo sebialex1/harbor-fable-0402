@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -12,6 +13,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.Toast
 import com.winlator.widget.XServerView
+import io.harbor.fable.data.ContainerRepository
 import com.winlator.xserver.Pointer
 import com.winlator.xserver.XServer
 import kotlin.math.hypot
@@ -24,12 +26,14 @@ import kotlin.math.hypot
  * Input is deliberately minimal (Winlator's TouchpadView / input-controls overlay are not
  * vendored): the screen works like a laptop trackpad — dragging a finger moves the cursor
  * relatively, a quick tap is a left click, a second finger is a right click, and hardware keyboard events go through Winlator's
- * `Keyboard.onKeyEvent`. Back leaves the screen; Wine keeps running.
+ * `Keyboard.onKeyEvent`. Leaving the screen (Back, or the activity finishing for any other
+ * reason) stops the container: its Wine processes and the X server.
  */
 class DisplayActivity : Activity() {
     private var view: XServerView? = null
     private var server: XServer? = null
     private var leftDown = false
+    private var containerId: String? = null
 
     // Trackpad state (screen pixels).
     private var activePointerId = MotionEvent.INVALID_POINTER_ID
@@ -46,6 +50,7 @@ class DisplayActivity : Activity() {
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        containerId = intent.getStringExtra(EXTRA_CONTAINER_ID)
         val xServer = DisplayServer.xServer
         if (xServer == null) {
             Toast.makeText(this, "Display isn't running", Toast.LENGTH_SHORT).show()
@@ -89,7 +94,23 @@ class DisplayActivity : Activity() {
         view?.renderer?.release()
         view = null
         server = null
+        // Only a real exit stops Wine; a recreate (config change not covered by the manifest)
+        // comes straight back to the same display.
+        if (isFinishing && !isChangingConfigurations) stopContainer()
         super.onDestroy()
+    }
+
+    /** Ends the container's Wine processes and the X server, off the main thread. */
+    private fun stopContainer() {
+        val id = containerId
+        if (id == null) {
+            // Nothing to attribute the processes to; still tear the display down.
+            runCatching { DisplayServer.stop() }
+            return
+        }
+        containerId = null
+        runCatching { ContainerRepository.get(applicationContext).stopContainerInBackground(id) }
+            .onFailure { Log.e(TAG, "Couldn't stop container $id", it) }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -202,14 +223,19 @@ class DisplayActivity : Activity() {
     }
 
     companion object {
+        private const val TAG = "DisplayActivity"
+        private const val EXTRA_CONTAINER_ID = "container_id"
         private const val SENSITIVITY = 1.5f
         private const val TOUCH_SLOP_DP = 10f
         private const val TAP_TIMEOUT_MS = 200L
 
-        fun open(context: Context) {
+        /** Opens the display for [containerId], which is stopped when the user leaves the screen. */
+        fun open(context: Context, containerId: String) {
             if (DisplayServer.xServer == null) return
             context.startActivity(
-                Intent(context, DisplayActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                Intent(context, DisplayActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(EXTRA_CONTAINER_ID, containerId),
             )
         }
     }

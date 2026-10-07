@@ -58,6 +58,9 @@ class ContainerRepository internal constructor(
     /** Live Wine process ids per container id. */
     private val runningPids = ConcurrentHashMap<String, MutableSet<Int>>()
 
+    /** Live Wine processes per container id, so [stopContainer] can end them. */
+    private val processes = ConcurrentHashMap<String, MutableSet<WineProcess>>()
+
     /** Serializes Wine extraction per container. */
     private val setupLocks = ConcurrentHashMap<String, Mutex>()
 
@@ -674,6 +677,55 @@ class ContainerRepository internal constructor(
         }
     }
 
+    /**
+     * Stops everything [containerId] is running: the tracked Wine processes, any helper processes
+     * Wine spawned for the same prefix (wineserver, explorer, services, …, which outlive their
+     * parent), and the X display server. The container goes back to READY.
+     */
+    suspend fun stopContainer(containerId: String) = withContext(Dispatchers.IO) {
+        runningPids.remove(containerId)
+        val tracked = processes.remove(containerId).orEmpty()
+        tracked.forEach { process -> runCatching { process.destroy() } }
+        runCatching { killPrefixProcesses(directory(containerId)) }
+            .onFailure { Log.w(TAG, "Couldn't sweep Wine processes for $containerId", it) }
+        runCatching { DisplayServer.stop() }
+            .onFailure { Log.w(TAG, "Couldn't stop the display server", it) }
+        mutex.withLock {
+            containersById[containerId]?.let { existing ->
+                if (existing.status == ContainerStatus.RUNNING) {
+                    containersById[containerId] = existing.copy(status = ContainerStatus.READY)
+                    persistLocked()
+                }
+            }
+        }
+        Log.i(TAG, "Stopped container $containerId (${tracked.size} tracked process(es))")
+    }
+
+    /** [stopContainer] on the repository's own scope, for callers that are going away (an activity's onDestroy). */
+    fun stopContainerInBackground(containerId: String) {
+        scope.launch {
+            runCatching { stopContainer(containerId) }
+                .onFailure { Log.e(TAG, "Stopping $containerId failed", it) }
+        }
+    }
+
+    /**
+     * SIGKILLs this app's other processes whose WINEPREFIX is [prefix]. Wine daemonizes
+     * wineserver and re-parents its helpers, so they aren't reachable from the launched process.
+     */
+    private fun killPrefixProcesses(prefix: File) {
+        val self = android.os.Process.myPid()
+        val marker = "WINEPREFIX=${prefix.absolutePath}"
+        File("/proc").listFiles()?.forEach { entry ->
+            val pid = entry.name.toIntOrNull() ?: return@forEach
+            if (pid == self) return@forEach
+            // environ is only readable for our own uid's processes; others fail and are skipped.
+            val environ = runCatching { File(entry, "environ").readBytes() }.getOrNull() ?: return@forEach
+            val matches = String(environ, Charsets.UTF_8).split('\u0000').any { it == marker }
+            if (matches) runCatching { android.os.Process.killProcess(pid) }
+        }
+    }
+
     /** Records a started process: container RUNNING, exe play stats, and a watcher that flips back on exit. */
     private suspend fun markStarted(containerId: String, exeId: String?, started: WineProcess, log: LaunchLog, processLog: File) {
         val pid = started.pid
@@ -685,12 +737,14 @@ class ContainerRepository internal constructor(
             persistLocked()
         }
         runningPids.getOrPut(containerId) { ConcurrentHashMap.newKeySet() }.add(pid)
+        processes.getOrPut(containerId) { ConcurrentHashMap.newKeySet() }.add(started)
         scope.launch {
             while (started.isAlive()) delay(PROCESS_POLL_MS)
             // The reaper thread appends "[fable] exit code N" / "killed by signal N"; give it a beat.
             delay(PROCESS_POLL_MS)
             log.section("Process $pid ended")
             log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
+            processes[containerId]?.remove(started)
             val remaining = runningPids[containerId]?.also { it.remove(pid) }
             if (remaining.isNullOrEmpty()) {
                 mutex.withLock {

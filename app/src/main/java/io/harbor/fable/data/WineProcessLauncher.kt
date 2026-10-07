@@ -289,4 +289,23 @@ internal class WineProcess(val pid: Int, val process: Process?) {
 
     /** The exit status once the process has ended, or null while it runs or when unknown. */
     fun exitCodeOrNull(): Int? = process?.let { if (it.isAlive) null else runCatching { it.exitValue() }.getOrNull() }
+
+    /**
+     * Ends the process: SIGTERM through [Process.destroy] for ProcessBuilder launches (SIGKILL if
+     * it is still alive after [graceMs]), or SIGKILL by [pid] for native launches.
+     */
+    fun destroy(graceMs: Long = DESTROY_GRACE_MS) {
+        val proc = process
+        if (proc != null) {
+            runCatching { proc.destroy() }
+            val exited = runCatching { proc.waitFor(graceMs, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(false)
+            if (!exited) runCatching { proc.destroyForcibly() }
+        } else if (pid > 0) {
+            runCatching { android.os.Process.killProcess(pid) }
+        }
+    }
+
+    private companion object {
+        const val DESTROY_GRACE_MS = 1_000L
+    }
 }

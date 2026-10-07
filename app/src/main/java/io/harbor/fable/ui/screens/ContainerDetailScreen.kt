@@ -49,7 +49,7 @@ fun ContainerDetailScreen(
     // is gone, so both run on the app-level scope.
     fun launchExe(exeId: String?) {
         fableUi.scope.launch {
-            fableUi.showMessage(repository.launch(containerId, exeId).also { it.openDisplay(context) }.message(), long = true)
+            fableUi.showMessage(repository.launch(containerId, exeId).also { it.openDisplay(context, containerId) }.message(), long = true)
         }
     }
 
@@ -60,7 +60,7 @@ fun ContainerDetailScreen(
         onLaunchPrimary = { launchExe(null) },
         onLaunchDesktop = {
             fableUi.scope.launch {
-                fableUi.showMessage(repository.launchDesktop(containerId).also { it.openDisplay(context) }.message(), long = true)
+                fableUi.showMessage(repository.launchDesktop(containerId).also { it.openDisplay(context, containerId) }.message(), long = true)
             }
         },
         onLaunchExe = { exe -> launchExe(exe.id) },

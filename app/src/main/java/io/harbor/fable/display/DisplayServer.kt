@@ -24,8 +24,8 @@ import java.io.IOException
  * only spawned after that, the same ordering as Winlator's `XEnvironment` (X server component
  * before the guest launcher).
  *
- * One server for the app process: it outlives the display screen so Wine keeps its connection
- * while the user is elsewhere in the app.
+ * One server for the app process. Leaving the display screen stops the container
+ * ([io.harbor.fable.data.ContainerRepository.stopContainer]), which also stops this server.
  */
 object DisplayServer {
     private const val TAG = "DisplayServer"
