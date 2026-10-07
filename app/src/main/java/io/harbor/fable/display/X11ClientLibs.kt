@@ -29,6 +29,9 @@ import java.io.IOException
  * - GnuTLS 3.8.13 (`libgnutls.so` + `libgnutls.so.30`, for secur32 / bcrypt) and its DT_NEEDED
  *   closure: nettle 3.10.2 (`libnettle.so.8`, `libhogweed.so.6` + unversioned), GMP, libtasn1,
  *   libidn2, libunistring, libiconv, p11-kit, libffi and zstd (`libzstd.so.1` + `libzstd.so`).
+ * - SDL 2.32.10 (`libSDL2-2.0.so.0` + `libSDL2.so`, for winebus joysticks; termux-x11 repo) and
+ *   the DT_NEEDED entries the X libraries above don't cover: libXss, libwayland-client,
+ *   libwayland-cursor, libwayland-egl, libxkbcommon, libdecor-0.
  *
  * Box64 asks for the versioned name first (`libfreetype.so.6`) and then the unversioned one, while
  * the Termux libraries reference each other by their DT_NEEDED names (`libz.so.1`, `libbz2.so.1.0`,
@@ -45,7 +48,7 @@ internal object X11ClientLibs {
     private const val TAG = "X11ClientLibs"
     private const val ASSET_DIR = "x11/arm64-v8a"
     /** Bump whenever the bundled assets change so existing installs copy them again. */
-    private const val VERSION = "termux-libx11-1.8.13_libxcb-1.17.0_freetype-2.14.3_xext-libs-2_fontconfig-2.18.3_gnutls-3.8.13"
+    private const val VERSION = "termux-libx11-1.8.13_libxcb-1.17.0_freetype-2.14.3_xext-libs-2_fontconfig-2.18.3_gnutls-3.8.13_sdl2-2.32.10"
     private const val MARKER = ".fable-x11"
     private const val TERMUX_SOCKET_PREFIX = "/data/data/com.termux/files/usr/tmp/.X11-unix/X"
 

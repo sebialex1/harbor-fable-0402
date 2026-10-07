@@ -225,6 +225,20 @@ library; the Termux build recipes are at https://github.com/termux/termux-packag
 | libffi.so | libffi 3.8.0 | MIT (`libffi.txt`) |
 | libzstd.so.1, libzstd.so | zstd 1.5.7-1 | BSD-3-Clause or GPL-2.0; used under BSD (`zstd.txt`) |
 
+### SDL2 and its dependencies (Termux builds)
+
+Wine's `winebus.sys` loads `libSDL2-2.0.so.0` through Box64 for joysticks / game controllers.
+Fable bundles the SDL2 build from the termux-x11 repository (https://packages.termux.dev/apt/termux-x11/)
+and the DT_NEEDED entries not already covered by the libraries above (termux-main unless noted).
+
+| Library (file names) | Termux package | License |
+|---|---|---|
+| libSDL2-2.0.so.0, libSDL2.so | sdl2 2.32.10 (termux-x11 repo) | zlib (`sdl2.txt`) |
+| libXss.so | libxss 1.2.5 | MIT/X11-style (`libxss.txt`) |
+| libwayland-client.so, libwayland-cursor.so, libwayland-egl.so | libwayland 1.26.0 | MIT (`libwayland.txt`) |
+| libxkbcommon.so | libxkbcommon 1.13.2 (termux-x11 repo) | MIT and MIT-style (`libxkbcommon.txt`) |
+| libdecor-0.so | libdecor 0.2.5 (termux-x11 repo) | MIT (`libdecor.txt`) |
+
 The full license texts ship in the APK under `assets/x11/licenses/`. At install time Fable
 patches one string in its copy of libxcb (the compiled-in socket directory
 `/data/data/com.termux/files/usr/tmp/.X11-unix/X` -> `<filesDir>/.X11-unix/X`); no other change.

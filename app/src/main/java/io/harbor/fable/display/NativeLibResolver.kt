@@ -25,6 +25,11 @@ import java.io.IOException
  * Copies of libft2.so that the previous resolver (`native-libs-1`) installed as
  * `libfreetype.so` / `libfreetype.so.6` are deleted ([purgeStaleSystemCopies]).
  *
+ * Fontconfig (without it Box64 can't initialize the wrapped `libfontconfig.so` and
+ * `kernel32.dll` fails with c0000135), GnuTLS and SDL2, plus their DT_NEEDED closures, are
+ * bundled-only as well (`native-libs-3`): Android has none of them, so a system lookup could only
+ * ever report them missing.
+ *
  * For the rest, once per [VERSION], system build and bundled set, each [Spec] missing from the
  * library directory is looked up in [SYSTEM_LIB_DIRS] under its candidate names and the first
  * aarch64 ELF found is **copied** (not symlinked; links across Android's partitions are
@@ -135,12 +140,21 @@ internal object NativeLibResolver {
         Spec("libp11-kit.so", listOf("libp11-kit.so", "libp11-kit.so.0"), "PKCS#11 (GnuTLS)", systemFallback = false),
         Spec("libffi.so", listOf("libffi.so", "libffi.so.8"), "libffi (p11-kit)", systemFallback = false),
         Spec("libzstd.so", listOf("libzstd.so", "libzstd.so.1"), "Zstandard (GnuTLS)", aliases = listOf("libzstd.so.1"), systemFallback = false),
+        // Bundled (Termux x11-repo SDL 2.32.10); Android has no SDL2 to fall back to.
         Spec(
             target = "libSDL2.so",
             candidates = listOf("libSDL2.so", "libSDL2-2.0.so.0", "libSDL2-2.0.so"),
             purpose = "SDL2 (winebus joysticks)",
             aliases = listOf("libSDL2-2.0.so.0"),
+            systemFallback = false,
         ),
+        // SDL2's DT_NEEDED closure, bundled alongside it (libiconv.so and the X libraries are listed above).
+        Spec("libXss.so", listOf("libXss.so", "libXss.so.1"), "X ScreenSaver (SDL2)", systemFallback = false),
+        Spec("libwayland-client.so", listOf("libwayland-client.so", "libwayland-client.so.0"), "Wayland client (SDL2)", systemFallback = false),
+        Spec("libwayland-cursor.so", listOf("libwayland-cursor.so", "libwayland-cursor.so.0"), "Wayland cursors (SDL2)", systemFallback = false),
+        Spec("libwayland-egl.so", listOf("libwayland-egl.so", "libwayland-egl.so.1"), "Wayland EGL (SDL2)", systemFallback = false),
+        Spec("libxkbcommon.so", listOf("libxkbcommon.so", "libxkbcommon.so.0"), "xkbcommon (SDL2)", systemFallback = false),
+        Spec("libdecor-0.so", listOf("libdecor-0.so", "libdecor-0.so.0"), "libdecor (SDL2)", systemFallback = false),
     )
 
     enum class Status {
