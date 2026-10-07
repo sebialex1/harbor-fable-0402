@@ -36,7 +36,7 @@ class LaunchLog private constructor(private val file: File?) {
     }
 
     /** Appends the last [maxBytes] of [source] (the child's stdout/stderr), if it exists. */
-    fun attachTail(source: File, title: String, maxBytes: Int = 16 * 1024) {
+    fun attachTail(source: File, title: String, maxBytes: Int = TAIL_BYTES) {
         section(title)
         val text = tail(source, maxBytes)
         append(text ?: "(no output file at ${source.absolutePath})")
@@ -53,6 +53,12 @@ class LaunchLog private constructor(private val file: File?) {
     companion object {
         private const val TAG = "LaunchLog"
         private const val KEEP = 20
+
+        /**
+         * How much of the Wine process output a launch log copies. With WINEDEBUG=+loaddll,+module
+         * the loader trace leading up to a failure is tens of kilobytes.
+         */
+        const val TAIL_BYTES = 96 * 1024
 
         fun logsDir(context: Context): File = File(context.applicationContext.filesDir, "logs")
 

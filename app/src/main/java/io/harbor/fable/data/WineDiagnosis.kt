@@ -16,7 +16,7 @@ import java.io.File
  * ```
  */
 internal object WineDiagnosis {
-    private const val TAIL_BYTES = 32 * 1024
+    private const val TAIL_BYTES = LaunchLog.TAIL_BYTES
 
     private val DLOPEN_NOT_FOUND = Regex("""library "([^"]+)" not found""")
     private val NATIVE_INIT_FAILED = Regex("""Error initializing native (\S+)""")

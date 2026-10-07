@@ -495,7 +495,14 @@ class ContainerRepository internal constructor(
 
         // 5. Start the process.
         val environment = buildList {
-            add("WINEDEBUG=-all")
+            // Diagnostics: WINEDEBUG=-all hid why Wine stopped (it only printed "could not load
+            // kernel32.dll, status c0000135"). +loaddll names every DLL Wine maps and from where,
+            // +module traces the loader's search (system32, WINEDLLDIR*, load order), and every
+            // other channel keeps Wine's default err/fixme output. A container can still set its
+            // own WINEDEBUG (e.g. -all) through its environment variables, which come last.
+            add("WINEDEBUG=$DIAGNOSTIC_WINEDEBUG")
+            // Box64 reports native dlopen()/dlsym() failures instead of failing silently.
+            add("BOX64_DLSYM_ERROR=1")
             addAll(translator.environment)
             if (screen != null) {
                 add("DISPLAY=${screen.display}")
@@ -1022,6 +1029,14 @@ private data class ResolvedTranslator(
     val environment: List<String>,
     val earlyExitHint: String? = null,
 )
+
+/**
+ * Wine's debug channels for every launch while the start-up failures are being diagnosed:
+ * `+loaddll` logs each DLL Wine loads (builtin or native, and its path), `+module` the loader's
+ * search for it. Channels not named here keep Wine's default `err`/`fixme` messages, which
+ * `-all` used to silence.
+ */
+internal const val DIAGNOSTIC_WINEDEBUG = "+loaddll,+module"
 
 /**
  * Box64 settings Winlator bionic launches Wine with (GuestProgramLauncherComponent's base
