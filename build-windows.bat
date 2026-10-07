@@ -8,38 +8,60 @@ REM =====================================================================
 
 setlocal
 
-set REPO_ROOT=%~dp0
-set CACHE=%REPO_ROOT%.build-cache
-set SDK_ROOT=%CACHE%\android-sdk
-set JDK_ROOT=%CACHE%\jdk17
-set MINGW_ROOT=%CACHE%\mingw64
-
-if not exist "%CACHE%" mkdir "%CACHE%"
+set "REPO_ROOT=%~dp0"
 
 REM =====================================================================
-REM  1. Check for PowerShell (required for the download/extract logic)
+REM  1. Find PowerShell (Windows PowerShell ships with every Windows 10+)
 REM =====================================================================
-where pwsh >nul 2>&1
-if %errorlevel% equ 0 (
-    set PS=pwsh
-) else (
-    where powershell >nul 2>&1
-    if %errorlevel% equ 0 (
-        set PS=powershell
-    ) else (
-        echo ERROR: PowerShell not found. Install PowerShell 7 or use Windows PowerShell.
-        exit /b 1
-    )
+set "PS="
+
+REM PowerShell 7 (pwsh.exe) — check PATH first
+for /f "delims=" %%i in ('where pwsh 2^>nul') do (
+    set "PS=%%i"
+    goto :ps_found
 )
 
+REM Windows PowerShell (powershell.exe) — check PATH
+for /f "delims=" %%i in ('where powershell 2^>nul') do (
+    set "PS=%%i"
+    goto :ps_found
+)
+
+REM Windows PowerShell — hardcoded path (every Windows 10/11 has it here)
+if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" (
+    set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+    goto :ps_found
+)
+
+REM Windows PowerShell — check by OS architecture (32-bit Windows on 64-bit)
+if exist "%SystemRoot%\SysNative\WindowsPowerShell\v1.0\powershell.exe" (
+    set "PS=%SystemRoot%\SysNative\WindowsPowerShell\v1.0\powershell.exe"
+    goto :ps_found
+)
+
+echo.
+echo ERROR: PowerShell not found on this system.
+echo   PowerShell ships with Windows 10 and later. If you're on an older
+echo   Windows version, install Windows Management Framework 5.1 from:
+echo     https://www.microsoft.com/en-us/download/details.aspx?id=54616
+echo   Or install PowerShell 7 from:
+echo     https://github.com/PowerShell/PowerShell/releases
+echo.
+pause
+exit /b 1
+
+:ps_found
+echo Using PowerShell: %PS%
+
 REM =====================================================================
-REM  2. Run the PowerShell build script
+REM  2. Run the build script
 REM =====================================================================
-%PS% -ExecutionPolicy Bypass -File "%REPO_ROOT%build-windows.ps1"
+"%PS%" -ExecutionPolicy Bypass -File "%REPO_ROOT%build-windows.ps1"
 
 if %errorlevel% neq 0 (
     echo.
     echo BUILD FAILED. See errors above.
+    pause
     exit /b %errorlevel%
 )
 
