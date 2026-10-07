@@ -1,5 +1,15 @@
 package io.harbor.fable.ui.components
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import io.harbor.fable.ui.theme.FableBlue
+import io.harbor.fable.ui.theme.TileTone
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -42,8 +52,10 @@ import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
 
 /**
- * Centered empty state: a grey glyph, a title and at most one short line, straight on the
- * canvas. No card and no button; the screen's own top-bar action is how you fill it.
+ * Centered empty state: the glyph on a toned gradient tile floating in a soft halo of the same
+ * hue, a title and at most one short line, straight on the canvas. No card and no button; the
+ * screen's own top-bar action is how you fill it. The tile drifts gently so the screen isn't
+ * dead while empty.
  */
 @Composable
 fun EmptyState(
@@ -51,15 +63,43 @@ fun EmptyState(
     title: String,
     modifier: Modifier = Modifier,
     message: String = "",
+    tone: TileTone = TileTone.Graphite,
 ) {
+    val drift = rememberInfiniteTransition(label = "emptyDrift")
+    val float by drift.animateFloat(
+        initialValue = -3f,
+        targetValue = 3f,
+        animationSpec = infiniteRepeatable(tween(2400, easing = Motion.EaseInOut), RepeatMode.Reverse),
+        label = "emptyFloat",
+    )
     Column(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.xxl, vertical = 56.dp),
+            .padding(horizontal = Spacing.xxl, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, contentDescription = null, tint = FableTextFaint, modifier = Modifier.size(40.dp))
-        Spacer(Modifier.height(Spacing.md))
+        Box(
+            Modifier
+                .size(112.dp)
+                .drawBehind {
+                    drawCircle(
+                        Brush.radialGradient(
+                            listOf(tone.start.copy(alpha = 0.55f), Color.Transparent),
+                            radius = size.minDimension / 2f,
+                        ),
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            ToneIconTile(
+                icon = icon,
+                tone = tone,
+                size = 56.dp,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.graphicsLayer { translationY = float.dp.toPx() },
+            )
+        }
+        Spacer(Modifier.height(Spacing.sm))
         Text(title, style = MaterialTheme.typography.titleMedium, color = FableTextDim, textAlign = TextAlign.Center)
         if (message.isNotBlank()) {
             Spacer(Modifier.height(Spacing.xs))
@@ -81,7 +121,8 @@ fun LoadingCard(message: String, modifier: Modifier = Modifier) {
         ) {
             CircularProgressIndicator(
                 modifier = Modifier.size(18.dp),
-                color = FableAccent,
+                color = FableBlue,
+                trackColor = FableTrack,
                 strokeWidth = 2.dp,
             )
             Text(message, style = MaterialTheme.typography.bodyMedium)
@@ -105,7 +146,15 @@ fun NoticeCard(
                 .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical + 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+            Box(
+                Modifier
+                    .size(30.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(tint.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(17.dp))
+            }
             Spacer(Modifier.width(Spacing.md))
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall)
@@ -125,9 +174,9 @@ fun NoticeCard(
 fun ThinProgressBar(
     progress: Float?,
     modifier: Modifier = Modifier,
-    color: Color = FableAccent,
+    color: Color = FableBlue,
 ) {
-    LineProgressBar(progress = progress, modifier = modifier, color = color, thickness = 2.dp)
+    LineProgressBar(progress = progress, modifier = modifier, color = color, thickness = 2.dp, rounded = true)
 }
 
 /**

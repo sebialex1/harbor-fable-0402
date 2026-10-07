@@ -1,5 +1,20 @@
 package io.harbor.fable.ui.screens
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
+import io.harbor.fable.ui.icons.FableIcons
+import io.harbor.fable.ui.theme.GlassBorder
+import io.harbor.fable.ui.theme.PillRadius
+import io.harbor.fable.ui.theme.RowPaddingHorizontal
+import io.harbor.fable.ui.theme.Spacing
+import io.harbor.fable.ui.theme.TileTone
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -103,7 +118,10 @@ internal fun SettingsContent(
     val appear = rememberEntrance()
 
     FableScreen(title = "Settings") {
-        // Two sections: what new containers start with, and the app itself.
+        // The device first, as a hero card; then what new containers start with, and the app.
+        item(key = "device") {
+            DeviceHeroCard(deviceInfo = deviceInfo, modifier = Modifier.animateItem().entrance(appear, 0))
+        }
         item(key = "defaults-label") { SectionLabel("New Containers", Modifier.animateItem().entrance(appear, 0)) }
         item(key = "defaults") {
             FableCard(Modifier.animateItem().entrance(appear, 0)) {
@@ -156,13 +174,8 @@ internal fun SettingsContent(
         item(key = "about-label") { SectionLabel("About", Modifier.animateItem().entrance(appear, 1)) }
         item(key = "about") {
             FableCard(Modifier.animateItem().entrance(appear, 1)) {
+                // Device, GPU and system live on the hero card above, not repeated here.
                 InfoRow(label = "Version", value = versionName)
-                CardDivider()
-                InfoRow(label = "Device", value = listOf(deviceInfo.device, deviceInfo.vendor).filter { it.isNotBlank() }.distinct().joinToString(" · "))
-                CardDivider()
-                InfoRow(label = "GPU", value = deviceInfo.gpu)
-                CardDivider()
-                InfoRow(label = "System", value = listOf(deviceInfo.abi, "SDK ${deviceInfo.sdk}").filter { it.isNotBlank() }.joinToString(" · "))
                 CardDivider()
                 InfoRow(label = "License", value = "MIT")
                 CardDivider()
@@ -188,3 +201,49 @@ internal fun SettingsContent(
         }
     }
 }
+
+/**
+ * The device as a hero: the GPU on an indigo-lit glass card with its tile, the model beneath,
+ * and the system facts as small glass chips.
+ */
+@Composable
+private fun DeviceHeroCard(deviceInfo: DeviceGpuInfo, modifier: Modifier = Modifier) {
+    FableCard(modifier.fillMaxWidth(), glow = TileTone.Indigo) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ToneIconTile(icon = FableIcons.GpuInfo, tone = TileTone.Indigo, size = 48.dp)
+            Spacer(Modifier.width(Spacing.md))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                Text(
+                    text = deviceInfo.gpu.takeIf { it.isNotBlank() && !it.equals("unknown", ignoreCase = true) } ?: "Unknown GPU",
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = listOf(deviceInfo.device, deviceInfo.vendor).filter { it.isNotBlank() }.distinct().joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs), modifier = Modifier.padding(top = Spacing.xs)) {
+                    listOf(deviceInfo.abi, "SDK ${deviceInfo.sdk}").filter { it.isNotBlank() }.forEach { fact ->
+                        Text(
+                            text = fact,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TileTone.Indigo.glyph,
+                            modifier = Modifier
+                                .glassOverlay(RoundedCornerShape(PillRadius), border = GlassBorder)
+                                .padding(horizontal = Spacing.sm, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+

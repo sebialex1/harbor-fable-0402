@@ -1,5 +1,6 @@
 package io.harbor.fable.ui.components
 
+import io.harbor.fable.ui.theme.TileTone
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -64,8 +65,8 @@ internal fun releaseSubtitle(release: RadvRelease, note: String? = null): String
 
 /**
  * One RADV Xclipse release. The title is the tag with a channel badge ("Latest", "Pre-release");
- * the trailing control walks through download → downloaded → install → active, and a thin progress
- * line runs along the bottom while bytes are coming in.
+ * the trailing control is one [MorphPill] that walks through download → progress → downloaded →
+ * active, stretching and filling as it goes (Install appears as a button once the zip is on disk).
  *
  * [onInstall] is offered once the zip is on disk; pass null to hide the install action.
  */
@@ -88,10 +89,8 @@ fun DriverReleaseRow(
         else -> null
     }
     val percent = ((task?.progressFraction ?: 0f) * 100).toInt()
-    val transferring = ui == ReleaseUiState.QUEUED || ui == ReleaseUiState.DOWNLOADING || ui == ReleaseUiState.VERIFYING
     val progress: Float? = when {
         ui == ReleaseUiState.DOWNLOADING && (task?.totalBytes ?: 0L) > 0 -> task?.progressFraction
-        ui == ReleaseUiState.VERIFYING -> 1f
         else -> null
     }
     Box(modifier) {
@@ -110,45 +109,44 @@ fun DriverReleaseRow(
                 }
             },
             trailing = {
+                // Download, progress and verification are one morphing pill (see MorphPill);
+                // only Install swaps in a real button once the zip is on disk.
                 AnimatedContent(
-                    targetState = ui,
+                    targetState = ui == ReleaseUiState.DOWNLOADED && onInstall != null,
                     transitionSpec = {
-                        (fadeIn(Motion.enter(Motion.Quick)) + scaleIn(Motion.pop(), initialScale = 0.8f)) togetherWith
+                        (fadeIn(Motion.enter(Motion.Quick)) + scaleIn(Motion.pop(), initialScale = 0.85f)) togetherWith
                             fadeOut(Motion.exit(Motion.Fast))
                     },
                     label = "releaseState",
-                ) { current ->
-                    when (current) {
-                        ReleaseUiState.AVAILABLE -> FableIconButton(
-                            icon = FableIcons.Download,
-                            contentDescription = "Download ${release.tag}",
-                            size = 32.dp,
+                ) { showInstall ->
+                    if (showInstall && onInstall != null) {
+                        FableButton(text = "Install", onClick = onInstall, compact = true)
+                    } else {
+                        MorphPill(
+                            phase = when (ui) {
+                                ReleaseUiState.AVAILABLE -> MorphPhase.Idle
+                                ReleaseUiState.QUEUED, ReleaseUiState.INSTALLING -> MorphPhase.Waiting
+                                ReleaseUiState.DOWNLOADING -> MorphPhase.Active
+                                ReleaseUiState.VERIFYING -> MorphPhase.Verifying
+                                ReleaseUiState.DOWNLOADED, ReleaseUiState.INSTALLED -> MorphPhase.Done
+                            },
+                            progress = progress,
+                            label = when (ui) {
+                                ReleaseUiState.AVAILABLE -> ""
+                                ReleaseUiState.QUEUED -> "Queued"
+                                ReleaseUiState.DOWNLOADING -> if (progress != null) "$percent%" else "Starting"
+                                ReleaseUiState.VERIFYING -> "Verifying"
+                                ReleaseUiState.DOWNLOADED -> "Downloaded"
+                                ReleaseUiState.INSTALLING -> "Installing"
+                                ReleaseUiState.INSTALLED -> "Active"
+                            },
+                            contentDescription = if (ui == ReleaseUiState.AVAILABLE) "Download ${release.tag}" else null,
                             onClick = onDownload,
                         )
-                        ReleaseUiState.QUEUED -> StateText("Queued")
-                        ReleaseUiState.DOWNLOADING -> StateText("$percent%")
-                        ReleaseUiState.VERIFYING -> StateText("Verifying")
-                        ReleaseUiState.DOWNLOADED -> if (onInstall != null) {
-                            FableButton(text = "Install", onClick = onInstall, compact = true)
-                        } else {
-                            StateText("Downloaded")
-                        }
-                        ReleaseUiState.INSTALLING -> StateText("Installing")
-                        ReleaseUiState.INSTALLED -> StateText("Active")
                     }
                 }
             },
         )
-        AnimatedVisibility(
-            visible = transferring,
-            enter = fadeIn(Motion.enter(Motion.Quick)),
-            exit = fadeOut(Motion.exit(Motion.Standard)),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = RowPaddingHorizontal),
-        ) {
-            ThinProgressBar(progress = progress)
-        }
     }
 }
 
@@ -168,6 +166,7 @@ fun DriverSummaryRow(
     icon: ImageVector = FableIcons.Drivers,
     iconTint: Color = FableText,
     titleMaxLines: Int = 2,
+    tone: TileTone = TileTone.Teal,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -177,7 +176,7 @@ fun DriverSummaryRow(
             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconTile(icon = icon, tint = iconTint)
+        ToneIconTile(icon = icon, tone = tone, size = 38.dp, dimmed = iconTint != FableText)
         Spacer(Modifier.width(Spacing.md))
         Column(Modifier.weight(1f)) {
             Text(

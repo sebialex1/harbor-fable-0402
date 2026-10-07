@@ -130,6 +130,7 @@ fun CollapsibleSection(
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
     badge: (@Composable () -> Unit)? = null,
+    leading: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, Motion.inPlace(), label = "sectionChevron")
@@ -144,6 +145,10 @@ fun CollapsibleSection(
                 .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (leading != null) {
+                leading()
+                Spacer(Modifier.width(Spacing.md))
+            }
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
@@ -171,7 +176,7 @@ fun CollapsibleSection(
             exit = shrinkVertically(Motion.exit()) + fadeOut(Motion.exit()),
         ) {
             Column(Modifier.fillMaxWidth()) {
-                CardDivider()
+                CardDivider(afterIcon = leading != null)
                 content()
             }
         }

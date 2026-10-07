@@ -1,5 +1,8 @@
 package io.harbor.fable.ui.screens
 
+import io.harbor.fable.ui.theme.TileTone
+import io.harbor.fable.ui.theme.FableBlue
+import androidx.compose.ui.unit.sp
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -229,6 +232,7 @@ internal fun VulkanExtensionsContent(
             item(key = "empty") {
                 EmptyState(
                     icon = FableIcons.Extension,
+                    tone = TileTone.Blue,
                     title = "No extensions reported",
                     modifier = Modifier.animateItem(),
                 )
@@ -246,7 +250,7 @@ private fun VulkanSummaryCard(
     probing: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    FableCard(modifier.fillMaxWidth()) {
+    FableCard(modifier.fillMaxWidth(), glow = TileTone.Blue) {
         // Each face is a single Column: AnimatedContent lays its content out in a Box, so sibling
         // rows placed directly in the lambda would stack on top of each other.
         AnimatedContent(
@@ -263,7 +267,7 @@ private fun VulkanSummaryCard(
                         .padding(horizontal = RowPaddingHorizontal, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = FableTextDim, strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = FableBlue, strokeWidth = 2.dp)
                     Text(
                         text = "Reading driver…",
                         style = MaterialTheme.typography.bodyMedium,
@@ -292,10 +296,35 @@ private fun VulkanSummaryCard(
                 }
                 else -> Column(Modifier.fillMaxWidth()) {
                     val device = result.primaryDevice
-                    InfoRow(
-                        label = device?.name ?: "No physical device",
-                        value = "${result.totalCount} extensions",
-                    )
+                    // Hero: the device on its tile, the extension count beneath, and the Vulkan
+                    // generation as an oversized figure on the right.
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.md),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ToneIconTile(icon = FableIcons.GpuInfo, tone = TileTone.Blue, size = 44.dp)
+                        Column(Modifier.weight(1f).padding(horizontal = Spacing.md)) {
+                            Text(
+                                text = device?.name ?: "No physical device",
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text("${result.totalCount} extensions", style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (device != null) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = device.apiGeneration,
+                                    style = MaterialTheme.typography.headlineLarge.copy(letterSpacing = (-1).sp),
+                                    color = TileTone.Blue.glyph,
+                                )
+                                Text("VULKAN", style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp))
+                            }
+                        }
+                    }
                     CardDivider()
                     if (device != null) {
                         InfoRow(label = "Vulkan API", value = device.apiVersion)

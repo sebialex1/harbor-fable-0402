@@ -2,6 +2,18 @@ package io.harbor.fable.ui.screens
 
 import androidx.compose.animation.core.animateDpAsState
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.text.font.FontFamily
+import io.harbor.fable.data.models.HudPosition
+import io.harbor.fable.data.models.HudSettings
+import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import android.os.Build
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
@@ -171,6 +183,9 @@ fun ContainerDetailScreen(
         onBox64Change = { box64 ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(box64 = box64)) } }
         },
+        onHudChange = { hud ->
+            container?.let { fableUi.scope.launch { repository.update(it.copy(hud = hud)) } }
+        },
         onAddExe = { showAddExe = true },
         onDelete = { showDeleteConfirm = true },
     )
@@ -248,6 +263,7 @@ internal fun ContainerDetailContent(
     onAddExe: () -> Unit,
     onDelete: () -> Unit,
     unavailableTools: Set<String> = emptySet(),
+    onHudChange: (HudSettings) -> Unit = {},
 ) {
     val appear = rememberEntrance()
     var tab by rememberSaveable { mutableStateOf(ContainerTab.Apps) }
@@ -386,6 +402,7 @@ internal fun ContainerDetailContent(
                         expanded = expansion.isExpanded(GRAPHICS_KEY, default = false),
                         onToggle = { expansion.toggle(GRAPHICS_KEY, default = false) },
                         modifier = Modifier.animateItem().entrance(appear, 0),
+                        leading = { ToneIconTile(icon = FableIcons.GpuInfo, tone = TileTone.Blue) },
                         badge = { Pill(text = graphicsSummary(container)) },
                     ) {
                         OptionSelector(
@@ -417,6 +434,18 @@ internal fun ContainerDetailContent(
                     }
                 }
 
+                // The display screen's performance overlay: which lines it shows and where.
+                item(key = "overlay") {
+                    PerformanceOverlaySection(
+                        hud = container.hud,
+                        resolution = container.screenResolution,
+                        expanded = expansion.isExpanded(OVERLAY_KEY, default = false),
+                        onToggle = { expansion.toggle(OVERLAY_KEY, default = false) },
+                        onChange = onHudChange,
+                        modifier = Modifier.animateItem().entrance(appear, 1),
+                    )
+                }
+
                 // What runs the container: the Wine build and driver it was created with (fixed)
                 // and the x86 translator.
                 item(key = "system") {
@@ -425,6 +454,7 @@ internal fun ContainerDetailContent(
                         expanded = expansion.isExpanded(SYSTEM_KEY, default = false),
                         onToggle = { expansion.toggle(SYSTEM_KEY, default = false) },
                         modifier = Modifier.animateItem().entrance(appear, 1),
+                        leading = { MonogramTile(text = "Wi", tone = TileTone.Violet) },
                         badge = { Pill(text = translatorLabel(container.translator)) },
                     ) {
                         InfoRow(label = "Wine", value = container.wineVersion)
@@ -916,6 +946,7 @@ private const val GRAPHICS_KEY = "graphics"
 private const val SYSTEM_KEY = "system"
 private const val BOX64_KEY = "box64"
 private const val BOX64_ADVANCED_KEY = "box64-advanced"
+private const val OVERLAY_KEY = "overlay"
 
 /** What the collapsed Graphics group shows: the resolution, and a flag when DXVK is off. */
 private fun graphicsSummary(container: Container): String {
@@ -944,6 +975,7 @@ private fun Box64PresetSection(
         expanded = expanded,
         onToggle = onToggle,
         modifier = modifier,
+        leading = { MonogramTile(text = "64", tone = TileTone.Amber) },
         badge = { Pill(text = settings.preset.label) },
     ) {
         OptionSelector(
@@ -989,6 +1021,7 @@ private fun Box64OptionsSection(
         expanded = expanded,
         onToggle = onToggle,
         modifier = modifier,
+        leading = { ToneIconTile(icon = FableIcons.Checklist, tone = TileTone.Amber) },
         badge = { if (settings.isCustomized) Pill(text = "${settings.overrides.size} changed") },
     ) {
         Box64Options.all.forEachIndexed { index, option ->
@@ -1047,3 +1080,136 @@ private fun toolCaption(exe: ExeEntry): String = when (exe.toolId) {
     ContainerTools.D3D12_TEST.id -> "via VKD3D-Proton"
     else -> "Built-in tool"
 }
+
+/**
+ * Performance overlay settings: a live preview (a little game frame with the HUD chip in its
+ * corner, showing exactly the lines that are on), a master switch, one switch per line and the
+ * corner. The chip glides between corners and grows or shrinks as lines are toggled.
+ */
+@Composable
+private fun PerformanceOverlaySection(
+    hud: HudSettings,
+    resolution: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onChange: (HudSettings) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    CollapsibleSection(
+        title = "Performance Overlay",
+        expanded = expanded,
+        onToggle = onToggle,
+        modifier = modifier,
+        leading = { MonogramTile(text = "fps", tone = TileTone.Teal) },
+        badge = { Pill(text = if (!hud.enabled || hud.isEmpty) "Off" else hudSummary(hud)) },
+    ) {
+        HudPreview(hud = hud, resolution = resolution)
+        CardDivider()
+        ToggleRow(
+            title = "Show Overlay",
+            subtitle = "On the display screen while the container runs",
+            checked = hud.enabled,
+            onCheckedChange = { onChange(hud.copy(enabled = it)) },
+        )
+        AnimatedVisibility(
+            visible = hud.enabled,
+            enter = expandVertically(Motion.morph()) + fadeIn(Motion.enter()),
+            exit = shrinkVertically(Motion.morph()) + fadeOut(Motion.exit()),
+        ) {
+            Column {
+                CardDivider()
+                ToggleRow(
+                    title = "Frame Rate",
+                    subtitle = "Frames the display drew each second",
+                    checked = hud.showFps,
+                    onCheckedChange = { onChange(hud.copy(showFps = it)) },
+                )
+                CardDivider()
+                ToggleRow(
+                    title = "Resolution",
+                    subtitle = "The X screen size",
+                    checked = hud.showResolution,
+                    onCheckedChange = { onChange(hud.copy(showResolution = it)) },
+                )
+                CardDivider()
+                ToggleRow(
+                    title = "CPU Usage",
+                    subtitle = "System-wide when Android allows it, otherwise Fable's own",
+                    checked = hud.showCpu,
+                    onCheckedChange = { onChange(hud.copy(showCpu = it)) },
+                )
+                CardDivider()
+                OptionSelector(
+                    label = "Position",
+                    options = HudPosition.entries.map { SelectOption(it, it.label) },
+                    selected = hud.position,
+                    onSelect = { onChange(hud.copy(position = it)) },
+                )
+            }
+        }
+    }
+}
+
+/** A miniature display: a dim game-frame gradient with the HUD chip as it will look. */
+@Composable
+private fun HudPreview(hud: HudSettings, resolution: String) {
+    val (hTarget, vTarget) = when (hud.position) {
+        HudPosition.TOP_START -> -1f to -1f
+        HudPosition.TOP_END -> 1f to -1f
+        HudPosition.BOTTOM_START -> -1f to 1f
+        HudPosition.BOTTOM_END -> 1f to 1f
+    }
+    val h by animateFloatAsState(hTarget, Motion.settle(), label = "hudPreviewX")
+    val v by animateFloatAsState(vTarget, Motion.settle(), label = "hudPreviewY")
+    val visible = hud.enabled && !hud.isEmpty
+    val chipAlpha by animateFloatAsState(if (visible) 1f else 0f, Motion.inPlace(), label = "hudPreviewAlpha")
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(RowPaddingHorizontal)
+            .aspectRatio(16f / 9f)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF1B2735), Color(0xFF090A0F), Color(0xFF2A1B3D))))
+            .border(0.5.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp))
+            .padding(Spacing.sm),
+    ) {
+        // A faint horizon so the frame reads as a scene, not a grey box.
+        Box(
+            Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth(0.7f)
+                .height(1.dp)
+                .background(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x40FFFFFF), Color.Transparent))),
+        )
+        Column(
+            Modifier
+                .align(BiasAlignment(h, v))
+                .graphicsLayer { alpha = chipAlpha }
+                .glassSurface(shape = RoundedCornerShape(8.dp), fill = Color(0x99000000), blurRadius = 0)
+                .animateContentSize(Motion.morph())
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+        ) {
+            val lines = buildList {
+                if (hud.showFps) add("FPS: 60")
+                if (hud.showResolution) add(resolution)
+                if (hud.showCpu) add("CPU: 34%")
+            }
+            lines.forEach { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+                    color = Color(0xCCFFFFFF),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** "FPS · CPU" for the collapsed badge. */
+private fun hudSummary(hud: HudSettings): String = listOfNotNull(
+    "FPS".takeIf { hud.showFps },
+    "Res".takeIf { hud.showResolution },
+    "CPU".takeIf { hud.showCpu },
+).joinToString(" · ")
+

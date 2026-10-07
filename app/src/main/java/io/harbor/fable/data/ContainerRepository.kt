@@ -11,6 +11,8 @@ import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
+import io.harbor.fable.data.models.HudPosition
+import io.harbor.fable.data.models.HudSettings
 import io.harbor.fable.display.DisplayServer
 import io.harbor.fable.display.NativeLibResolver
 import io.harbor.fable.display.X11ClientLibs
@@ -1816,6 +1818,16 @@ class FileContainerStore(private val file: File) : ContainerDao {
         put("box64Preset", box64.preset.id)
         put("box64Overrides", JSONObject(box64.overrides))
         put("box64RcFile", box64.useRcFile)
+        put(
+            "hud",
+            JSONObject().apply {
+                put("enabled", hud.enabled)
+                put("fps", hud.showFps)
+                put("resolution", hud.showResolution)
+                put("cpu", hud.showCpu)
+                put("position", hud.position.name)
+            },
+        )
     }
 
     private fun JSONObject.toContainer(): Container = Container(
@@ -1841,6 +1853,16 @@ class FileContainerStore(private val file: File) : ContainerDao {
             overrides = optJSONObject("box64Overrides")?.toStringMap() ?: emptyMap(),
             useRcFile = optBoolean("box64RcFile", false),
         ),
+        // Records from before the overlay was configurable showed everything, top left.
+        hud = optJSONObject("hud")?.let { hud ->
+            HudSettings(
+                enabled = hud.optBoolean("enabled", true),
+                showFps = hud.optBoolean("fps", true),
+                showResolution = hud.optBoolean("resolution", true),
+                showCpu = hud.optBoolean("cpu", true),
+                position = HudPosition.fromName(hud.optString("position", "")),
+            )
+        } ?: HudSettings(),
     )
 
     private fun ExeEntry.toJson(): JSONObject = JSONObject().apply {

@@ -37,6 +37,8 @@ import com.winlator.widget.XServerView
 import io.harbor.fable.R
 import io.harbor.fable.data.ContainerRepository
 import io.harbor.fable.data.WineFailure
+import io.harbor.fable.data.models.HudPosition
+import io.harbor.fable.data.models.HudSettings
 import com.winlator.xserver.Pointer
 import com.winlator.xserver.Window
 import com.winlator.xserver.WindowManager as XWindowManager
@@ -120,6 +122,8 @@ class DisplayActivity : Activity() {
     private var hudThread: HandlerThread? = null
     private var hudHandler: Handler? = null
     private var hudLastSampleMs = 0L
+    /** This container's overlay settings (container screen → Settings → Performance Overlay). */
+    private var hudSettings = HudSettings()
     private val cpuSampler = CpuSampler()
     private val hudUpdate = object : Runnable {
         override fun run() {
@@ -151,6 +155,9 @@ class DisplayActivity : Activity() {
         }
         xServer.renderer = created.renderer
         created.setOnTouchListener { _, event -> onTouch(xServer, created, event) }
+        hudSettings = containerId?.let { id ->
+            runCatching { ContainerRepository.get(applicationContext).containers.value.firstOrNull { it.id == id }?.hud }.getOrNull()
+        } ?: HudSettings()
         val hud = createHud(xServer)
         val status = createStatusText()
         val controls = createControlsOverlay(xServer)
@@ -941,32 +948,55 @@ class DisplayActivity : Activity() {
         }
     }
 
-    /** Small semi-transparent label for the top-left corner; doesn't take touches. */
+    /**
+     * The performance HUD: a small glass chip in the corner [hudSettings] picks, carrying only the
+     * lines the user turned on (frame rate, X screen resolution, CPU usage). Doesn't take touches.
+     * Hidden entirely when the overlay is off or every line is.
+     */
     private fun createHud(xServer: XServer): TextView {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
+        val gravity = when (hudSettings.position) {
+            HudPosition.TOP_START -> Gravity.TOP or Gravity.START
+            HudPosition.TOP_END -> Gravity.TOP or Gravity.END
+            HudPosition.BOTTOM_START -> Gravity.BOTTOM or Gravity.START
+            HudPosition.BOTTOM_END -> Gravity.BOTTOM or Gravity.END
+        }
         return TextView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or Gravity.START,
-            ).apply { setMargins(dp(8f), dp(8f), 0, 0) }
-            setTextColor(0xCCFFFFFF.toInt())
+                gravity,
+            ).apply { setMargins(dp(10f), dp(10f), dp(10f), dp(10f)) }
+            setTextColor(0xE6FFFFFF.toInt())
             textSize = 11f
             typeface = Typeface.MONOSPACE
-            setPadding(dp(6f), dp(4f), dp(6f), dp(4f))
-            background = GradientDrawable().apply {
-                setColor(0x88000000.toInt())
-                cornerRadius = 6f * density
+            setLineSpacing(dp(1f).toFloat(), 1f)
+            setPadding(dp(8f), dp(5f), dp(8f), dp(5f))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0xA61C1C1E.toInt(), 0x8C0B0B0D.toInt()),
+            ).apply {
+                cornerRadius = 8f * density
+                setStroke((0.75f * density).toInt().coerceAtLeast(1), DRAWER_RIM.toInt())
             }
             isClickable = false
             isFocusable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            text = "FPS: --\n${xServer.screenInfo}"
+            visibility = if (hudSettings.enabled && !hudSettings.isEmpty) View.VISIBLE else View.GONE
+            text = buildString {
+                if (hudSettings.showFps) append("FPS: --")
+                if (hudSettings.showResolution) {
+                    if (isNotEmpty()) append('\n')
+                    append(xServer.screenInfo)
+                }
+            }
         }
     }
 
     private fun startHud() {
+        // Nothing to sample when the overlay is off.
+        if (!hudSettings.enabled || hudSettings.isEmpty) return
         if (hudText == null || hudThread != null) return
         val thread = HandlerThread("PerformanceHud").also { it.start() }
         hudThread = thread
@@ -991,13 +1021,18 @@ class DisplayActivity : Activity() {
         val frames = view?.renderer?.takeFrameCount() ?: 0
         val fps = Math.round(frames * 1000f / elapsedMs)
         val res = server?.screenInfo?.toString() ?: DisplayServer.resolution ?: "?"
-        val cpu = cpuSampler.sample()?.let { usage ->
-            if (usage.systemWide) "CPU: ${usage.percent}%" else "CPU (app): ${usage.percent}%"
+        val cpu = if (hudSettings.showCpu) {
+            cpuSampler.sample()?.let { usage ->
+                if (usage.systemWide) "CPU: ${usage.percent}%" else "CPU (app): ${usage.percent}%"
+            }
+        } else {
+            null
         }
-        return buildString {
-            append("FPS: ").append(fps).append('\n').append(res)
-            if (cpu != null) append('\n').append(cpu)
-        }
+        return listOfNotNull(
+            "FPS: $fps".takeIf { hudSettings.showFps },
+            res.takeIf { hudSettings.showResolution },
+            cpu,
+        ).joinToString("\n")
     }
 
     @Suppress("DEPRECATION")

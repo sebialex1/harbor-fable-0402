@@ -4,6 +4,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,3 +48,37 @@ fun ToneIconTile(
         )
     }
 }
+
+/**
+ * A typographic tile: a short monogram ("Wi", "DX", "VK") set tight on the [tone] gradient,
+ * for things the icon set has no good glyph for (asset kinds). Mixed with [ToneIconTile] it keeps
+ * lists from being a column of identical outline icons.
+ */
+@Composable
+fun MonogramTile(
+    text: String,
+    tone: TileTone,
+    modifier: Modifier = Modifier,
+    size: Dp = RowIconSize,
+    shape: Shape = RoundedCornerShape(size * 0.3f),
+) {
+    Box(
+        modifier
+            .size(size)
+            .gradientTile(shape = shape, start = tone.start, end = tone.end),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = tone.glyph,
+            maxLines = 1,
+            style = MaterialTheme.typography.labelLarge.copy(
+                fontSize = (size.value * if (text.length > 2) 0.32f else 0.4f).sp,
+                lineHeight = (size.value * 0.44f).sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = (-0.4).sp,
+            ),
+        )
+    }
+}
+

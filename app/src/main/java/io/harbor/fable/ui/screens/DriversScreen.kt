@@ -41,6 +41,7 @@ import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
+import io.harbor.fable.ui.theme.TileTone
 import kotlinx.coroutines.launch
 import io.harbor.fable.ui.icons.FableIcons
 
@@ -194,9 +195,10 @@ internal fun DriversContent(
                 onUninstall = onUninstall,
                 modifier = Modifier.animateItem().entrance(appear, 0),
                 footer = {
-                    CardDivider()
+                    CardDivider(afterIcon = true)
                     ListRow(
                         title = "Vulkan Extensions",
+                        leading = { ToneIconTile(icon = FableIcons.Extension, tone = TileTone.Blue) },
                         trailing = {
                             Text(
                                 text = deviceInfo.gpu.takeIf { it.isNotBlank() && !it.equals("unknown", ignoreCase = true) } ?: "System",
@@ -271,7 +273,7 @@ internal fun DriversContent(
                 EmptyState(
                     icon = FableIcons.Drivers,
                     title = "No releases",
-                    
+                    tone = TileTone.Teal,
                     modifier = Modifier.animateItem().entrance(appear, 3),
                 )
             }
@@ -310,7 +312,7 @@ internal fun ActiveDriverCard(
     val lastInstalling = remember { arrayOfNulls<String>(1) }
     if (installed != null) lastInstalled[0] = installed
     if (installing != null) lastInstalling[0] = installing
-    FableCard(modifier.fillMaxWidth()) {
+    FableCard(modifier.fillMaxWidth(), glow = TileTone.Teal) {
         AnimatedContent(
             targetState = state,
             transitionSpec = {
@@ -328,7 +330,7 @@ internal fun ActiveDriverCard(
                             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconTile(icon = FableIcons.Drivers)
+                        ToneIconTile(icon = FableIcons.Drivers, tone = TileTone.Teal, size = 38.dp)
                         Column(Modifier.weight(1f).padding(start = Spacing.md)) {
                             Text("Installing ${installing ?: lastInstalling[0].orEmpty()}", style = MaterialTheme.typography.titleSmall)
                             Text(

@@ -54,7 +54,8 @@ fun FableTabBar(
                 .widthIn(max = 460.dp)
                 .fillMaxWidth()
                 .height(TabBarMetrics.Height)
-                .solidSurface(pill, SurfaceLevel.Bar),
+                // The same glass as the top bar, so the two floating chromes match.
+                .glassSurface(shape = pill, fill = SurfaceLevel.Bar.fill, blurRadius = 28),
         ) {
             val count = items.size.coerceAtLeast(1)
             val inner = TabBarMetrics.IndicatorInset
@@ -71,8 +72,7 @@ fun FableTabBar(
                         .padding(vertical = inner)
                         .width(slot)
                         .fillMaxHeight()
-                        .clip(pill)
-                        .background(FableSurfaceHigh),
+                        .glassSurface(shape = pill, fill = FableSurfaceHigh.copy(alpha = 0.85f), blurRadius = 0),
                 )
             }
             Row(

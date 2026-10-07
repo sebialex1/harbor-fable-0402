@@ -50,11 +50,14 @@ import io.harbor.fable.ui.theme.PillRadius
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.RowPaddingVertical
 import io.harbor.fable.ui.theme.Spacing
+import io.harbor.fable.ui.theme.TileTone
+import io.harbor.fable.ui.theme.FableBlue
 import io.harbor.fable.ui.icons.FableIcons
 
 /**
- * Leading visual of list rows: a small grey rounded square with a white glyph, like the icons in
- * iOS Settings but without the colour coding. [tint] colours the glyph only.
+ * Leading visual of list rows: a small rounded square with a white glyph, on a graphite gradient
+ * with a glossy top and a hairline rim (the neutral [TileTone.Graphite]), so even untoned rows
+ * have depth. Rows that deserve an identity use [ToneIconTile]. [tint] colours the glyph only.
  */
 @Composable
 fun IconTile(
@@ -66,8 +69,11 @@ fun IconTile(
     Box(
         modifier
             .size(size)
-            .clip(RoundedCornerShape(ChipRadius))
-            .background(FableSurfaceRaised),
+            .gradientTile(
+                shape = RoundedCornerShape(ChipRadius),
+                start = TileTone.Graphite.start,
+                end = TileTone.Graphite.end,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size * 0.6f))
@@ -265,9 +271,10 @@ fun ToggleRow(
             onCheckedChange = null,
             modifier = Modifier.scale(0.85f),
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.Black,
-                checkedTrackColor = FableAccent,
-                checkedBorderColor = FableAccent,
+                // Blue when on, like the display menu's switches and every progress fill.
+                checkedThumbColor = Color.White,
+                checkedTrackColor = FableBlue,
+                checkedBorderColor = FableBlue,
                 uncheckedThumbColor = FableTextDim,
                 uncheckedTrackColor = FableControl,
                 uncheckedBorderColor = FableControl,

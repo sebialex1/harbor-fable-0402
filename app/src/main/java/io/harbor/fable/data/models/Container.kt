@@ -59,7 +59,38 @@ data class Container(
     val translator: String = ContainerDefaults.TRANSLATOR,
     /** Box64 preset and per-variable changes; passed to Wine as `BOX64_*` variables. */
     val box64: Box64Settings = Box64Settings(),
+    /** What the display screen's performance overlay shows for this container. */
+    val hud: HudSettings = HudSettings(),
 )
+
+/** Corner of the display screen the performance overlay sits in. */
+enum class HudPosition(val label: String) {
+    TOP_START("Top left"),
+    TOP_END("Top right"),
+    BOTTOM_START("Bottom left"),
+    BOTTOM_END("Bottom right"),
+    ;
+
+    companion object {
+        fun fromName(name: String?): HudPosition = entries.firstOrNull { it.name == name } ?: TOP_START
+    }
+}
+
+/**
+ * Performance overlay (HUD) customisation, per container: whether it shows at all, which lines
+ * it carries — frame rate, X screen resolution, CPU usage — and which corner it sits in. The
+ * defaults match the HUD before it was configurable (everything on, top left).
+ */
+data class HudSettings(
+    val enabled: Boolean = true,
+    val showFps: Boolean = true,
+    val showResolution: Boolean = true,
+    val showCpu: Boolean = true,
+    val position: HudPosition = HudPosition.TOP_START,
+) {
+    /** True when the overlay would have nothing to show. */
+    val isEmpty: Boolean get() = !showFps && !showResolution && !showCpu
+}
 
 data class ExeEntry(
     val id: String = UUID.randomUUID().toString(),

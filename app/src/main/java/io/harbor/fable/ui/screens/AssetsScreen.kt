@@ -50,6 +50,7 @@ import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.Spacing
+import io.harbor.fable.ui.theme.TileTone
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import io.harbor.fable.ui.icons.FableIcons
@@ -166,6 +167,7 @@ internal fun AssetsContent(
                 EmptyState(
                     icon = FableIcons.Download,
                     title = "No assets",
+                    tone = TileTone.Blue,
                     modifier = Modifier.animateItem().entrance(appear, 1),
                 )
             }
@@ -183,6 +185,8 @@ internal fun AssetsContent(
                             expanded = expanded,
                             onToggle = { expansion.toggle(typeKey, default = true) },
                             modifier = Modifier.animateItem().entrance(appear, typeIndex + 1),
+                            leading = { MonogramTile(text = typeMonogram(type), tone = typeTone(type)) },
+                            badge = { Pill(text = "${versions.count { v -> v.variants.any { it.asset.isDownloaded } }}/${versions.size}") },
                         ) {
                             versions.forEachIndexed { index, group ->
                                 AssetVersionRow(
@@ -293,25 +297,56 @@ internal fun SetupBanner(
         else -> state.pending.joinToString(", ") { it.kind.label } +
             if (state.pendingBytes > 0) " · ${formatBytes(state.pendingBytes)}" else ""
     }
-    FableCard(modifier = modifier.fillMaxWidth()) {
+    // The Get button morphs into the download's own progress pill, like every download row.
+    FableCard(modifier = modifier.fillMaxWidth(), glow = TileTone.Blue) {
         ListRow(
             title = if (busy) "Downloading" else "Recommended",
             subtitle = detail,
             subtitleMaxLines = 2,
             showChevron = false,
+            leading = { ToneIconTile(icon = FableIcons.Download, tone = TileTone.Blue) },
             trailing = {
-                if (!busy) {
-                    FableButton(text = "Get", primary = true, compact = true, onClick = onDownloadAll)
+                AnimatedContent(
+                    targetState = busy,
+                    transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit(Motion.Fast)) },
+                    label = "setupBannerAction",
+                ) { working ->
+                    if (!working) {
+                        FableButton(text = "Get", primary = true, compact = true, onClick = onDownloadAll)
+                    } else {
+                        MorphPill(
+                            phase = if (state.isDownloading) MorphPhase.Active else MorphPhase.Waiting,
+                            progress = if (state.isDownloading) state.progress else null,
+                            label = if (state.isDownloading) "${(state.progress * 100).toInt()}%" else "Preparing",
+                        )
+                    }
                 }
             },
         )
-        if (busy) {
-            ThinProgressBar(
-                progress = if (state.isDownloading) state.progress else null,
-                modifier = Modifier.padding(horizontal = RowPaddingHorizontal).padding(bottom = Spacing.sm),
-            )
-        }
     }
+}
+
+/** Two-letter mark for an asset kind's section tile. */
+private fun typeMonogram(type: AssetType): String = when (type) {
+    AssetType.WINE -> "Wi"
+    AssetType.BOX64 -> "64"
+    AssetType.FEX -> "Fx"
+    AssetType.DXVK -> "DX"
+    AssetType.VKD3D -> "12"
+    AssetType.VULKAN_DRIVER -> "Vk"
+    AssetType.PROTON -> "Pr"
+    AssetType.RUNTIME -> "Rt"
+    AssetType.OTHER -> "··"
+}
+
+/** Each asset kind's tone: Wine and Proton share one, the D3D layers sit in blues. */
+private fun typeTone(type: AssetType): TileTone = when (type) {
+    AssetType.WINE, AssetType.PROTON -> TileTone.Violet
+    AssetType.BOX64, AssetType.FEX -> TileTone.Amber
+    AssetType.DXVK -> TileTone.Blue
+    AssetType.VKD3D -> TileTone.Indigo
+    AssetType.VULKAN_DRIVER -> TileTone.Teal
+    AssetType.RUNTIME, AssetType.OTHER -> TileTone.Graphite
 }
 
 /** Prefix for a version row ("Wine 11.19", "DXVK 2.7"). */
