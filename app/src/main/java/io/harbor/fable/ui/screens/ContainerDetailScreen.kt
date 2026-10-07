@@ -186,9 +186,10 @@ fun ContainerDetailScreen(
 
 /**
  * The container screen in two tabs pinned under the bar. **Apps**: the launch buttons, the
- * container's apps and the built-in tools as one compact row. **Settings**: Wine, driver,
- * DXVK, VKD3D-Proton, resolution, translator, fullscreen, Box64 and Delete. Each tab keeps its
- * own scroll position.
+ * container's apps and the built-in tools as one compact row. **Settings**: collapsed groups
+ * — Graphics (DXVK, VKD3D-Proton, resolution, fullscreen), System (Wine, driver, translator),
+ * Box64 (preset, rc file) and the advanced BOX64_* switches — each with a pill summarising its
+ * current state, then Delete. Each tab keeps its own scroll position.
  */
 @Composable
 internal fun ContainerDetailContent(
@@ -216,7 +217,8 @@ internal fun ContainerDetailContent(
     var tab by rememberSaveable { mutableStateOf(ContainerTab.Apps) }
     val appsListState = rememberLazyListState()
     val settingsListState = rememberLazyListState()
-    var box64Expanded by rememberSaveable { mutableStateOf(false) }
+    // Which Settings groups are open; all start collapsed so the tab is a short list.
+    val expansion = rememberExpansionState()
 
     FableScreen(
         title = container?.name ?: "Container",
@@ -329,37 +331,41 @@ internal fun ContainerDetailContent(
             }
 
             ContainerTab.Settings -> {
-                // Everything about the container itself is one section: what it runs, then how.
-                item(key = "settings") {
-                    FableCard(Modifier.animateItem().entrance(appear, 0)) {
-                        if (container.status == ContainerStatus.ERROR) {
+                // Only a failed container has a status worth a row of its own.
+                if (container.status == ContainerStatus.ERROR) {
+                    item(key = "status") {
+                        FableCard(Modifier.animateItem().entrance(appear, 0)) {
                             InfoRow(
                                 label = "Status",
                                 value = container.status.name.lowercase(),
                                 valueContent = { StatusPill(container.status) },
                             )
-                            CardDivider()
                         }
-                        InfoRow(label = "Wine", value = container.wineVersion)
-                        CardDivider()
-                        InfoRow(label = "Driver", value = container.graphicsDriver)
-                        CardDivider()
-                        // DXVK goes into the prefix on the next launch (DxWrappers); off = WineD3D.
+                    }
+                }
+
+                // How the container draws. DXVK / VKD3D-Proton go into the prefix on the next
+                // launch (DxWrappers); their "Off" options say what Wine falls back to.
+                item(key = "graphics") {
+                    CollapsibleSection(
+                        title = "Graphics",
+                        expanded = expansion.isExpanded(GRAPHICS_KEY, default = false),
+                        onToggle = { expansion.toggle(GRAPHICS_KEY, default = false) },
+                        modifier = Modifier.animateItem().entrance(appear, 0),
+                        badge = { Pill(text = graphicsSummary(container)) },
+                    ) {
                         OptionSelector(
                             label = "DXVK",
                             options = dxvkOptions(dxvkBuilds),
                             selected = container.dxvkVersion,
                             onSelect = onSelectDxvk,
-                            hint = "Direct3D 8-11 through Vulkan. Applied on the next launch",
                         )
                         CardDivider()
-                        // d3d12.dll / d3d12core.dll next to DXVK (DxWrappers); off = Wine's builtin d3d12.
                         OptionSelector(
                             label = "VKD3D-Proton",
                             options = vkd3dOptions(vkd3dBuilds),
                             selected = container.vkd3dVersion,
                             onSelect = onSelectVkd3d,
-                            hint = "Direct3D 12 through Vulkan. Applied on the next launch",
                         )
                         CardDivider()
                         OptionSelector(
@@ -367,13 +373,6 @@ internal fun ContainerDetailContent(
                             options = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) },
                             selected = container.screenResolution,
                             onSelect = onSelectResolution,
-                        )
-                        CardDivider()
-                        OptionSelector(
-                            label = "Translator",
-                            options = TRANSLATOR_OPTIONS,
-                            selected = container.translator,
-                            onSelect = onSelectTranslator,
                         )
                         CardDivider()
                         ToggleRow(
@@ -384,30 +383,54 @@ internal fun ContainerDetailContent(
                     }
                 }
 
+                // What runs the container: the Wine build and driver it was created with (fixed)
+                // and the x86 translator.
+                item(key = "system") {
+                    CollapsibleSection(
+                        title = "System",
+                        expanded = expansion.isExpanded(SYSTEM_KEY, default = false),
+                        onToggle = { expansion.toggle(SYSTEM_KEY, default = false) },
+                        modifier = Modifier.animateItem().entrance(appear, 1),
+                        badge = { Pill(text = translatorLabel(container.translator)) },
+                    ) {
+                        InfoRow(label = "Wine", value = container.wineVersion)
+                        CardDivider()
+                        InfoRow(label = "Driver", value = container.graphicsDriver)
+                        CardDivider()
+                        OptionSelector(
+                            label = "Translator",
+                            options = TRANSLATOR_OPTIONS,
+                            selected = container.translator,
+                            onSelect = onSelectTranslator,
+                        )
+                    }
+                }
+
                 // Box64 presets (Winlator's Box64PresetManager) and the individual BOX64_*
-                // switches. FEX containers don't run Box64, so the section is hidden for them.
+                // switches. FEX containers don't run Box64, so both are hidden for them.
                 if (!ContainerRepository.usesFex(container)) {
-                    item(key = "box64-label") { SectionLabel("Box64", Modifier.animateItem().entrance(appear, 1)) }
                     item(key = "box64") {
-                        Box64PresetCard(
+                        Box64PresetSection(
                             settings = container.box64,
+                            expanded = expansion.isExpanded(BOX64_KEY, default = false),
+                            onToggle = { expansion.toggle(BOX64_KEY, default = false) },
                             onChange = onBox64Change,
-                            modifier = Modifier.animateItem().entrance(appear, 1),
+                            modifier = Modifier.animateItem().entrance(appear, 2),
                         )
                     }
                     item(key = "box64-options") {
                         Box64OptionsSection(
                             settings = container.box64,
-                            expanded = box64Expanded,
-                            onToggle = { box64Expanded = !box64Expanded },
+                            expanded = expansion.isExpanded(BOX64_ADVANCED_KEY, default = false),
+                            onToggle = { expansion.toggle(BOX64_ADVANCED_KEY, default = false) },
                             onChange = onBox64Change,
-                            modifier = Modifier.animateItem().entrance(appear, 1),
+                            modifier = Modifier.animateItem().entrance(appear, 2),
                         )
                     }
                 }
 
                 item(key = "delete") {
-                    FableCard(Modifier.animateItem().entrance(appear, 2).padding(top = Spacing.xl)) {
+                    FableCard(Modifier.animateItem().entrance(appear, 3).padding(top = Spacing.md)) {
                         ListRow(
                             title = "Delete Container",
                             titleColor = FableError,
@@ -516,14 +539,41 @@ private fun ToolTiles(
     }
 }
 
-/** Preset picker, the rc-file switch and, when settings were changed, a way back to the preset. */
+/** Settings-tab group keys for [ExpansionState]. */
+private const val GRAPHICS_KEY = "graphics"
+private const val SYSTEM_KEY = "system"
+private const val BOX64_KEY = "box64"
+private const val BOX64_ADVANCED_KEY = "box64-advanced"
+
+/** What the collapsed Graphics group shows: the resolution, and a flag when DXVK is off. */
+private fun graphicsSummary(container: Container): String {
+    val dxvkOff = container.dxvkVersion?.trim().equals(ContainerDefaults.DXVK_OFF, ignoreCase = true)
+    return if (dxvkOff) "${container.screenResolution} · no DXVK" else container.screenResolution
+}
+
+/** "Box64" / "FEX" for the collapsed System group. */
+private fun translatorLabel(translator: String): String =
+    TRANSLATOR_OPTIONS.firstOrNull { it.value.equals(translator.trim(), ignoreCase = true) }?.label ?: translator
+
+/**
+ * Preset picker, the rc-file switch and, when settings were changed, a way back to the preset,
+ * collapsed by default behind the active preset's name.
+ */
 @Composable
-private fun Box64PresetCard(
+private fun Box64PresetSection(
     settings: Box64Settings,
+    expanded: Boolean,
+    onToggle: () -> Unit,
     onChange: (Box64Settings) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    FableCard(modifier) {
+    CollapsibleSection(
+        title = "Box64",
+        expanded = expanded,
+        onToggle = onToggle,
+        modifier = modifier,
+        badge = { Pill(text = settings.preset.label) },
+    ) {
         OptionSelector(
             label = "Preset",
             options = Box64Preset.entries.map { SelectOption(it, it.label, it.description) },
