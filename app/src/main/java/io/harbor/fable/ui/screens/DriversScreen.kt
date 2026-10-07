@@ -6,11 +6,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -383,8 +381,13 @@ internal fun ActiveDriverCard(
 }
 
 /**
- * The installed face of [ActiveDriverCard]: summary, then the update prompt (when there is one)
- * beside the uninstall action. While the update is downloading the prompt turns into progress.
+ * The installed face of [ActiveDriverCard]: the summary with the uninstall action at its top
+ * right, then the update prompt on its own row when there is one. While the update is
+ * downloading the prompt turns into progress.
+ *
+ * Uninstall used to share a row below the summary with the update prompt; with no update that
+ * row was a wide empty gap with a lone button at the right edge. It now sits in the summary
+ * row's trailing slot, and the row below only exists while an update is offered.
  */
 @Composable
 private fun InstalledDriverFace(
@@ -399,7 +402,7 @@ private fun InstalledDriverFace(
         DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING, DownloadStatus.VERIFYING,
     )
     Column(Modifier.fillMaxWidth()) {
-        // Short title and short facts: "v1.5.0 · Vulkan 1.4" fits one line next to the pill, and
+        // Short title and short facts: "v1.5.0 · Vulkan 1.4" fits one line next to the button, and
         // the full Mesa build string gets its own line instead of being cut off.
         DriverSummaryRow(
             title = "RADV Xclipse",
@@ -410,28 +413,36 @@ private fun InstalledDriverFace(
                 ).joinToString(" · "),
                 driver.mesaVersion?.let { "Mesa $it" }.orEmpty(),
             ),
+            trailing = {
+                FableButton(
+                    text = "Uninstall",
+                    destructive = true,
+                    compact = true,
+                    onClick = onUninstall,
+                )
+            },
         )
-        CardDivider()
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.sm),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // The update button and its download progress swap in place; nothing when current.
+        if (updateAvailable != null) {
+            CardDivider()
+            // The update button and its download progress swap in place, across the full width.
             AnimatedContent(
-                targetState = updateAvailable to transferring,
+                targetState = transferring,
                 transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) },
                 contentAlignment = Alignment.CenterStart,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.sm),
                 label = "driverUpdate",
-            ) { (update, downloading) ->
-                when {
-                    update != null && downloading -> Column(Modifier.fillMaxWidth()) {
+            ) { downloading ->
+                if (downloading) {
+                    Column(Modifier.fillMaxWidth()) {
                         val percent = ((updateTask?.progressFraction ?: 0f) * 100).toInt()
                         Text(
-                            text = if (updateTask?.status == DownloadStatus.VERIFYING) "Verifying ${update.tag}" else "Downloading ${update.tag} · $percent%",
+                            text = if (updateTask?.status == DownloadStatus.VERIFYING) {
+                                "Verifying ${updateAvailable.tag}"
+                            } else {
+                                "Downloading ${updateAvailable.tag} · $percent%"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                         )
@@ -440,22 +451,16 @@ private fun InstalledDriverFace(
                             modifier = Modifier.padding(top = Spacing.xs),
                         )
                     }
-                    update != null -> FableButton(
-                        text = "Update to ${update.tag}",
+                } else {
+                    FableButton(
+                        text = "Update to ${updateAvailable.tag}",
                         primary = true,
                         compact = true,
                         onClick = onInstallUpdate,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    else -> Spacer(Modifier.fillMaxWidth())
                 }
             }
-            FableButton(
-                text = "Uninstall",
-                destructive = true,
-                compact = true,
-                onClick = onUninstall,
-            )
         }
     }
 }
