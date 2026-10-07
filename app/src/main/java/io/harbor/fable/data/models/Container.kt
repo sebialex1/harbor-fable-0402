@@ -15,7 +15,7 @@ object ContainerDefaults {
      * build from the create-container picker; this only covers records that predate it.
      */
     const val WINE_VERSION = ""
-    const val GRAPHICS_DRIVER = "RADV Xclipse"
+    const val GRAPHICS_DRIVER = "System"
     const val SCREEN_RESOLUTION = "1280x720"
     const val TRANSLATOR = "box64"
 

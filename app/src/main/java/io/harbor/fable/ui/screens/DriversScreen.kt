@@ -405,7 +405,7 @@ private fun InstalledDriverFace(
         // Short title and short facts: "v1.5.0 · Vulkan 1.4" fits one line next to the button, and
         // the full Mesa build string gets its own line instead of being cut off.
         DriverSummaryRow(
-            title = "RADV Xclipse",
+            title = driver.name ?: "RADV Xclipse",
             lines = listOf(
                 listOfNotNull(
                     driver.tag,
