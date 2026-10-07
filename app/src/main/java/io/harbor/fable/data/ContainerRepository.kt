@@ -29,6 +29,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -129,6 +130,14 @@ class ContainerRepository internal constructor(
     suspend fun availableWineBuilds(): List<WineBuild> = withContext(Dispatchers.IO) {
         runCatching { runtime?.wineBuilds().orEmpty() }.getOrElse { error ->
             Log.w(TAG, "Could not list Wine builds", error)
+            emptyList()
+        }
+    }
+
+    /** Downloaded DXVK packages a container can pick, newest first. Reads the disk: call off the main thread. */
+    suspend fun availableDxvkBuilds(): List<ComponentBuild> = withContext(Dispatchers.IO) {
+        runCatching { runtime?.dxvkBuilds().orEmpty() }.getOrElse { error ->
+            Log.w(TAG, "Could not list DXVK builds", error)
             emptyList()
         }
     }
@@ -465,6 +474,16 @@ class ContainerRepository internal constructor(
             )
         }
 
+        // 2c. Direct3D the way Winlator sets it up: DXVK (d3d8/9/10/11, dxgi) and VKD3D-Proton
+        //     (d3d12) DLLs in system32/syswow64, loaded as native through WINEDLLOVERRIDES.
+        //     Without them a D3D game goes through WineD3D, which needs GLX OpenGL that Android
+        //     doesn't have: the desktop works, but games (ULTRAKILL) stay black and exit.
+        log.section("Direct3D (DXVK / VKD3D-Proton)")
+        val direct3d = installDxWrappers(runtime, configured, dir, log)
+        direct3d.describe().forEach { log.line(it) }
+        val dxvkConf = if (direct3d.installed[DxWrappers.Kind.DXVK] != null) DxWrappers.ensureDxvkConf(dir) else null
+        dxvkConf?.let { log.line("dxvk.conf: ${it.absolutePath}") }
+
         // 3. The display server has to be listening before Wine starts (Winlator's XEnvironment
         //    starts XServerComponent before GuestProgramLauncherComponent the same way).
         val current = mutex.withLock { containersById[container.id] } ?: container
@@ -548,6 +567,10 @@ class ContainerRepository internal constructor(
         )
         wineLocations.filterNot { it.startsWith("WINEDLLPATH=") }.forEach { log.line(it) }
 
+        // Fable's native overrides for DXVK / VKD3D-Proton first, the container's own after them
+        // (Wine lets a later entry for the same DLL win), as one variable.
+        val dllOverrides = DxWrappers.mergeOverrides(direct3d.dllOverrides, current.envVars[DLL_OVERRIDES_ENV])
+
         // 5. Start the process.
         val environment = buildList {
             // Diagnostics: WINEDEBUG=-all hid why Wine stopped (it only printed "could not load
@@ -565,6 +588,15 @@ class ContainerRepository internal constructor(
             // files. Belt and braces: Wine derives the same paths from ntdll.so's location, and
             // WINEDLLPATH can't stand in for missing system32 files (see WinePrefix).
             addAll(wineLocations)
+            dllOverrides?.let { add("$DLL_OVERRIDES_ENV=$it") }
+            if (dxvkConf != null) {
+                // A Windows path: DXVK opens it through Wine's file APIs.
+                add("DXVK_CONFIG_FILE=${toWindowsPath(dxvkConf.absolutePath)}")
+            }
+            if (direct3d.installed[DxWrappers.Kind.VKD3D] != null) {
+                // Winlator's default VKD3D feature level.
+                add("VKD3D_FEATURE_LEVEL=12_1")
+            }
             if (screen != null) {
                 add("DISPLAY=${screen.display}")
                 // Native (aarch64 bionic) libX11/libxcb for Box64's wrapped libX11, then the system
@@ -579,8 +611,11 @@ class ContainerRepository internal constructor(
                 val fontsConf = File(screen.x11LibDir, "fonts.conf")
                 if (fontsConf.isFile) add("FONTCONFIG_FILE=${fontsConf.absolutePath}")
             }
-            // The container's own variables come last so they can override anything above.
-            current.envVars.forEach { (key, value) -> if (key != LAUNCHER_ENV) add("$key=$value") }
+            // The container's own variables come last so they can override anything above
+            // (its WINEDLLOVERRIDES is already part of the merged value).
+            current.envVars.forEach { (key, value) ->
+                if (key != LAUNCHER_ENV && key != DLL_OVERRIDES_ENV) add("$key=$value")
+            }
         }
         val driver = runtime.activeDriverLibrary()
         val useNative = current.envVars[LAUNCHER_ENV]?.trim().equals(LAUNCHER_NATIVE, ignoreCase = true)
@@ -674,8 +709,8 @@ class ContainerRepository internal constructor(
      * DISPLAY, …) and needs the DLLs [WinePrefix] copied, like any Wine process. Only the
      * diagnostic WINEDEBUG is toned down (+loaddll,+module on wineboot's dozens of helper
      * processes would bury the error lines), and mscoree/mshtml are disabled unless the
-     * container sets WINEDLLOVERRIDES, so the update doesn't wait on the Wine Mono / Gecko
-     * install prompts. A failure is logged but never blocks the launch.
+     * container's WINEDLLOVERRIDES says something about them, so the update doesn't wait on the
+     * Wine Mono / Gecko install prompts. A failure is logged but never blocks the launch.
      */
     private suspend fun runWineboot(
         runtime: WineRuntime,
@@ -688,7 +723,14 @@ class ContainerRepository internal constructor(
     ) {
         log.section("Prefix initialisation (wineboot -u)")
         val winebootEnv = environment.map { if (it == "WINEDEBUG=$DIAGNOSTIC_WINEDEBUG") "WINEDEBUG=$WINEBOOT_WINEDEBUG" else it }
-            .let { env -> if (env.any { it.startsWith("WINEDLLOVERRIDES=") }) env else env + "WINEDLLOVERRIDES=mscoree,mshtml=" }
+            .let { env ->
+                val overrides = env.firstOrNull { it.startsWith("$DLL_OVERRIDES_ENV=") }
+                when {
+                    overrides == null -> env + "$DLL_OVERRIDES_ENV=$NO_MONO_GECKO"
+                    overrides.contains("mscoree") || overrides.contains("mshtml") -> env
+                    else -> env.map { if (it == overrides) "$it;$NO_MONO_GECKO" else it }
+                }
+            }
         val winebootLog = File(dir, WineRuntime.WINEBOOT_LOG)
         val outcome = withContext(Dispatchers.IO) {
             WineProcessLauncher.launch(
@@ -789,6 +831,58 @@ class ContainerRepository internal constructor(
         if (!NativeLoader.isLoaded) return LaunchResult.Unavailable("The native runtime couldn't load on this device")
         val reason = runCatching { NativeLoader.lastLaunchError() }.getOrNull()
         return LaunchResult.Failed(reason?.let { "Couldn't start $label: $it" } ?: "Couldn't start $label")
+    }
+
+    /**
+     * Puts the container's DXVK and the newest downloaded VKD3D-Proton into its prefix
+     * ([DxWrappers]). [Container.dxvkVersion] picks the DXVK build: null for the newest one,
+     * [ContainerDefaults.DXVK_OFF] for none (WineD3D). A layer whose package can't be unpacked
+     * is left as it is in the prefix rather than removed.
+     */
+    private suspend fun installDxWrappers(
+        runtime: WineRuntime,
+        container: Container,
+        dir: File,
+        log: LaunchLog,
+    ): DxWrappers.Report {
+        val wanted = LinkedHashMap<DxWrappers.Kind, DxWrappers.Package?>()
+        val dxvkChoice = container.dxvkVersion?.trim()?.ifEmpty { null }
+        if (dxvkChoice.equals(ContainerDefaults.DXVK_OFF, ignoreCase = true)) {
+            log.line("DXVK: off for this container; Direct3D 8-11 go through WineD3D (needs OpenGL)")
+            wanted[DxWrappers.Kind.DXVK] = null
+        } else {
+            resolveDxWrapper(runtime, DxWrappers.Kind.DXVK, runtime.dxvkArchives(), dxvkChoice, log)
+                .onSuccess { wanted[DxWrappers.Kind.DXVK] = it }
+        }
+        resolveDxWrapper(runtime, DxWrappers.Kind.VKD3D, runtime.vkd3dArchives(), null, log)
+            .onSuccess { wanted[DxWrappers.Kind.VKD3D] = it }
+        return withContext(Dispatchers.IO) { DxWrappers.apply(prefix = dir, wineRoot = dir, wanted = wanted) }
+    }
+
+    /**
+     * The unpacked package for one layer: success(null) when nothing is downloaded (Wine's
+     * builtin is used), failure when the chosen package couldn't be unpacked.
+     */
+    private suspend fun resolveDxWrapper(
+        runtime: WineRuntime,
+        kind: DxWrappers.Kind,
+        archives: List<File>,
+        preferred: String?,
+        log: LaunchLog,
+    ): Result<DxWrappers.Package?> {
+        if (archives.isEmpty()) {
+            log.line("${kind.label}: no package downloaded (Assets); Wine's builtin DLLs stay in place")
+            return Result.success(null)
+        }
+        val archive = WineRuntime.pickComponent(archives, preferred) ?: archives.first().also {
+            log.line("${kind.label}: $preferred isn't downloaded; using the newest, ${it.name}")
+        }
+        return try {
+            Result.success(DxWrappers.Package(kind, archive.name, runtime.unpackDxWrapper(archive)))
+        } catch (error: IOException) {
+            log.error("${kind.label}: ${error.message}; leaving the prefix's ${kind.label} DLLs as they are")
+            Result.failure(error)
+        }
     }
 
     /**
@@ -1110,6 +1204,12 @@ class ContainerRepository internal constructor(
          * JNI fork/execve path (diagnostics only). Never passed on to Wine.
          */
         private const val LAUNCHER_ENV = "FABLE_LAUNCHER"
+
+        /** Wine's DLL load-order variable; Fable's and the container's values are merged. */
+        private const val DLL_OVERRIDES_ENV = "WINEDLLOVERRIDES"
+
+        /** Disables Wine Mono and Gecko so `wineboot -u` doesn't stop on their install prompts. */
+        private const val NO_MONO_GECKO = "mscoree,mshtml="
 
         /** Container environment switch: `FABLE_WINEBOOT=1` runs `wineboot -u` once for a new prefix. */
         private const val WINEBOOT_ENV = "FABLE_WINEBOOT"

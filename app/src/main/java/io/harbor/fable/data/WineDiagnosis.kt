@@ -13,7 +13,13 @@ import java.io.File
  * Wine cannot find certain functions that it needs inside the FreeType font library. ... upgrade FreeType to at least version 2.1.4.
  * wine: could not load kernel32.dll, status c0000135
  * CANNOT LINK EXECUTABLE "...": cannot locate symbol "foo" referenced by "libbar.so"
+ * 0024:err:wgl:X11DRV_WineGL_InitOpenglInfo couldn't initialize OpenGL, expect problems
+ * err:   DxvkInstance: Failed to create Vulkan instance
+ * 0024:err:vulkan:wine_vk_init Failed to load libvulkan.so.1
  * ```
+ *
+ * The last three are why a game can show a black screen while the Wine desktop works: WineD3D
+ * (no DXVK) needs OpenGL, DXVK / VKD3D-Proton need a working Vulkan driver.
  */
 internal object WineDiagnosis {
     private const val TAIL_BYTES = LaunchLog.TAIL_BYTES
@@ -26,6 +32,12 @@ internal object WineDiagnosis {
     private const val FREETYPE_MISSING = "Wine cannot find the FreeType font library"
     private const val FREETYPE_TOO_OLD = "Wine cannot find certain functions that it needs inside the FreeType font library"
     private const val LSCPU_MISSING = "lscpu: inaccessible or not found"
+
+    /** Error lines from the graphics stack: WineD3D/OpenGL, winevulkan, DXVK, VKD3D-Proton. */
+    private val GRAPHICS_ERROR = Regex(
+        """(err:(wgl|d3d|winediag|vulkan|dxgi|d3d11|d3d12|vkd3d)[:\s].*|err:\s+.*(Dxvk|DXGI|D3D11|D3D9|Vulkan|vk[A-Z]).*)""",
+    )
+    private const val MAX_GRAPHICS_ERRORS = 5
 
     data class Diagnosis(
         /** Native libraries `dlopen` couldn't find (e.g. `libfreetype.so`). */
@@ -45,10 +57,14 @@ internal object WineDiagnosis {
         val freeTypeTooOld: Boolean = false,
         /** Box64 couldn't run `lscpu` (harmless; noted so it isn't mistaken for the cause). */
         val lscpuMissing: Boolean = false,
+        /** The first few graphics error lines (WineD3D/OpenGL, winevulkan, DXVK, VKD3D-Proton). */
+        val graphicsErrors: List<String> = emptyList(),
+        /** WineD3D couldn't get OpenGL: DXVK isn't installed or isn't loaded as native. */
+        val openGlUnavailable: Boolean = false,
     ) {
         val isEmpty: Boolean
             get() = missingLibraries.isEmpty() && nativeInitFailures.isEmpty() && failedDlls.isEmpty() &&
-                missingSymbols.isEmpty() && !freeTypeMissing && !freeTypeTooOld
+                missingSymbols.isEmpty() && !freeTypeMissing && !freeTypeTooOld && graphicsErrors.isEmpty()
 
         /** Short user-facing explanation, or null when nothing was recognized. */
         fun summary(): String? {
@@ -62,6 +78,10 @@ internal object WineDiagnosis {
                 if (nativeInitFailures.isNotEmpty()) add("couldn't initialize ${nativeInitFailures.joinToString()}")
                 if (missingSymbols.isNotEmpty()) add("unresolved symbol ${missingSymbols.first()}")
                 if (failedDlls.isNotEmpty()) add("Wine couldn't load ${failedDlls.joinToString()}")
+                when {
+                    openGlUnavailable -> add("Direct3D fell back to WineD3D, which needs OpenGL (download DXVK in Assets)")
+                    graphicsErrors.isNotEmpty() -> add("graphics error: ${graphicsErrors.first().take(120)}")
+                }
             }
             return parts.takeIf { it.isNotEmpty() }?.joinToString("; ")
         }
@@ -80,6 +100,10 @@ internal object WineDiagnosis {
                 add("kernel32.dll c0000135 = not found in C:\\windows\\system32; check the Prefix section (WinePrefix copies Wine's DLLs there)")
             }
             if (lscpuMissing) add("lscpu not found (harmless: Box64 falls back to /proc/cpuinfo)")
+            graphicsErrors.forEach { add("graphics: $it") }
+            if (openGlUnavailable) {
+                add("WineD3D has no OpenGL here; games need DXVK (and VKD3D-Proton for D3D12), see the Direct3D section")
+            }
             if (isEmpty && !lscpuMissing) add("no known failure pattern in the process output")
         }
     }
@@ -96,7 +120,13 @@ internal object WineDiagnosis {
         var freeType = false
         var freeTypeOld = false
         var lscpu = false
+        val graphics = LinkedHashSet<String>()
+        var noOpenGl = false
         for (line in output.lineSequence()) {
+            if (graphics.size < MAX_GRAPHICS_ERRORS) {
+                GRAPHICS_ERROR.find(line)?.let { graphics += it.value.trim().take(200) }
+            }
+            if (line.contains("err:") && line.contains("OpenGL", ignoreCase = true)) noOpenGl = true
             DLOPEN_NOT_FOUND.findAll(line).forEach { missing += it.groupValues[1] }
             NATIVE_INIT_FAILED.find(line)?.let { initFailures += it.groupValues[1] }
             NEEDED_LIB_FAILED.find(line)?.let { missing += it.groupValues[1].trimEnd('.', ',') }
@@ -114,6 +144,8 @@ internal object WineDiagnosis {
             freeTypeMissing = freeType,
             freeTypeTooOld = freeTypeOld,
             lscpuMissing = lscpu,
+            graphicsErrors = graphics.toList(),
+            openGlUnavailable = noOpenGl,
         )
     }
 }

@@ -55,6 +55,12 @@ internal data class InstalledWine(val build: String, val binary: File)
 data class WineBuild(val id: String, val label: String, val archive: File)
 
 /**
+ * A downloaded DXVK / VKD3D-Proton package a container can use: [id] is what the container
+ * stores (`dxvk-3.1.1`), [label] what the picker shows (`DXVK 3.1.1`).
+ */
+data class ComponentBuild(val id: String, val label: String, val archive: File)
+
+/**
  * Finds, unpacks and wires together the downloaded runtime pieces: the x86_64 translator (Box64
  * or FEX, shared, extracted once under `filesDir/runtime/box64` / `filesDir/runtime/fex`), a Wine build (extracted into each container) and the
  * active Vulkan driver from [DriverRepository].
@@ -70,6 +76,7 @@ internal class WineRuntime(
 ) {
     private val box64Lock = Mutex()
     private val fexLock = Mutex()
+    private val dxWrapperLock = Mutex()
 
     // --- Wine -----------------------------------------------------------------------------
 
@@ -314,6 +321,56 @@ internal class WineRuntime(
                 File(candidate, "usr/lib/x86_64-linux-gnu").isDirectory
         }
 
+    // --- DXVK / VKD3D-Proton ----------------------------------------------------------------
+
+    /**
+     * Downloaded DXVK packages for Windows, newest first: the release tarballs
+     * (`dxvk-3.1.1.tar.gz`) and Winlator `.wcp` DXVK packages. `dxvk-native-*` (Linux) and
+     * ARM64EC builds can't be loaded by an x86_64 Wine and are left out.
+     */
+    fun dxvkArchives(): List<File> = assets.downloadedFiles(AssetType.DXVK)
+        .filter { isDxvkPackageName(it.name) }
+
+    /**
+     * Downloaded VKD3D-Proton packages, newest first. VKD3D has no catalog type of its own yet,
+     * so packages are recognised by name among the DXVK and "other" downloads.
+     */
+    fun vkd3dArchives(): List<File> = (assets.downloadedFiles(AssetType.DXVK) + assets.downloadedFiles(AssetType.OTHER))
+        .filter { isVkd3dPackageName(it.name) }
+        .distinctBy { it.absolutePath }
+
+    fun dxvkBuilds(): List<ComponentBuild> = dxvkArchives().map { componentBuild(it, "DXVK") }
+
+    fun vkd3dBuilds(): List<ComponentBuild> = vkd3dArchives().map { componentBuild(it, "VKD3D-Proton") }
+
+    /**
+     * Unpacks a DXVK / VKD3D-Proton [archive] under `filesDir/runtime/dxwrappers` the first time
+     * and returns the directory. Throws [IOException] when it can't be unpacked.
+     */
+    suspend fun unpackDxWrapper(archive: File): File = dxWrapperLock.withLock {
+        withContext(Dispatchers.IO) {
+            val dir = File(runtimeRoot, "dxwrappers/${sanitizeFileName(archive.name)}")
+            val done = File(dir, COMPLETE_MARKER)
+            // The package name doesn't change when a download is replaced; its size does.
+            if (done.isFile && readTextOrNull(done)?.trim() == "${archive.name} ${archive.length()}") {
+                return@withContext dir
+            }
+            dir.deleteRecursively()
+            dir.mkdirs()
+            try {
+                ArchiveExtractor.extract(archive, dir, context = coroutineContext)
+                done.writeText("${archive.name} ${archive.length()}")
+            } catch (error: CancellationException) {
+                dir.deleteRecursively()
+                throw error
+            } catch (error: Exception) {
+                dir.deleteRecursively()
+                throw IOException("Couldn't unpack ${archive.name}: ${error.message ?: error.javaClass.simpleName}", error)
+            }
+            dir
+        }
+    }
+
     // --- Executables and drivers ---------------------------------------------------------
 
     /**
@@ -456,6 +513,38 @@ internal class WineRuntime(
             if (loader.isFile) add("WINELOADER=${loader.absolutePath}")
             val server = File(containerDir, "bin/wineserver")
             if (server.isFile) add("WINESERVER=${server.absolutePath}")
+        }
+
+        /**
+         * Picks from [archives] (newest first) the package whose [buildName] is [preferred]
+         * (case-insensitive, or a file name starting with it); the newest when [preferred] is
+         * blank. Null when [preferred] names a package that isn't downloaded.
+         */
+        fun pickComponent(archives: List<File>, preferred: String?): File? {
+            val key = preferred?.trim()?.lowercase().orEmpty()
+            if (key.isEmpty()) return archives.firstOrNull()
+            return archives.firstOrNull { buildName(it).lowercase() == key }
+                ?: archives.firstOrNull { it.name.lowercase().startsWith(key) }
+        }
+
+        /** Windows DXVK packages: not dxvk-native (Linux), not ARM64EC, not VKD3D. */
+        fun isDxvkPackageName(name: String): Boolean {
+            val lower = name.lowercase()
+            return lower.contains("dxvk") && !lower.contains("native") && !lower.contains("arm64ec") &&
+                !lower.contains("vkd3d")
+        }
+
+        /** VKD3D-Proton packages (`vkd3d-proton-3.0.1.tar.zst`, Winlator `Vkd3d-3.0.1-….wcp`), not ARM64EC. */
+        fun isVkd3dPackageName(name: String): Boolean {
+            val lower = name.lowercase()
+            return lower.contains("vkd3d") && !lower.contains("arm64ec")
+        }
+
+        /** `dxvk-3.1.1.tar.gz` -> id `dxvk-3.1.1`, label `DXVK 3.1.1`. */
+        private fun componentBuild(archive: File, family: String): ComponentBuild {
+            val id = buildName(archive)
+            val version = Regex("""[0-9]+(\.[0-9]+)+[a-z]?""").find(id)?.value
+            return ComponentBuild(id = id, label = if (version != null) "$family $version" else id, archive = archive)
         }
 
         /** `wine-9.20.wcp` -> `wine-9.20`, `Proton.9.0-x86_64.wcp` -> `Proton.9.0-x86_64`. */

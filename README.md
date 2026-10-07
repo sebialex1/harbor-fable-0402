@@ -7,6 +7,7 @@ A minimal Android Wine container manager with a dark, premium glass UI.
 - **Containers** — create Wine containers, add Windows apps, launch an app or the Wine desktop
 - **Wine through Box64** — Kron4ek's x86_64 Wine builds run on ARM64 via Box64
 - **Box64 presets** — per-container Stability / Compatibility / Balanced / Performance presets (Winlator's values) plus individual `BOX64_*` switches (dynarec, safe flags, strong memory, big blocks, AVX/AVX2, SSE 4.2, logging, box64rc)
+- **DXVK and VKD3D-Proton in every prefix** — like Winlator, the container's DXVK (Direct3D 8–11) and VKD3D-Proton (Direct3D 12) DLLs are copied into `system32`/`syswow64` and loaded as native through `WINEDLLOVERRIDES`, with a per-container `dxvk.conf`; without them games fall back to WineD3D, which has no OpenGL on Android
 - **Custom Vulkan driver** — RADV Xclipse (Mesa) for Samsung Xclipse GPUs, every release from JimVulkan/radv-xclipse, one active driver at a time
 - **First-open setup** — an animated glass setup flow downloads and installs the recommended Wine, Box64, RADV Xclipse driver and DXVK with live progress; also available later from the Assets tab
 - **Asset downloads** — Wine builds, DXVK and drivers from GitHub releases, with resume and checksum checks

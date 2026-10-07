@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
+import io.harbor.fable.data.ComponentBuild
 import io.harbor.fable.data.ContainerRepository
 import io.harbor.fable.data.models.Box64Options
 import io.harbor.fable.data.models.Box64Preset
@@ -46,6 +48,10 @@ fun ContainerDetailScreen(
 
     var showAddExe by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    // Downloaded DXVK builds, re-read whenever the asset list changes (a download finished).
+    val assetEntries by app.assetRepository.assets.collectAsStateWithLifecycle()
+    var dxvkBuilds by remember { mutableStateOf<List<ComponentBuild>>(emptyList()) }
+    LaunchedEffect(assetEntries) { dxvkBuilds = repository.availableDxvkBuilds() }
 
     // Launching can take a while on first use, and a delete must finish even after the screen
     // is gone, so both run on the app-level scope.
@@ -58,6 +64,7 @@ fun ContainerDetailScreen(
     ContainerDetailContent(
         container = container,
         exes = containerExes,
+        dxvkBuilds = dxvkBuilds,
         onBack = onBack,
         onLaunchPrimary = { launchExe(null) },
         onLaunchDesktop = {
@@ -76,6 +83,9 @@ fun ContainerDetailScreen(
         },
         onSelectTranslator = { translator ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(translator = translator)) } }
+        },
+        onSelectDxvk = { dxvk ->
+            container?.let { fableUi.scope.launch { repository.update(it.copy(dxvkVersion = dxvk)) } }
         },
         onFullscreenChange = { fullscreen ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(isFullscreen = fullscreen)) } }
@@ -114,12 +124,14 @@ fun ContainerDetailScreen(
 internal fun ContainerDetailContent(
     container: Container?,
     exes: List<ExeEntry>,
+    dxvkBuilds: List<ComponentBuild>,
     onBack: () -> Unit,
     onLaunchPrimary: () -> Unit,
     onLaunchDesktop: () -> Unit,
     onSetPrimary: (ExeEntry) -> Unit,
     onSelectResolution: (String) -> Unit,
     onSelectTranslator: (String) -> Unit,
+    onSelectDxvk: (String?) -> Unit,
     onFullscreenChange: (Boolean) -> Unit,
     onBox64Change: (Box64Settings) -> Unit,
     onAddExe: () -> Unit,
@@ -192,10 +204,15 @@ internal fun ContainerDetailContent(
                 InfoRow(label = "Wine", value = container.wineVersion)
                 CardDivider()
                 InfoRow(label = "Driver", value = container.graphicsDriver)
-                if (container.dxvkVersion != null) {
-                    CardDivider()
-                    InfoRow(label = "DXVK", value = container.dxvkVersion)
-                }
+                CardDivider()
+                // DXVK goes into the prefix on the next launch (DxWrappers); off = WineD3D.
+                OptionSelector(
+                    label = "DXVK",
+                    options = dxvkOptions(dxvkBuilds),
+                    selected = container.dxvkVersion,
+                    onSelect = onSelectDxvk,
+                    hint = "Direct3D 8-11 through Vulkan. Applied on the next launch",
+                )
                 CardDivider()
                 OptionSelector(
                     label = "Resolution",
@@ -350,4 +367,11 @@ private fun Box64OptionsSection(
             }
         }
     }
+}
+
+/** DXVK choices: the newest download (null), each downloaded build, or off (WineD3D). */
+private fun dxvkOptions(builds: List<ComponentBuild>): List<SelectOption<String?>> = buildList {
+    add(SelectOption(null, "Newest", builds.firstOrNull()?.label ?: "None downloaded yet (Assets)"))
+    builds.forEach { add(SelectOption(it.id, it.label, it.archive.name)) }
+    add(SelectOption(ContainerDefaults.DXVK_OFF, "Off", "WineD3D: needs OpenGL, most games won't render"))
 }

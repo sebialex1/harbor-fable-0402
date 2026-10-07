@@ -19,6 +19,12 @@ object ContainerDefaults {
     const val SCREEN_RESOLUTION = "1280x720"
     const val TRANSLATOR = "box64"
 
+    /**
+     * [Container.dxvkVersion] value that turns DXVK off (Direct3D through WineD3D). Null means
+     * the newest downloaded DXVK, any other value names a build (`dxvk-3.1.1`).
+     */
+    const val DXVK_OFF = "none"
+
     val RESOLUTION_PRESETS: List<String> = listOf(
         "800x600",
         "1024x768",
@@ -35,6 +41,7 @@ data class Container(
     val exePath: String? = null,
     val exeName: String? = null,
     val wineVersion: String = ContainerDefaults.WINE_VERSION,
+    /** DXVK build installed into the prefix: null = newest downloaded, [ContainerDefaults.DXVK_OFF] = none. */
     val dxvkVersion: String? = null,
     val driverId: String? = null,
     val status: ContainerStatus = ContainerStatus.CREATED,
