@@ -16,6 +16,12 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import io.harbor.fable.ui.theme.FableText
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -96,8 +102,8 @@ import kotlin.math.abs
  * The bar is glass: at rest it is the black canvas itself, and as content scrolls beneath it a
  * translucent [glassSurface] fades in (with a hairline under it), so rows stay faintly visible
  * through the chrome. The back button and the action buttons are frosted glass discs
- * ([LocalGlassControls]). Messages from [FableUi.showMessage] appear just under the bar
- * ([TopBarNotice]) unless [showNotice] is false.
+ * ([LocalGlassControls]). Messages from [FableUi.showMessage] are not drawn here: [FableScreen]
+ * shows them at the bottom of the screen ([TopBarNotice]), clear of the bar and its actions.
  *
  * [drawGlass] is false when the caller ([FableScreen]) draws one glass layer behind the bar and
  * a pinned header together.
@@ -111,7 +117,6 @@ fun FableTopBar(
     showInlineTitle: Boolean = true,
     collapseFraction: (() -> Float)? = null,
     drawGlass: Boolean = true,
-    showNotice: Boolean = true,
     titleMorph: TitleMorph? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
@@ -193,7 +198,6 @@ fun FableTopBar(
                 }
             }
         }
-        if (showNotice) TopBarNotice()
     }
 }
 
@@ -229,8 +233,9 @@ private fun GlassChrome(
 }
 
 /**
- * The top bar's message line: [FableUi.notice] fades in as simple blue text just under the bar.
- * No card, no glint, no gradient wash — just text. Tap to dismiss.
+ * The screen's message line: [FableUi.notice] rises in at the bottom of the screen (the caller
+ * positions it above the tab bar / navigation bar) as a small dark pill with plain text, so it
+ * stays readable over the list and never overlaps the top bar. Tap to dismiss.
  */
 @Composable
 fun TopBarNotice(modifier: Modifier = Modifier) {
@@ -238,32 +243,39 @@ fun TopBarNotice(modifier: Modifier = Modifier) {
     AnimatedContent(
         targetState = ui.notice,
         transitionSpec = {
-            fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) using
+            (fadeIn(Motion.enter()) + slideInVertically(Motion.enter()) { it / 2 }) togetherWith
+                (fadeOut(Motion.exit()) + slideOutVertically(Motion.exit()) { it / 2 }) using
                 SizeTransform(clip = false) { _, _ -> Motion.morph() }
         },
         contentKey = { it?.id },
-        label = "topBarNotice",
+        label = "bottomNotice",
         modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.BottomCenter,
     ) { notice ->
         if (notice == null) {
             Spacer(Modifier.fillMaxWidth().height(0.dp))
         } else {
-            Text(
-                text = notice.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = FableBlue,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { ui.dismissNotice(notice.id) },
-                    )
-                    .padding(horizontal = ScreenPadding * 2, vertical = Spacing.sm),
-            )
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = notice.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = FableText,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .padding(horizontal = ScreenPadding)
+                        .clip(NoticeShape)
+                        .background(NoticeFill)
+                        .border(0.5.dp, FableDivider, NoticeShape)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { ui.dismissNotice(notice.id) },
+                        )
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+                )
+            }
         }
     }
 }
@@ -466,7 +478,7 @@ fun FableScreen(
                 content()
             }
 
-            // Bar + pinned header on one sheet of glass, then the message line under both.
+            // Bar + pinned header on one sheet of glass.
             Column(Modifier.fillMaxWidth()) {
                 // Tab screens carry their actions on the large-title row, vertically centred on
                 // the title, so the + lines up with "Containers" instead of floating above it.
@@ -484,15 +496,21 @@ fun FableScreen(
                             showInlineTitle = actionsInBar,
                             collapseFraction = if (largeTitle) collapse else null,
                             drawGlass = false,
-                            showNotice = false,
                             titleMorph = if (largeTitle) titleMorph else null,
                             actions = if (actionsInBar) actions else ({}),
                         )
                         header?.invoke()
                     }
                 }
-                TopBarNotice()
             }
+
+            // Messages sit at the bottom, above the floating tab bar on tab screens (pushed
+            // screens have no tab bar) and the navigation bar, so they never cover the top bar.
+            TopBarNotice(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = navigationBottom + (if (largeTitle) LocalTabBarClearance.current else 0.dp) + Spacing.sm),
+            )
         }
     }
 }
@@ -618,6 +636,10 @@ private val TopBarHeight = 52.dp
 
 /** First-frame guess for a pinned header (a tab row) before it has been measured. */
 private val HeaderEstimate = 48.dp
+
+/** The bottom notice's pill: near-black, opaque enough to read over any row. */
+private val NoticeShape = RoundedCornerShape(16.dp)
+private val NoticeFill = Color(0xF20E0E10)
 
 /** How far a notice must be dragged up before it is dismissed; past it, it fades fully. */
 private val NoticeDismissDistance = 56.dp
