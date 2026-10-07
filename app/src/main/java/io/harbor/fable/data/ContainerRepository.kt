@@ -433,6 +433,14 @@ class ContainerRepository internal constructor(
             return LaunchResult.Failed("Wine isn't installed in this container")
         }
         describeBinary(log, "wine", wineBinary)
+        // Winlator-style copy of Wine's PE DLLs into system32/syswow64, so the loader finds
+        // kernel32.dll in the prefix even without WINEDLLPATH. installWine() already did it for
+        // new trees; this catches containers set up by an older Fable (a marker makes it a no-op
+        // once done for this build).
+        val dllsCopied = withContext(Dispatchers.IO) { runCatching { runtime.installBuiltinDlls(dir, wineBuild) } }
+        dllsCopied.onSuccess { count ->
+            if (count > 0) log.line("copied $count built-in Wine DLLs into drive_c/windows/system32 and syswow64")
+        }.onFailure { error -> log.error("copying Wine DLLs into the prefix failed", error) }
 
         // 3. The display server has to be listening before Wine starts (Winlator's XEnvironment
         //    starts XServerComponent before GuestProgramLauncherComponent the same way).
@@ -510,6 +518,11 @@ class ContainerRepository internal constructor(
         val ntdll = File(dir, "lib/wine/x86_64-windows/ntdll.dll").takeIf { it.isFile }
             ?: File(dir, "lib64/wine/x86_64-windows/ntdll.dll").takeIf { it.isFile }
         log.line("ntdll.dll in x86_64-windows: ${ntdll?.let { "yes (${it.absolutePath}, ${it.length()} bytes)" } ?: "NO"}")
+        val system32Kernel32 = File(dir, "drive_c/windows/system32/kernel32.dll")
+        log.line(
+            "kernel32.dll in prefix system32: " +
+                if (system32Kernel32.isFile) "yes (${system32Kernel32.length()} bytes)" else "NO",
+        )
         wineLocations.filterNot { it.startsWith("WINEDLLPATH=") }.forEach { log.line(it) }
 
         // 5. Start the process.

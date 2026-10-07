@@ -111,6 +111,57 @@ internal class WineRuntime(
     fun wineBinary(containerDir: File): File? =
         WINE_BINARIES.map { File(containerDir, it) }.firstOrNull { it.isFile }
 
+    /**
+     * Copies Wine's built-in PE DLLs into the prefix, the way Winlator's RootFSInstaller does
+     * (`lib/wine/x86_64-windows` -> `drive_c/windows/system32`, `lib/wine/i386-windows` ->
+     * `drive_c/windows/syswow64`).
+     *
+     * Wine looks for kernel32.dll & co. in its dll_dir, which for this build is the Termux path
+     * `/data/data/com.termux/files/usr/lib/wine/x86_64-windows` that doesn't exist on the device.
+     * WINEDLLPATH fixes the search path; having the real DLLs in system32 as well means the
+     * loader finds them through the prefix's own search order too, so a WINEDLLPATH that isn't
+     * honoured (or is overridden by the container's environment) can't bring back
+     * `could not load kernel32.dll, status c0000135`. prefixPack.txz only ships placeholder
+     * stubs there.
+     *
+     * Done once per Wine [build] (tracked by a marker file), so it is cheap to call before every
+     * launch: containers installed by an older Fable get the DLLs on their next launch. Returns
+     * the number of files copied (0 when the prefix is already in sync). Failures for single
+     * files are logged and skipped; the marker is only written when everything was copied.
+     */
+    fun installBuiltinDlls(containerDir: File, build: String): Int {
+        val marker = File(containerDir, PREFIX_DLLS_MARKER)
+        if (readTextOrNull(marker)?.trim() == build) return 0
+        var copied = 0
+        var failed = 0
+        for ((source, target) in PREFIX_DLL_TARGETS) {
+            val sourceDir = source.map { File(containerDir, it) }.firstOrNull { it.isDirectory } ?: continue
+            val targetDir = File(containerDir, target)
+            if (!targetDir.isDirectory && !targetDir.mkdirs()) {
+                Log.w(TAG, "Could not create ${targetDir.absolutePath}")
+                failed++
+                continue
+            }
+            sourceDir.walkTopDown().filter { it.isFile }.forEach { file ->
+                val dest = File(targetDir, file.relativeTo(sourceDir).path)
+                try {
+                    dest.parentFile?.mkdirs()
+                    file.copyTo(dest, overwrite = true)
+                    copied++
+                } catch (error: IOException) {
+                    Log.w(TAG, "Could not copy ${file.name} into ${targetDir.absolutePath}", error)
+                    failed++
+                }
+            }
+        }
+        if (failed == 0) {
+            runCatching { writeAtomic(marker, build) }
+                .onFailure { Log.w(TAG, "Could not write ${marker.name}", it) }
+        }
+        Log.i(TAG, "Copied $copied built-in Wine DLLs into ${containerDir.name}'s prefix ($failed failed)")
+        return copied
+    }
+
     /** True when [installWine] set up a fresh prefix that hasn't been through `wineboot -u` yet. */
     fun winebootPending(containerDir: File): Boolean = File(containerDir, WINEBOOT_PENDING).isFile
 
@@ -160,6 +211,11 @@ internal class WineRuntime(
             // prefixPack.txz holds `.wine/…`; strip it so drive_c and the registry land in the prefix.
             ArchiveExtractor.extract(prefixArchive, containerDir, stripComponents = 1, context = coroutineContext)
         }
+        val build = buildName(archive)
+        // A new Wine tree needs its own DLLs in the prefix, even when they were copied for an
+        // older build before.
+        File(containerDir, PREFIX_DLLS_MARKER).delete()
+        installBuiltinDlls(containerDir, build)
         if (freshPrefix) {
             // Winlator runs `wine wineboot -u` while setting up a prefix (WineUtils.java), which
             // brings the prefixPack's registry and drive_c up to date with this Wine build and
@@ -172,7 +228,6 @@ internal class WineRuntime(
             runCatching { File(containerDir, WINEBOOT_PENDING).writeText(buildName(archive)) }
                 .onFailure { Log.w(TAG, "Could not mark ${containerDir.name} for wineboot", it) }
         }
-        val build = buildName(archive)
         writeAtomic(
             File(containerDir, WINE_MARKER),
             JSONObject()
@@ -398,6 +453,19 @@ internal class WineRuntime(
 
         /** Output of the one-off `wineboot -u` that initialises a fresh prefix. */
         const val WINEBOOT_LOG = "fable-wineboot.log"
+
+        /** Holds the Wine build whose built-in DLLs [installBuiltinDlls] copied into the prefix. */
+        private const val PREFIX_DLLS_MARKER = ".fable-prefix-dlls"
+
+        /**
+         * Where [installBuiltinDlls] copies Wine's PE DLLs from (first existing directory wins)
+         * and to, as in Winlator's RootFSInstaller: 64-bit DLLs into system32, 32-bit ones into
+         * syswow64 (a 64-bit prefix's 32-bit system directory).
+         */
+        private val PREFIX_DLL_TARGETS = listOf(
+            listOf("lib/wine/x86_64-windows", "lib64/wine/x86_64-windows") to "drive_c/windows/system32",
+            listOf("lib/wine/i386-windows", "lib64/wine/i386-windows") to "drive_c/windows/syswow64",
+        )
 
         /** Present while a freshly extracted prefix still needs `wineboot -u`. */
         private const val WINEBOOT_PENDING = ".fable-wineboot-pending"
