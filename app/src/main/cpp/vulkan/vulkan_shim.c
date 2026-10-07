@@ -483,6 +483,9 @@ VK_SHIM_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance in
     SHIM_PROC(vkGetPhysicalDeviceSurfaceCapabilities2KHR);
     SHIM_PROC(vkGetPhysicalDeviceSurfaceFormatsKHR);
     SHIM_PROC(vkGetPhysicalDeviceSurfaceFormats2KHR);
+    SHIM_PROC(vkGetPhysicalDeviceFeatures);
+    SHIM_PROC(vkGetPhysicalDeviceFeatures2);
+    SHIM_PROC(vkGetPhysicalDeviceFeatures2KHR);
     /* Defined below, also needed by Wine's direct dlsym lookup. */
     extern VK_SHIM_EXPORT void VKAPI_CALL vkDestroySurfaceKHR(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
     SHIM_PROC(vkDestroySurfaceKHR);
@@ -525,4 +528,68 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPres
         return VK_ERROR_INITIALIZATION_FAILED;
     }
     return real.vkQueuePresentKHR(queue, pPresentInfo);
+}
+
+/* --- Physical device feature override -----------------------------------------------------
+ *
+ * Samsung's proprietary Xclipse (RDNA2) Vulkan driver does not report textureCompressionBC
+ * even though the hardware supports BC1–BC7 in silicon. DXVK 2.x+ requires that feature as a
+ * hard gate in its device filter, so without it DXVK finds zero usable adapters and every
+ * Direct3D 9/10/11 application fails at D3D11CreateDevice.
+ *
+ * The shim wraps vkGetPhysicalDeviceFeatures / vkGetPhysicalDeviceFeatures2[KHR] and sets
+ * textureCompressionBC = VK_TRUE after the real driver answers. Only that one bit is touched;
+ * every other feature keeps the driver's own value, so nothing else changes for DXVK or any
+ * other Vulkan consumer. Because the hardware genuinely supports block-compressed texture
+ * formats, games that rely on them (ULTRAKILL, the d3d11-test tool, most Unity titles) render
+ * correctly once the gate is lifted.
+ */
+
+static void force_texture_compression_bc(VkPhysicalDeviceFeatures *features) {
+    if (features && !features->textureCompressionBC) {
+        features->textureCompressionBC = VK_TRUE;
+        LOGI("vkGetPhysicalDeviceFeatures: forcing textureCompressionBC = VK_TRUE (RDNA2 hardware supports it; driver omits it)");
+    }
+}
+
+static void force_texture_compression_bc2(VkPhysicalDeviceFeatures2 *features2) {
+    if (!features2) return;
+    force_texture_compression_bc(&features2->features);
+    /* A VkPhysicalDeviceVulkan12Features or similar struct in the pNext chain could also gate
+     * DXVK; walk the chain for the one that carries imageCompressionControl or any future
+     * feature DXVK might read. Nothing currently required beyond the base struct. */
+}
+
+VK_SHIM_EXPORT void VKAPI_CALL vkGetPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice,
+                                                           VkPhysicalDeviceFeatures *pFeatures) {
+    ensure_init();
+    PFN_vkGetPhysicalDeviceFeatures fn =
+        (PFN_vkGetPhysicalDeviceFeatures)load_real("vkGetPhysicalDeviceFeatures", 1);
+    if (!fn || !pFeatures) return;
+    fn(physicalDevice, pFeatures);
+    force_texture_compression_bc(pFeatures);
+}
+
+VK_SHIM_EXPORT void VKAPI_CALL vkGetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
+                                                            VkPhysicalDeviceFeatures2 *pFeatures) {
+    ensure_init();
+    PFN_vkGetPhysicalDeviceFeatures2 fn =
+        (PFN_vkGetPhysicalDeviceFeatures2)load_real("vkGetPhysicalDeviceFeatures2", 1);
+    if (!fn || !pFeatures) return;
+    fn(physicalDevice, pFeatures);
+    force_texture_compression_bc2(pFeatures);
+}
+
+VK_SHIM_EXPORT void VKAPI_CALL vkGetPhysicalDeviceFeatures2KHR(VkPhysicalDevice physicalDevice,
+                                                               VkPhysicalDeviceFeatures2 *pFeatures) {
+    ensure_init();
+    PFN_vkGetPhysicalDeviceFeatures2KHR fn =
+        (PFN_vkGetPhysicalDeviceFeatures2KHR)real_instance_proc(VK_NULL_HANDLE, "vkGetPhysicalDeviceFeatures2KHR");
+    if (!fn || !pFeatures) {
+        /* Fall back to the core entry point (Vulkan 1.1 loaders expose both names). */
+        vkGetPhysicalDeviceFeatures2(physicalDevice, pFeatures);
+        return;
+    }
+    fn(physicalDevice, pFeatures);
+    force_texture_compression_bc2(pFeatures);
 }

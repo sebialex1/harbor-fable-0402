@@ -1,0 +1,419 @@
+0000 (load path (null))
+0144:trace:module:MODULE_InitDLL (000000027EAC0000,PROCESS_ATTACH,0000000000000000) - RETURN 1
+0144:trace:module:process_attach (L"combase.dll",0000000000000000) - END
+0144:trace:module:process_attach (L"coml2.dll",0000000000000000) - START
+0144:trace:module:MODULE_InitDLL (000000027EAA0000 L"coml2.dll",PROCESS_ATTACH,0000000000000000) - CALL
+0144:trace:module:MODULE_InitDLL (000000027EAA0000,PROCESS_ATTACH,0000000000000000) - RETURN 1
+0144:trace:module:process_attach (L"coml2.dll",0000000000000000) - END
+0144:trace:module:MODULE_InitDLL (000000027EB10000 L"ole32.dll",PROCESS_ATTACH,0000000000000000) - CALL
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE750, base 00000000801EE748.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+0144:trace:module:MODULE_InitDLL (000000027EB10000,PROCESS_ATTACH,0000000000000000) - RETURN 1
+0144:trace:module:process_attach (L"ole32.dll",0000000000000000) - END
+0144:trace:module:LdrResolveDelayLoadedAPI (000000027EC10000, 000000027EC21C90, 0000000000000000, 000000027FE22340, 000000027EC25138, 0x00000000)
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EF0B0, base 00000000801EF0A8.
+0144:trace:module:LdrGetDllHandleEx L"ole32" -> 000000027EB10000 (load path (null))
+0144:trace:module:load_dll looking for L"imm32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\imm32.dll" for L"imm32.dll" at 000000027EC10000, count=2
+0144:trace:module:FindResourceExW 000000027ED90000 #000c #7f00 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE57F38
+0144:trace:module:FindResourceExW 000000027ED90000 #0001 #0003 0000
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801EE8B0.
+0144:trace:module:FindResourceExW 000000027ED90000 #000e #7f00 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE580F8
+0144:trace:module:FindResourceExW 000000027ED90000 #0003 #0006 0000
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801EE8B0.
+0144:trace:module:LoadResource 000000027ED90000 000000027EE57AB8
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801EE510.
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE5A0, base 00000000801EE598.
+0144:trace:module:LdrGetDllHandleEx L"C:\\windows\\system32\\user32.dll" -> 000000027ED90000 (load path (null))
+0144:trace:module:FindResourceExW 000000027ED90000 #000e #7f00 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE580F8
+0144:trace:module:FindResourceExW 000000027ED90000 #0003 #0003 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE57A88
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801EDFC0.
+0144:trace:module:FindResourceExW 000000027ED90000 #000e #7f05 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE58148
+0144:trace:module:FindResourceExW 000000027ED90000 #0003 #003c 0000
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801EEEA0.
+0144:trace:module:load_dll looking for L"d3dcompiler_47.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:get_load_order looking for L"C:\\windows\\system32\\d3dcompiler_47.dll"
+0144:trace:module:get_load_order got hardcoded default for L"d3dcompiler_47.dll"
+0144:trace:module:map_image_into_view mapping PE file L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" at 0x27ea70000-0x27eaa0000
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" section .text at 0x27ea71000 off 1000 size 19000 virt 18e36 flags 60000020
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" section .rdata at 0x27ea8a000 off 1a000 size 10000 virt f490 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" section .data at 0x27ea9a000 off 2a000 size 1000 virt 468 flags c0000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" section .pdata at 0x27ea9b000 off 2b000 size 1000 virt bac flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" section .eh_fram at 0x27ea9c000 off 2c000 size 1000 virt 178 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" section .rodata at 0x27ea9d000 off 2d000 size 1000 virt 2f0 flags c0000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" section .rsrc at 0x27ea9e000 off 2e000 size 1000 virt 3cc flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" section .reloc at 0x27ea9f000 off 2f000 size 1000 virt 70c flags 42000040
+0144:trace:module:map_image_into_view relocating L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" dynamic base 180000000 -> 6fffffaf0000 mapped at 0x27ea70000
+0144:trace:module:perform_relocations relocating from 00006FFFFFAF0000-00006FFFFFB20000 to 000000027EA70000-000000027EAA0000
+0144:trace:module:load_dll looking for L"wined3d.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:get_load_order looking for L"C:\\windows\\system32\\wined3d.dll"
+0144:trace:module:get_load_order got hardcoded default for L"wined3d.dll"
+0144:trace:module:map_image_into_view mapping PE file L"\\??\\C:\\windows\\system32\\wined3d.dll" at 0x27e7f0000-0x27ea67000
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\wined3d.dll" section .text at 0x27e7f1000 off 1000 size 1ad000 virt 1ac176 flags 60000020
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\wined3d.dll" section .rdata at 0x27e99e000 off 1ae000 size ae000 virt ad5ac flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\wined3d.dll" section .data at 0x27ea4c000 off 25c000 size 1000 virt 8918 flags c0000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\wined3d.dll" section .pdata at 0x27ea55000 off 25d000 size a000 virt 9798 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\wined3d.dll" section .rodata at 0x27ea5f000 off 267000 size 1000 virt 6d8 flags c0000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\wined3d.dll" section .rsrc at 0x27ea60000 off 268000 size 4000 virt 3c58 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\wined3d.dll" section .reloc at 0x27ea64000 off 26c000 size 3000 virt 2b3c flags 42000040
+0144:trace:module:map_image_into_view relocating L"\\??\\C:\\windows\\system32\\wined3d.dll" dynamic base 180000000 -> 6ffffd8d0000 mapped at 0x27e7f0000
+0144:trace:module:perform_relocations relocating from 00006FFFFD8D0000-00006FFFFDB47000 to 000000027E7F0000-000000027EA67000
+0144:trace:module:load_dll looking for L"opengl32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:get_load_order looking for L"C:\\windows\\system32\\opengl32.dll"
+0144:trace:module:get_load_order got hardcoded default for L"opengl32.dll"
+0144:trace:module:map_image_into_view mapping PE file L"\\??\\C:\\windows\\system32\\opengl32.dll" at 0x7bf00000-0x7bfe3000
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\opengl32.dll" section .text at 0x7bf01000 off 1000 size 8b000 virt 8a075 flags 60000020
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\opengl32.dll" section .rdata at 0x7bf8c000 off 8c000 size 42000 virt 41ca8 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\opengl32.dll" section .data at 0x7bfce000 off ce000 size 6000 virt 5674 flags c0000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\opengl32.dll" section .pdata at 0x7bfd4000 off d4000 size b000 virt a134 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\opengl32.dll" section .rodata at 0x7bfdf000 off df000 size 1000 virt 740 flags c0000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\opengl32.dll" section .rsrc at 0x7bfe0000 off e0000 size 1000 virt 360 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\opengl32.dll" section .reloc at 0x7bfe1000 off e1000 size 2000 virt 156c flags 42000040
+0144:trace:module:map_image_into_view relocating L"\\??\\C:\\windows\\system32\\opengl32.dll" dynamic base 7a800000 -> 7bf00000 mapped at 0x7bf00000
+0144:trace:module:load_dll looking for L"gdi32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\GDI32.dll" for L"gdi32.dll" at 000000027EF30000, count=-1
+0144:trace:module:load_dll looking for L"ucrtbase.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ucrtbase.dll" for L"ucrtbase.dll" at 000000027F590000, count=-1
+0144:trace:module:load_dll looking for L"kernel32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\kernel32.dll" for L"kernel32.dll" at 000000027FF10000, count=-1
+0144:trace:module:load_dll looking for L"ntdll.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ntdll.dll" for L"ntdll.dll" at 000000027FF70000, count=-1
+0144:trace:module:build_module loaded L"\\??\\C:\\windows\\system32\\opengl32.dll" 0000000080990A60 000000007BF00000
+0144:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\opengl32.dll" at 000000007BF00000: builtin
+0144:trace:module:load_dll Loaded module L"\\??\\C:\\windows\\system32\\opengl32.dll" at 000000007BF00000
+0144:trace:module:load_dll looking for L"user32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\user32.dll" for L"user32.dll" at 000000027ED90000, count=-1
+0144:trace:module:load_dll looking for L"gdi32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\GDI32.dll" for L"gdi32.dll" at 000000027EF30000, count=-1
+0144:trace:module:load_dll looking for L"advapi32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ADVAPI32.dll" for L"advapi32.dll" at 000000027F690000, count=-1
+0144:trace:module:load_dll looking for L"ucrtbase.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ucrtbase.dll" for L"ucrtbase.dll" at 000000027F590000, count=-1
+0144:trace:module:load_dll looking for L"kernel32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\kernel32.dll" for L"kernel32.dll" at 000000027FF10000, count=-1
+0144:trace:module:load_dll looking for L"ntdll.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ntdll.dll" for L"ntdll.dll" at 000000027FF70000, count=-1
+0144:trace:module:build_module loaded L"\\??\\C:\\windows\\system32\\wined3d.dll" 0000000080990920 000000027E7F0000
+0144:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\wined3d.dll" at 000000027E7F0000: builtin
+0144:trace:module:load_dll Loaded module L"\\??\\C:\\windows\\system32\\wined3d.dll" at 000000027E7F0000
+0144:trace:module:load_dll looking for L"ucrtbase.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ucrtbase.dll" for L"ucrtbase.dll" at 000000027F590000, count=-1
+0144:trace:module:load_dll looking for L"kernel32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\kernel32.dll" for L"kernel32.dll" at 000000027FF10000, count=-1
+0144:trace:module:load_dll looking for L"ntdll.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ntdll.dll" for L"ntdll.dll" at 000000027FF70000, count=-1
+0144:trace:module:build_module loaded L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" 00000000809907E0 000000027EA70000
+0144:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\d3dcompiler_47.dll" at 000000027EA70000: builtin
+0144:trace:module:load_dll Loaded module L"\\??\\C:\\windows\\system32\\d3dcompiler_47.dll" at 000000027EA70000
+0144:trace:module:process_attach (L"d3dcompiler_47.dll",0000000000000000) - START
+0144:trace:module:process_attach (L"wined3d.dll",0000000000000000) - START
+0144:trace:module:process_attach (L"opengl32.dll",0000000000000000) - START
+0144:trace:module:MODULE_InitDLL (000000007BF00000 L"opengl32.dll",PROCESS_ATTACH,0000000000000000) - CALL
+[BOX64] 24141|Call to dlopen("/data/user/0/io.harbor.fable/files/containers/17dfbab9-e3e6-497b-a368-329dcf8f5e15/lib/wine/x86_64-unix/opengl32.so"/0xb400007448fc2750, 2)
+[BOX64] Trying to load "/data/user/0/io.harbor.fable/files/containers/17dfbab9-e3e6-497b-a368-329dcf8f5e15/lib/wine/x86_64-unix/opengl32.so"
+[BOX64] Simplified name is "opengl32.so"
+[BOX64] dlopen: New handle 0xc (/data/user/0/io.harbor.fable/files/containers/17dfbab9-e3e6-497b-a368-329dcf8f5e15/lib/wine/x86_64-unix/opengl32.so), dlopened=1
+[BOX64] 24141|Call to dlsym(0xc, "__wine_unix_call_funcs")0x3f0416ce60
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EEFC0, base 00000000801EEFB8.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+0144:trace:module:MODULE_InitDLL (000000007BF00000,PROCESS_ATTACH,0000000000000000) - RETURN 1
+0144:trace:module:process_attach (L"opengl32.dll",0000000000000000) - END
+0144:trace:module:MODULE_InitDLL (000000027E7F0000 L"wined3d.dll",PROCESS_ATTACH,0000000000000000) - CALL
+0144:trace:module:FindResourceExW 000000027ED90000 #000e #7f05 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE58148
+0144:trace:module:FindResourceExW 000000027ED90000 #0003 #003b 0000
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801EE650.
+0144:trace:module:FindResourceExW 000000027ED90000 #000c #7f00 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE57F38
+0144:trace:module:FindResourceExW 000000027ED90000 #0001 #0003 0000
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801EE650.
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE260, base 00000000801EE258.
+0144:trace:module:LdrGetDllHandleEx L"C:\\windows\\system32\\user32.dll" -> 000000027ED90000 (load path (null))
+0144:trace:module:FindResourceExW 000000027ED90000 #000e #7f05 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE58148
+0144:trace:module:FindResourceExW 000000027ED90000 #0003 #003c 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE57E18
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801EDC80.
+0144:trace:module:LdrGetDllFullName module 0000000000000000, name 00000000801EED28.
+0144:trace:module:GetModuleFileNameW L"C:\\fable\\tools\\d3d11-test.exe"
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE8E0, base 00000000801EE8D8.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EED50, base 00000000801EED48.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+0144:trace:module:MODULE_InitDLL (000000027E7F0000,PROCESS_ATTACH,0000000000000000) - RETURN 1
+0144:trace:module:process_attach (L"wined3d.dll",0000000000000000) - END
+0144:trace:module:MODULE_InitDLL (000000027EA70000 L"d3dcompiler_47.dll",PROCESS_ATTACH,0000000000000000) - CALL
+0144:trace:module:MODULE_InitDLL (000000027EA70000,PROCESS_ATTACH,0000000000000000) - RETURN 1
+0144:trace:module:process_attach (L"d3dcompiler_47.dll",0000000000000000) - END
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EEC10, base 00000000801EEC08.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE910, base 00000000801EE908.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+0144:trace:module:LdrGetDllFullName module 0000000000000000, name 00000000801EEB98.
+0144:trace:module:GetModuleFileNameW L"C:\\fable\\tools\\d3d11-test.exe"
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE430, base 00000000801EE428.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+info:  Game: d3d11-test.exe
+info:  DXVK: v3.1.1
+info:  Build: x86_64 gcc 16.2.0
+info:  Found config file: Z:\data\user\0\io.harbor.fable\files\containers\17dfbab9-e3e6-497b-a368-329dcf8f5e15\dxvk.conf
+0144:trace:module:LdrGetDllFullName module 0000000000000000, name 00000000801EEC08.
+0144:trace:module:GetModuleFileNameW L"C:\\fable\\tools\\d3d11-test.exe"
+0144:trace:module:load_dll looking for L"winevulkan.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:get_load_order looking for L"C:\\windows\\system32\\winevulkan.dll"
+0144:trace:module:get_load_order got hardcoded default for L"winevulkan.dll"
+0144:trace:module:map_image_into_view mapping PE file L"\\??\\C:\\windows\\system32\\winevulkan.dll" at 0x27e7c0000-0x27e7ea000
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\winevulkan.dll" section .text at 0x27e7c1000 off 1000 size 11000 virt 10a56 flags 60000020
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\winevulkan.dll" section .rdata at 0x27e7d2000 off 12000 size 10000 virt f630 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\winevulkan.dll" section .data at 0x27e7e2000 off 22000 size 1000 virt 1e4 flags c0000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\winevulkan.dll" section .pdata at 0x27e7e3000 off 23000 size 3000 virt 29b8 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\winevulkan.dll" section .eh_fram at 0x27e7e6000 off 26000 size 1000 virt 158 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\winevulkan.dll" section .rodata at 0x27e7e7000 off 27000 size 1000 virt 690 flags c0000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\winevulkan.dll" section .rsrc at 0x27e7e8000 off 28000 size 1000 virt 498 flags 40000040
+0144:trace:module:map_image_into_view mapping L"\\??\\C:\\windows\\system32\\winevulkan.dll" section .reloc at 0x27e7e9000 off 29000 size 1000 virt 9ec flags 42000040
+0144:trace:module:map_image_into_view relocating L"\\??\\C:\\windows\\system32\\winevulkan.dll" dynamic base 180000000 -> 6fffffab0000 mapped at 0x27e7c0000
+0144:trace:module:perform_relocations relocating from 00006FFFFFAB0000-00006FFFFFADA000 to 000000027E7C0000-000000027E7EA000
+0144:trace:module:load_dll looking for L"user32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\user32.dll" for L"user32.dll" at 000000027ED90000, count=-1
+0144:trace:module:load_dll looking for L"advapi32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ADVAPI32.dll" for L"advapi32.dll" at 000000027F690000, count=-1
+0144:trace:module:load_dll looking for L"setupapi.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\SETUPAPI.dll" for L"setupapi.dll" at 000000027ECC0000, count=-1
+0144:trace:module:load_dll looking for L"ucrtbase.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ucrtbase.dll" for L"ucrtbase.dll" at 000000027F590000, count=-1
+0144:trace:module:load_dll looking for L"kernel32.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\kernel32.dll" for L"kernel32.dll" at 000000027FF10000, count=-1
+0144:trace:module:load_dll looking for L"ntdll.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:trace:module:load_dll Found L"C:\\windows\\system32\\ntdll.dll" for L"ntdll.dll" at 000000027FF70000, count=-1
+0144:trace:module:build_module loaded L"\\??\\C:\\windows\\system32\\winevulkan.dll" 0000000080990BA0 000000027E7C0000
+0144:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\winevulkan.dll" at 000000027E7C0000: builtin
+0144:trace:module:load_dll Loaded module L"\\??\\C:\\windows\\system32\\winevulkan.dll" at 000000027E7C0000
+0144:trace:module:process_attach (L"winevulkan.dll",0000000000000000) - START
+0144:trace:module:MODULE_InitDLL (000000027E7C0000 L"winevulkan.dll",PROCESS_ATTACH,0000000000000000) - CALL
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EDE40, base 00000000801EDE38.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+0144:trace:module:MODULE_InitDLL (000000027E7C0000,PROCESS_ATTACH,0000000000000000) - RETURN 1
+0144:trace:module:process_attach (L"winevulkan.dll",0000000000000000) - END
+info:  Vulkan: Found vkGetInstanceProcAddr in winevulkan.dll @ 0x27e7c3770
+info:  Extension providers:
+info:    Platform WSI
+info:    OpenVR
+info:  OpenVR: could not open registry key, status 2
+0144:trace:module:LdrGetDllHandleEx flags 0, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE9C0, base 00000000801EE9B8.
+0144:trace:module:find_dll_file Skipping file search for L"openvr_api.dll".
+0144:trace:module:LdrGetDllHandleEx L"openvr_api.dll" -> 0000000000000000 (load path (null))
+0144:trace:module:load_dll looking for L"openvr_api_dxvk.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:warn:module:load_dll Failed to load module L"openvr_api_dxvk.dll"; status=c0000135
+info:  OpenVR: Failed to locate module
+info:    OpenXR
+0144:trace:module:load_dll looking for L"wineopenxr.dll" in L"C:\\fable\\tools;C:\\windows\\system32;C:\\windows\\system;C:\\windows;.;C:\\windows\\system32;C:\\windows;C:\\windows\\system32\\wbem;C:\\windows\\system32\\WindowsPowershell\\v1.0"
+0144:warn:module:load_dll Failed to load module L"wineopenxr.dll"; status=c0000135
+[BOX64] 24141|Call to dlopen("/data/user/0/io.harbor.fable/files/containers/17dfbab9-e3e6-497b-a368-329dcf8f5e15/lib/wine/x86_64-unix/winevulkan.so"/0xb400007448fc33b0, 2)
+[BOX64] Trying to load "/data/user/0/io.harbor.fable/files/containers/17dfbab9-e3e6-497b-a368-329dcf8f5e15/lib/wine/x86_64-unix/winevulkan.so"
+[BOX64] Simplified name is "winevulkan.so"
+[BOX64] dlopen: New handle 0xd (/data/user/0/io.harbor.fable/files/containers/17dfbab9-e3e6-497b-a368-329dcf8f5e15/lib/wine/x86_64-unix/winevulkan.so), dlopened=1
+[BOX64] 24141|Call to dlsym(0xd, "__wine_unix_call_funcs")0x3f050e5b80
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE690, base 00000000801EE688.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+[BOX64] 24141|Call to dlopen("libvulkan.so.1"/0x3f0101f61c, 2)
+[BOX64] Trying to load "libvulkan.so.1"
+[BOX64] Simplified name is "libvulkan.so.1"
+[BOX64] dlopen: New handle 0xe (libvulkan.so.1), dlopened=1
+[BOX64] 24141|Call to dlsym(0xe, "vkDestroySurfaceKHR")0x60680000
+[BOX64] 24141|Call to dlsym(0xe, "vkQueuePresentKHR")0x60680020
+[BOX64] 24141|Call to dlsym(0xe, "vkGetDeviceProcAddr")0x60680040
+[BOX64] 24141|Call to dlsym(0xe, "vkGetInstanceProcAddr")0x60680060
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0x0, "vkCreateInstance") => 0x60000140 (0x578c256b40)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0x0, "vkEnumerateInstanceVersion") => 0x60000160 (0x71df25fbc8)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0x0, "vkEnumerateInstanceExtensionProperties") => 0x60000180 (0x71d3217824)
+info:  Enabled instance extensions:
+info:    VK_EXT_surface_maintenance1
+info:    VK_KHR_get_surface_capabilities2
+info:    VK_KHR_surface
+info:    VK_KHR_win32_surface
+0144:trace:module:LdrGetDllFullName module 0000000000000000, name 00000000801EE6F8.
+0144:trace:module:GetModuleFileNameW L"C:\\fable\\tools\\d3d11-test.exe"
+[BOX64] 24141|Call to dlsym(0xe, "vkCreateXlibSurfaceKHR")0x60680080
+[BOX64] 24141|Call to dlsym(0xe, "vkGetPhysicalDeviceXlibPresentationSupportKHR")0x606800a0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkCreateDebugReportCallbackEXT") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkCreateDebugUtilsMessengerEXT") => 0x600001a0 (0x578c258384)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkDebugReportMessageEXT") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkDestroyDebugReportCallbackEXT") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkDestroyDebugUtilsMessengerEXT") => 0x600001c0 (0x578c258438)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkDestroyInstance") => 0x600001e0 (0x578c257eac)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkEnumeratePhysicalDeviceGroups") => 0x60000200 (0x71df26a194)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkEnumeratePhysicalDeviceGroupsKHR") => 0x60000220 (0x71aa955e84)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkEnumeratePhysicalDevices") => 0x60000240 (0x71df26a098)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkSubmitDebugUtilsMessageEXT") => 0x60000260 (0x71aa91f8a4)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkCreateDevice") => 0x60000280 (0x578c2566e8)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkEnumerateDeviceExtensionProperties") => 0x600002a0 (0x71df25f600)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkEnumerateDeviceLayerProperties") => 0x600002c0 (0x71df25f53c)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT") => 0x600002e0 (0x71aa945f18)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceCalibrateableTimeDomainsKHR") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceCooperativeMatrixPropertiesNV") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFeatures") => 0x60000300 (0x71aa9451e8)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFeatures2") => 0x60000320 (0x71df268de0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFeatures2KHR") => 0x60000340 (0x71aa945670)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFormatProperties") => 0x60000360 (0x71aa945200)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFormatProperties2") => 0x60000380 (0x71df26a7d0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFormatProperties2KHR") => 0x600003a0 (0x71aa945684)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFragmentShadingRatesKHR") => 0x600003c0 (0x71aa945f28)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceImageFormatProperties") => 0x600003e0 (0x71aa9451f8)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceImageFormatProperties2") => 0x60000400 (0x71df26a84c)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceImageFormatProperties2KHR") => 0x60000420 (0x71aa94568c)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceMemoryProperties") => 0x60000440 (0x71aa9452c0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceMemoryProperties2") => 0x60000460 (0x71df26a944)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceMemoryProperties2KHR") => 0x60000480 (0x71aa9456b4)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceMultisamplePropertiesEXT") => 0x600004a0 (0x71aa945694)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceOpticalFlowImageFormatsNV") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDevicePresentRectanglesKHR") => 0x600004c0 (0x71df270ebc)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceProperties") => 0x600004e0 (0x71aa9451f0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceProperties2") => 0x60000500 (0x578c259514)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceProperties2KHR") => 0x60000520 (0x71aa94567c)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceQueueFamilyProperties") => 0x60000540 (0x71aa9452d4)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceQueueFamilyProperties2") => 0x60000560 (0x71df26a8c8)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceQueueFamilyProperties2KHR") => 0x60000580 (0x71aa9456ac)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSparseImageFormatProperties") => 0x600005a0 (0x71aa945328)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSparseImageFormatProperties2") => 0x600005c0 (0x71df26a9ac)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSparseImageFormatProperties2KHR") => 0x600005e0 (0x71aa945728)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceCapabilities2KHR") => 0x60000600 (0x71d32172ec)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") => 0x60000620 (0x71d3217230)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceFormats2KHR") => 0x60000640 (0x71d3217740)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceFormatsKHR") => 0x60000660 (0x71d32173cc)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfacePresentModesKHR") => 0x60000680 (0x71df270b1c)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceSupportKHR") => 0x600006a0 (0x71df26fb28)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceToolProperties") => 0x600006c0 (0x71aa945f20)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceToolPropertiesEXT") => 0x600006c0 (0x71aa945f20)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceVideoCapabilitiesKHR") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceVideoFormatPropertiesKHR") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkCreateDevice") => 0x60000280 (0x578c2566e8)
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE540, base 00000000801EE538.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkDestroyInstance") => 0x600001e0 (0x578c257eac)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkEnumerateDeviceExtensionProperties") => 0x600002a0 (0x71df25f600)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkEnumeratePhysicalDevices") => 0x60000240 (0x71df26a098)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceExternalSemaphoreProperties") => 0x600006e0 (0x71df26aac0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFeatures") => 0x60000300 (0x71aa9451e8)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFeatures2") => 0x60000320 (0x71df268de0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFormatProperties") => 0x60000360 (0x71aa945200)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceFormatProperties2") => 0x60000380 (0x71df26a7d0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceProperties2") => 0x60000500 (0x578c259514)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceImageFormatProperties") => 0x600003e0 (0x71aa9451f8)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceImageFormatProperties2") => 0x60000400 (0x71df26a84c)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceMemoryProperties") => 0x60000440 (0x71aa9452c0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceMemoryProperties2") => 0x60000460 (0x71df26a944)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceProperties") => 0x600004e0 (0x71aa9451f0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceQueueFamilyProperties") => 0x60000540 (0x71aa9452d4)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceQueueFamilyProperties2") => 0x60000560 (0x71df26a8c8)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSparseImageFormatProperties") => 0x600005a0 (0x71aa945328)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSparseImageFormatProperties2") => 0x600005c0 (0x71df26a9ac)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceCapabilities2KHR") => 0x60000600 (0x71d32172ec)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceFormats2KHR") => 0x60000640 (0x71d3217740)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceSupportKHR") => 0x600006a0 (0x71df26fb28)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") => 0x60000620 (0x71d3217230)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfaceFormatsKHR") => 0x60000660 (0x71d32173cc)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfacePresentModesKHR") => 0x60000680 (0x71df270b1c)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkCmdBeginDebugUtilsLabelEXT") => 0x60000700 (0x71aa8d7968)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkCmdEndDebugUtilsLabelEXT") => 0x60000720 (0x71aa8d796c)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkCmdInsertDebugUtilsLabelEXT") => 0x60000740 (0x71aa8d7970)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkCreateDebugUtilsMessengerEXT") => 0x600001a0 (0x578c258384)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkDestroyDebugUtilsMessengerEXT") => 0x600001c0 (0x578c258438)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkSubmitDebugUtilsMessageEXT") => 0x60000260 (0x71aa91f8a4)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceDescriptorSizeEXT") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceSurfacePresentModes2EXT") => 0x0
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkReleaseSwapchainImagesEXT") => 0x60000760 (0x71df26c7c4)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d8fef040, "vkGetPhysicalDeviceMultisamplePropertiesEXT") => 0x600004a0 (0x71aa945694)
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE1A0, base 00000000801EE198.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EDEA0, base 00000000801EDE98.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EE7D0, base 00000000801EE7C8.
+0144:trace:module:LdrGetDllHandleEx L"winevulkan.dll" -> 000000027E7C0000 (load path (null))
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0x0, "vkCreateInstance") => 0x60000140 (0x578c256b40)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d905f0b0, "vkDestroyInstance") => 0x600001e0 (0x578c257eac)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d905f0b0, "vkEnumeratePhysicalDevices") => 0x60000240 (0x71df26a098)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d905f0b0, "vkGetPhysicalDeviceProperties2KHR") => 0x60000520 (0x71aa94567c)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d905f0b0, "vkGetPhysicalDeviceMemoryProperties") => 0x60000440 (0x71aa9452c0)
+[BOX64] Calling my_vkGetInstanceProcAddr[0x71d32180e4](0xb4000073d905f0b0, "vkGetPhysicalDeviceMemoryProperties2KHR") => 0x60000480 (0x71aa9456b4)
+info:  Found device: Samsung Xclipse 920 (Samsung Proprietary driver 24.0.545)
+info:    Skipping: Device does not support required feature 'textureCompressionBC'
+warn:  DXVK: No adapters found. Please check your device filter settings
+warn:  and Vulkan drivers. A Vulkan 1.3 capable setup is required.
+0144:trace:module:LdrUnloadDll (000000027E7C0000)
+0144:trace:module:LdrUnloadDll (L"winevulkan.dll") - START
+0144:trace:module:MODULE_DecRefCount (L"winevulkan.dll") ldr.LoadCount: 0
+0144:trace:module:MODULE_InitDLL (000000027E7C0000 L"winevulkan.dll",PROCESS_DETACH,0000000000000000) - CALL
+0144:trace:module:MODULE_InitDLL (000000027E7C0000,PROCESS_DETACH,0000000000000000) - RETURN 1
+0144:trace:module:free_modref  unloading L"C:\\windows\\system32\\winevulkan.dll"
+[BOX64] Call to dlclose(0xd)
+[BOX64] Free1Library winevulkan.so
+0144:trace:module:LdrUnloadDll END
+err:   Failed to initialize DXVK.
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EEBB0, base 00000000801EEBA8.
+0144:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF70000 (load path (null))
+err:   D3D11CreateDevice: Failed to create a DXGI factory
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EF070, base 00000000801EF068.
+0144:trace:module:LdrGetDllHandleEx L"dxgi.dll" -> 000000027EFB0000 (load path (null))
+0144:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000801EF070, base 00000000801EF068.
+0144:trace:module:LdrGetDllHandleEx L"d3d11.dll" -> 000000027F6D0000 (load path (null))
+0144:trace:module:FindResourceExW 000000027ED90000 #0005 L"MSGBOX" 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE57F08
+0144:trace:module:FindResourceExW 000000027ED90000 #0004 L"SYSMENU" 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE57ED8
+0144:trace:module:FindResourceExW 000000027ED90000 #000e L"" 0000
+0144:trace:module:FindResourceExW 000000027ED90000 #0016 L"" 0000
+0144:trace:module:FindResourceExW 000000027ED90000 #000e #7f01 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE58108
+0144:trace:module:FindResourceExW 000000027ED90000 #0003 #0010 0000
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801ED780.
+0144:trace:module:LoadResource 000000027ED90000 000000027EE57B58
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801ED3E0.
+0144:trace:module:FindResourceExW 000000027ED90000 #000e #7f05 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE58148
+0144:trace:module:FindResourceExW 000000027ED90000 #0003 #003c 0000
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801ED490.
+0144:trace:module:FindResourceExW 000000027ED90000 #000e #7f05 0000
+0144:trace:module:LoadResource 000000027ED90000 000000027EE58148
+0144:trace:module:FindResourceExW 000000027ED90000 #0003 #003b 0000
+0144:trace:module:LdrGetDllFullName module 000000027ED90000, name 00000000801EE5E0.
+00a4:trace:module:LdrShutdownThread ()
+00a4:trace:module:MODULE_InitDLL (000000027FD80000 L"rpcrt4.dll",THREAD_DETACH,0000000000000000) - CALL
+00a4:trace:module:MODULE_InitDLL (000000027FD80000,THREAD_DETACH,0000000000000000) - RETURN 1
+00a4:trace:module:MODULE_InitDLL (000000027FB90000 L"msvcrt.dll",THREAD_DETACH,0000000000000000) - CALL
+00a4:trace:module:MODULE_InitDLL (000000027FB90000,THREAD_DETACH,0000000000000000) - RETURN 1
+00a4:trace:module:MODULE_InitDLL (000000027FC40000 L"ucrtbase.dll",THREAD_DETACH,0000000000000000) - CALL
+00a4:trace:module:MODULE_InitDLL (000000027FC40000,THREAD_DETACH,0000000000000000) - RETURN 1
+0058:trace:module:LdrShutdownThread ()
+0058:trace:module:MODULE_InitDLL (000000027FD80000 L"rpcrt4.dll",THREAD_DETACH,0000000000000000) - CALL
+0058:trace:module:MODULE_InitDLL (000000027FD80000,THREAD_DETACH,0000000000000000) - RETURN 1
+0058:trace:module:MODULE_InitDLL (000000027FB90000 L"msvcrt.dll",THREAD_DETACH,0000000000000000) - CALL
+0058:trace:module:MODULE_InitDLL (000000027FB90000,THREAD_DETACH,0000000000000000) - RETURN 1
+0058:trace:module:MODULE_InitDLL (000000027FC40000 L"ucrtbase.dll",THREAD_DETACH,0000000000000000) - CALL
+0058:trace:module:MODULE_InitDLL (000000027FC40000,THREAD_DETACH,0000000000000000) - RETURN 1
+0110:trace:module:LdrShutdownThread ()
+0110:trace:module:MODULE_InitDLL (000000027FD70000 L"rpcrt4.dll",THREAD_DETACH,0000000000000000) - CALL
+0110:trace:module:MODULE_InitDLL (000000027FD70000,THREAD_DETACH,0000000000000000) - RETURN 1
+0110:trace:module:MODULE_InitDLL (000000027FB80000 L"msvcrt.dll",THREAD_DETACH,0000000000000000) - CALL
+0110:trace:module:MODULE_InitDLL (000000027FB80000,THREAD_DETACH,0000000000000000) - RETURN 1
+0110:trace:module:MODULE_InitDLL (000000027FC30000 L"ucrtbase.dll",THREAD_DETACH,0000000000000000) - CALL
+0110:trace:module:MODULE_InitDLL (000000027FC30000,THREAD_DETACH,0000000000000000) - RETURN 1
+[fable] exit code 143
+[fable] (status > 128: probably killed by signal 15)
+0134:trace:module:LdrShutdownThread ()
+0134:trace:module:MODULE_InitDLL (000000027FD70000 L"rpcrt4.dll",THREAD_DETACH,0000000000000000) - CALL
+0134:trace:module:MODULE_InitDLL (000000027FD70000,THREAD_DETACH,0000000000000000) - RETURN 1
+0134:trace:module:MODULE_InitDLL (000000027FB80000 L"msvcrt.dll",THREAD_DETACH,0000000000000000) - CALL
+0134:trace:module:MODULE_InitDLL (000000027FB80000,THREAD_DETACH,0000000000000000) - RETURN 1
+0134:trace:module:MODULE_InitDLL (000000027FC30000 L"ucrtbase.dll",THREAD_DETACH,0000000000000000) - CALL
+0134:trace:module:MODULE_InitDLL (000000027FC30000,THREAD_DETACH,0000000000000000) - RETURN 1
+
