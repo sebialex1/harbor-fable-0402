@@ -19,9 +19,11 @@ import java.io.IOException
  *   `vulkaninfo.exe --summary` when present, and Wine's `dxdiag /t` (Direct3D 9 adapter, through
  *   DXVK's d3d9.dll), and opens the report in Notepad.
  * - **Direct3D 9 / 11 / 12 Test** (`d3d9-test.exe`, `d3d11-test.exe`, `d3d12-test.exe`): copied
- *   from the APK's `assets/container_tools/` when the build bundles them. The shortcuts exist
- *   either way; launching a missing one says it isn't bundled. See
- *   `app/src/main/assets/container_tools/README.md` for what goes there.
+ *   from the APK's `assets/container_tools/` when the build bundles them. `d3d11-test.exe` is
+ *   Fable's own (`container_tools/d3d11-test`), cross-compiled and bundled by the release
+ *   workflow, so it is available in those builds. The shortcuts exist either way; launching a
+ *   missing one says it isn't bundled. See `app/src/main/assets/container_tools/README.md`
+ *   for what goes there.
  *
  * [install] runs on every launch, after the prefix exists, and only rewrites files when the
  * APK changed ([MARKER]) or a file is missing.

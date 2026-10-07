@@ -39,6 +39,22 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
+      # Fable's own Direct3D 11 test (container_tools/d3d11-test), bundled as an asset so every
+      # container's Tools list has it. Must run before Gradle packages the assets.
+      - name: Build Direct3D 11 test (MinGW-w64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+          make -C container_tools/d3d11-test
+          exe=container_tools/d3d11-test/build/d3d11-test.exe
+          x86_64-w64-mingw32-objdump -p "$exe" | grep 'DLL Name'
+          # Statically linked: only Windows (Wine) and Direct3D DLLs, no MinGW runtime DLLs.
+          if x86_64-w64-mingw32-objdump -p "$exe" | grep -qiE 'DLL Name: lib(gcc|stdc|winpthread)'; then
+            echo "::error::d3d11-test.exe imports MinGW runtime DLLs"
+            exit 1
+          fi
+          cp "$exe" app/src/main/assets/container_tools/d3d11-test.exe
+
       - name: Assemble debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 

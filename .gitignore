@@ -10,3 +10,6 @@
 .cxx
 local.properties
 .kotlin
+# Built from container_tools/d3d11-test (the release workflow bundles it); not checked in.
+/container_tools/d3d11-test/build
+/app/src/main/assets/container_tools/d3d11-test.exe
