@@ -10,7 +10,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -69,7 +68,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.R
 import io.harbor.fable.app.FableApp
-import io.harbor.fable.data.RecommendedItem
 import io.harbor.fable.data.RecommendedKind
 import io.harbor.fable.data.RecommendedStatus
 import io.harbor.fable.data.SetupState
@@ -339,17 +337,6 @@ private fun DownloadStep(
             }
         }
         Spacer(Modifier.height(Spacing.xxl))
-        Staggered(index = 3) {
-            FableCard(Modifier.fillMaxWidth()) {
-                // Optional kinds (FEX) are chosen per container later, not during first-run setup.
-                val rows = RecommendedKind.entries.filter { it.required }
-                rows.forEachIndexed { index, kind ->
-                    if (index > 0) CardDivider(afterIcon = true)
-                    val item = items.firstOrNull { it.kind == kind }
-                    SetupItemRow(kind = kind, item = item, preparing = preparing)
-                }
-            }
-        }
         AnimatedVisibility(visible = message != null, enter = fadeIn(Motion.enter()), exit = fadeOut(Motion.exit())) {
             Column {
                 Spacer(Modifier.height(Spacing.md))
@@ -370,8 +357,8 @@ private fun DownloadStep(
                     label = "setupAction",
                 ) { (done, failed, missing) ->
                     when {
-                        done -> FableButton(
-                            text = if (missing) "Continue Anyway" else "Continue",
+                        done && missing -> FableButton(
+                            text = "Continue Anyway",
                             primary = true,
                             onClick = onContinue,
                             modifier = Modifier.fillMaxWidth(),
@@ -391,67 +378,6 @@ private fun DownloadStep(
         }
         Spacer(Modifier.height(Spacing.lg))
     }
-}
-
-@Composable
-private fun SetupItemRow(kind: RecommendedKind, item: RecommendedItem?, preparing: Boolean) {
-    val status = item?.status
-    val installed = status == RecommendedStatus.INSTALLED
-    val downloading = status == RecommendedStatus.DOWNLOADING
-    val progress = item?.progress ?: 0f
-    val sizeBytes = item?.sizeBytes ?: 0L
-    val statusText = when {
-        installed -> ""
-        downloading && progress >= 1f && kind == RecommendedKind.DRIVER -> "Installing"
-        downloading -> "${(progress * 100).toInt()}%"
-        preparing -> "Preparing"
-        status == RecommendedStatus.AVAILABLE -> if (sizeBytes > 0) formatBytes(sizeBytes) else "Waiting"
-        status == RecommendedStatus.UNAVAILABLE -> "No build"
-        else -> ""
-    }
-    Box(Modifier.fillMaxWidth()) {
-        ListRow(
-            title = kind.label,
-            icon = kindIcon(kind),
-            showChevron = false,
-            trailing = {
-                AnimatedContent(
-                    targetState = statusText,
-                    transitionSpec = {
-                        (fadeIn(Motion.enter(Motion.Quick)) + scaleIn(Motion.enter(Motion.Quick), initialScale = 0.85f)) togetherWith
-                            fadeOut(Motion.exit(Motion.Fast))
-                    },
-                    label = "setupItemStatus",
-                ) { text ->
-                    StateText(text)
-                }
-            },
-        )
-        // Only an item that is actually downloading/installing gets its own line; the generic
-        // "Preparing" phase is already covered by the ring and the overall bar. The line runs
-        // the full card width, edge to edge.
-        AnimatedVisibility(
-            visible = downloading,
-            enter = fadeIn(Motion.enter(Motion.Quick)),
-            exit = fadeOut(Motion.exit(Motion.Standard)),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth(),
-        ) {
-            ThinProgressBar(
-                progress = if (downloading && progress < 1f) progress else null,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
-private fun kindIcon(kind: RecommendedKind) = when (kind) {
-    RecommendedKind.WINE -> Icons.Outlined.WineBar
-    RecommendedKind.BOX64 -> Icons.Outlined.Terminal
-    RecommendedKind.DRIVER -> Icons.Outlined.Memory
-    RecommendedKind.DXVK -> Icons.Outlined.Layers
-    RecommendedKind.FEX -> Icons.Outlined.SwapHoriz
 }
 
 /** Overall progress as a thin white ring with the percentage in the middle. Real progress only. */
