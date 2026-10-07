@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.dp
  * outlined set, and every glyph comes in matching weights: the tab bar shows the Regular
  * outline for idle tabs and the Fill version for the active one, the way iOS tab bars do;
  * small indicator glyphs (chevrons, check marks) use the Bold weight so they stay legible at
- * 18–20 dp. Path data is copied verbatim from `phosphor-icons/core` (`assets/<weight>/*.svg`,
+ * 18–20 dp. Path data is copied verbatim from `phosphor-icons/core` (the Phosphor source SVGs,
  * 256×256 viewport, non-zero fill). Each vector is built once, on first use.
  */
 object FableIcons {
