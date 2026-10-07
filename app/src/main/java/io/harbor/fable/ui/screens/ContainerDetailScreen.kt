@@ -634,7 +634,7 @@ private fun LaunchCard(
                 subtitle = "Add an .exe with +, or tap one below",
                 subtitleMaxLines = 2,
                 titleColor = FableTextDim,
-                leading = { ToneIconTile(icon = FableIcons.Apps, tone = TileTone.Graphite, size = LaunchIconSize, dimmed = true) },
+                leading = null,
                 showChevron = false,
             )
         }
@@ -656,7 +656,7 @@ private fun LaunchCard(
         ListRow(
             title = "Wine Desktop",
             subtitle = "Explorer and the Windows shell",
-            leading = { ToneIconTile(icon = FableIcons.Desktop, tone = TileTone.Indigo, size = LaunchIconSize) },
+            leading = null,
             showChevron = primaryName != null,
             onClick = onLaunchDesktop,
             trailing = desktopPlay,
