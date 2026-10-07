@@ -64,4 +64,12 @@ data class ExeEntry(
     val icon: String? = null,
     val lastPlayed: Long? = null,
     val playCount: Int = 0,
-)
+    /**
+     * Set for the built-in tools every container gets (GPU Info, Direct3D tests; see
+     * `ContainerTools`): their id, e.g. `gpu-info`. Null for apps the user added. Tools never
+     * become the container's primary app and aren't listed on the Home screen.
+     */
+    val toolId: String? = null,
+) {
+    val isTool: Boolean get() = toolId != null
+}

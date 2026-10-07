@@ -14,11 +14,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.ComponentBuild
 import io.harbor.fable.data.ContainerRepository
+import io.harbor.fable.data.ContainerTools
 import io.harbor.fable.data.models.Box64Options
 import io.harbor.fable.data.models.Box64Preset
 import io.harbor.fable.data.models.Box64Settings
@@ -64,9 +66,11 @@ fun ContainerDetailScreen(
     ContainerDetailContent(
         container = container,
         exes = containerExes,
+        unavailableTools = containerExes.filter { it.isTool && !repository.toolAvailable(it) }.map { it.id }.toSet(),
         dxvkBuilds = dxvkBuilds,
         onBack = onBack,
         onLaunchPrimary = { launchExe(null) },
+        onLaunchTool = { tool -> launchExe(tool.id) },
         onLaunchDesktop = {
             fableUi.scope.launch {
                 fableUi.showMessage(repository.launchDesktop(containerId).also { it.openDisplay(context, containerId) }.message(), long = true)
@@ -127,6 +131,7 @@ internal fun ContainerDetailContent(
     dxvkBuilds: List<ComponentBuild>,
     onBack: () -> Unit,
     onLaunchPrimary: () -> Unit,
+    onLaunchTool: (ExeEntry) -> Unit,
     onLaunchDesktop: () -> Unit,
     onSetPrimary: (ExeEntry) -> Unit,
     onSelectResolution: (String) -> Unit,
@@ -136,6 +141,7 @@ internal fun ContainerDetailContent(
     onBox64Change: (Box64Settings) -> Unit,
     onAddExe: () -> Unit,
     onDelete: () -> Unit,
+    unavailableTools: Set<String> = emptySet(),
 ) {
     val appear = rememberEntrance()
     var box64Expanded by rememberSaveable { mutableStateOf(false) }
@@ -258,21 +264,52 @@ internal fun ContainerDetailContent(
             }
         }
 
-        item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().entrance(appear, 2)) }
-        item(key = "apps") {
-            FableCard(Modifier.animateItem().entrance(appear, 2)) {
-                exes.forEach { exe ->
-                    ListRow(
-                        title = exe.name,
-                        subtitle = if (container.exePath == exe.path) "Primary" else null,
-                        leading = { ExeIcon(name = exe.name, iconPath = exe.icon) },
-                        showChevron = false,
-                        // No per-row play button: tapping a row makes it the primary app, and the
-                        // launch button at the top starts the primary app, so a second launch
-                        // control on every row was redundant. "Primary" marks what will launch.
-                        onClick = { onSetPrimary(exe) },
-                    )
-                    CardDivider(afterIcon = true)
+        val apps = exes.filter { !it.isTool }
+        // Tools in ContainerTools order: GPU Info first, then the Direct3D tests.
+        val tools = exes.filter { it.isTool }
+            .sortedBy { exe -> ContainerTools.all.indexOfFirst { it.id == exe.toolId }.let { if (it < 0) Int.MAX_VALUE else it } }
+
+        if (apps.isNotEmpty()) {
+            item(key = "apps-label") { SectionLabel("Apps", Modifier.animateItem().entrance(appear, 2)) }
+            item(key = "apps") {
+                FableCard(Modifier.animateItem().entrance(appear, 2)) {
+                    apps.forEachIndexed { index, exe ->
+                        if (index > 0) CardDivider(afterIcon = true)
+                        ListRow(
+                            title = exe.name,
+                            subtitle = if (container.exePath == exe.path) "Primary" else null,
+                            leading = { ExeIcon(name = exe.name, iconPath = exe.icon) },
+                            showChevron = false,
+                            // No per-row play button: tapping a row makes it the primary app, and the
+                            // launch button at the top starts the primary app, so a second launch
+                            // control on every row was redundant. "Primary" marks what will launch.
+                            onClick = { onSetPrimary(exe) },
+                        )
+                    }
+                }
+            }
+        }
+
+        // Built-in checks every container gets (ContainerTools): tap to launch.
+        if (tools.isNotEmpty()) {
+            item(key = "tools-label") { SectionLabel("Tools", Modifier.animateItem().entrance(appear, 3)) }
+            item(key = "tools") {
+                FableCard(Modifier.animateItem().entrance(appear, 3)) {
+                    tools.forEachIndexed { index, exe ->
+                        if (index > 0) CardDivider(afterIcon = true)
+                        val available = exe.id !in unavailableTools
+                        ListRow(
+                            title = exe.name,
+                            subtitle = if (available) {
+                                ContainerTools.byId(exe.toolId)?.description
+                            } else {
+                                "Not included in this build"
+                            },
+                            icon = toolIcon(exe.toolId),
+                            showChevron = false,
+                            onClick = { onLaunchTool(exe) },
+                        )
+                    }
                 }
             }
         }
@@ -374,4 +411,10 @@ private fun dxvkOptions(builds: List<ComponentBuild>): List<SelectOption<String?
     add(SelectOption(null, "Newest", builds.firstOrNull()?.label ?: "None downloaded yet (Assets)"))
     builds.forEach { add(SelectOption(it.id, it.label, it.archive.name)) }
     add(SelectOption(ContainerDefaults.DXVK_OFF, "Off", "WineD3D: needs OpenGL, most games won't render"))
+}
+
+/** Leading glyph for a built-in tool row. */
+private fun toolIcon(toolId: String?): ImageVector = when (toolId) {
+    ContainerTools.GPU_INFO.id -> Icons.Outlined.Memory
+    else -> Icons.Outlined.ViewInAr
 }

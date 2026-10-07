@@ -32,7 +32,8 @@ fun HomeScreen(
     val exes by repository.exes.collectAsStateWithLifecycle()
 
     HomeContent(
-        exes = exes,
+        // The built-in tools (GPU Info, Direct3D tests) live on each container's screen.
+        exes = exes.filter { !it.isTool },
         containers = containers,
         onAddApp = onAddApp,
         onSeeAllContainers = onNavigateToContainers,

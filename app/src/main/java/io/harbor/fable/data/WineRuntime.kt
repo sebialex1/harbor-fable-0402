@@ -371,6 +371,23 @@ internal class WineRuntime(
         }
     }
 
+    // --- Container tools --------------------------------------------------------------------
+
+    /** Lower-case names of the tool binaries this APK bundles ([ContainerTools.ASSET_DIR]). */
+    val bundledTools: Set<String> by lazy { ContainerTools.bundledFiles(appContext.assets) }
+
+    /**
+     * Writes GPU Info and the bundled Direct3D tests into [containerDir]'s `C:\fable\tools`
+     * ([ContainerTools]); refreshed after an app update.
+     */
+    fun installContainerTools(containerDir: File): ContainerTools.Report {
+        val stamp = runCatching {
+            @Suppress("DEPRECATION")
+            appContext.packageManager.getPackageInfo(appContext.packageName, 0).lastUpdateTime.toString()
+        }.getOrDefault("0")
+        return ContainerTools.install(containerDir, appContext.assets, stamp)
+    }
+
     // --- Executables and drivers ---------------------------------------------------------
 
     /**

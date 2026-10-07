@@ -99,8 +99,11 @@ class ContainerRepository internal constructor(
         }
         loaded.containers.forEach { containersById[it.id] = it }
         loaded.exes.forEach { exesById[it.id] = it }
-        // No Wine process survives the app, so a persisted RUNNING / CONFIGURING state is stale.
+        // Containers from before the built-in tools existed (or from an older tool list) get
+        // their GPU Info / Direct3D test shortcuts here.
         var reset = false
+        containersById.keys.toList().forEach { id -> if (ensureToolEntriesLocked(id)) reset = true }
+        // No Wine process survives the app, so a persisted RUNNING / CONFIGURING state is stale.
         containersById.values.toList().forEach { container ->
             val settled = when (container.status) {
                 ContainerStatus.RUNNING -> ContainerStatus.READY
@@ -121,6 +124,15 @@ class ContainerRepository internal constructor(
 
     fun listExes(containerId: String): List<ExeEntry> =
         exesById.values.filter { it.containerId == containerId }.sortedBy { it.name.lowercase() }
+
+    /**
+     * Whether [exe] can run: always for user apps and scripted tools, and for a binary tool
+     * (Direct3D tests) only when this build bundles it ([ContainerTools]).
+     */
+    fun toolAvailable(exe: ExeEntry): Boolean {
+        val tool = ContainerTools.byId(exe.toolId) ?: return true
+        return tool.isAvailable(runtime?.bundledTools.orEmpty())
+    }
 
     /**
      * Downloaded Wine packages a new container can use, newest first: bionic Winlator `.wcp`
@@ -180,9 +192,34 @@ class ContainerRepository internal constructor(
         withContext(Dispatchers.IO) {
             containersById[container.id] = container
             directory(container.id).mkdirs()
+            ensureToolEntriesLocked(container.id)
             persistLocked()
             container
         }
+    }
+
+    /**
+     * Adds the shortcuts for [ContainerTools.all] that [containerId] doesn't have yet and keeps
+     * existing ones pointing at the current file. The files themselves are written on launch,
+     * once the prefix exists. Returns true when anything changed. Call with [mutex] held (or
+     * from `init`).
+     */
+    private fun ensureToolEntriesLocked(containerId: String): Boolean {
+        var changed = false
+        val existing = exesById.values.filter { it.containerId == containerId && it.toolId != null }
+            .associateBy { it.toolId }
+        for (tool in ContainerTools.all) {
+            val entry = existing[tool.id]
+            if (entry == null) {
+                val created = ExeEntry(containerId = containerId, name = tool.name, path = tool.windowsPath, toolId = tool.id)
+                exesById[created.id] = created
+                changed = true
+            } else if (entry.name != tool.name || entry.path != tool.windowsPath) {
+                exesById[entry.id] = entry.copy(name = tool.name, path = tool.windowsPath)
+                changed = true
+            }
+        }
+        return changed
     }
 
     /**
@@ -250,7 +287,7 @@ class ContainerRepository internal constructor(
             val container = containersById[entry.containerId]
                 ?: throw NoSuchElementException("Unknown container ${entry.containerId}")
             exesById[entry.id] = entry
-            if (container.exePath.isNullOrBlank()) {
+            if (container.exePath.isNullOrBlank() && !entry.isTool) {
                 containersById[container.id] = container.copy(
                     exePath = entry.path,
                     exeName = entry.name,
@@ -266,7 +303,7 @@ class ContainerRepository internal constructor(
             val removed = exesById.remove(id) ?: return@withContext false
             val container = containersById[removed.containerId]
             if (container != null && container.exePath == removed.path) {
-                val replacement = exesById.values.firstOrNull { it.containerId == container.id }
+                val replacement = exesById.values.firstOrNull { it.containerId == container.id && !it.isTool }
                 containersById[container.id] = container.copy(
                     exePath = replacement?.path,
                     exeName = replacement?.name,
@@ -281,6 +318,7 @@ class ContainerRepository internal constructor(
     suspend fun setPrimaryExe(exeId: String): Boolean = mutex.withLock {
         withContext(Dispatchers.IO) {
             val exe = exesById[exeId] ?: return@withContext false
+            if (exe.isTool) return@withContext false
             val container = containersById[exe.containerId] ?: return@withContext false
             containersById[container.id] = container.copy(exePath = exe.path, exeName = exe.name)
             persistLocked()
@@ -302,9 +340,11 @@ class ContainerRepository internal constructor(
             val container = containersById[containerId]
                 ?: return LaunchResult.Failed("Container not found")
             val candidates = exesById.values.filter { it.containerId == containerId }
+            // "Launch" without a choice starts the primary app, never a built-in tool.
+            val apps = candidates.filter { !it.isTool }
             val exe = when {
                 exeId != null -> candidates.firstOrNull { it.id == exeId }
-                else -> candidates.firstOrNull { it.path == container.exePath } ?: candidates.firstOrNull()
+                else -> apps.firstOrNull { it.path == container.exePath } ?: apps.firstOrNull()
             } ?: return LaunchResult.Failed("Add an app first")
             container to exe
         }
@@ -483,6 +523,19 @@ class ContainerRepository internal constructor(
         direct3d.describe().forEach { log.line(it) }
         val dxvkConf = if (direct3d.installed[DxWrappers.Kind.DXVK] != null) DxWrappers.ensureDxvkConf(dir) else null
         dxvkConf?.let { log.line("dxvk.conf: ${it.absolutePath}") }
+
+        // 2d. GPU Info and the Direct3D tests in C:\fable\tools (Winlator puts its test programs
+        //     into every container the same way); refreshed after an app update.
+        log.section("Container tools")
+        val tools = withContext(Dispatchers.IO) { runtime.installContainerTools(dir) }
+        tools.describe().forEach { log.line(it) }
+        val tool = ContainerTools.byId(exe?.toolId)
+        if (tool != null && !ContainerTools.file(dir, tool).isFile) {
+            log.error("${tool.fileName} isn't in ${ContainerTools.WINDOWS_DIR}: this build doesn't bundle it")
+            return LaunchResult.Failed(
+                "${tool.name} isn't included in this build. Its .exe goes in assets/${ContainerTools.ASSET_DIR}"
+            )
+        }
 
         // 3. The display server has to be listening before Wine starts (Winlator's XEnvironment
         //    starts XServerComponent before GuestProgramLauncherComponent the same way).
@@ -1247,6 +1300,7 @@ class ContainerRepository internal constructor(
                 icon TEXT,
                 lastPlayed INTEGER,
                 playCount INTEGER NOT NULL,
+                toolId TEXT,
                 FOREIGN KEY(containerId) REFERENCES containers(id) ON DELETE CASCADE
             );
             CREATE INDEX index_exes_containerId ON exes(containerId);
@@ -1484,6 +1538,7 @@ class FileContainerStore(private val file: File) : ContainerDao {
         putNullable("icon", icon)
         if (lastPlayed == null) put("lastPlayed", JSONObject.NULL) else put("lastPlayed", lastPlayed)
         put("playCount", playCount)
+        putNullable("toolId", toolId)
     }
 
     private fun JSONObject.toExe(): ExeEntry = ExeEntry(
@@ -1494,6 +1549,7 @@ class FileContainerStore(private val file: File) : ContainerDao {
         icon = stringOrNull("icon"),
         lastPlayed = longOrNull("lastPlayed"),
         playCount = optInt("playCount", 0),
+        toolId = stringOrNull("toolId"),
     )
 
     companion object {
