@@ -441,11 +441,12 @@ class ContainerRepository internal constructor(
 
         // 4. Resolve what to run: `wine explorer /desktop=shell,WxH [start /d <dir> <exe>]`,
         //    Winlator's guest command, so every app runs inside a virtual desktop the size of the
-        //    X screen.
+        //    X screen. Desktop mode opens a file browser at C:\ so the user sees something
+        //    instead of a black screen.
         val program = "explorer"
         val arguments: List<String>
         if (exe == null) {
-            arguments = listOf("/desktop=shell,$desktopSize")
+            arguments = listOf("/desktop=shell,$desktopSize", "/root,C:\\")
         } else {
             val path = runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
                 ?: run {
