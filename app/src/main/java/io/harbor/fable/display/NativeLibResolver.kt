@@ -7,7 +7,10 @@ import io.harbor.fable.data.ElfInfo
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FilterInputStream
 import java.io.IOException
+import java.io.InputStream
+import java.util.zip.ZipFile
 
 /**
  * Supplies the native (aarch64 bionic) libraries Box64 wraps Wine's Unix-side dependencies onto
@@ -35,7 +38,14 @@ import java.io.IOException
  * SONAME on every Linux distribution — and Box64 doesn't strip the version suffix, so without a
  * `libvulkan.so.1` on `LD_LIBRARY_PATH` DXVK can't create a Vulkan instance (Direct3D 11 apps never
  * open) and WineD3D falls back to an OpenGL that isn't there either (Direct3D 9 shows a black
- * screen). The system loader is therefore copied in under both names.
+ * screen). The system loader is copied in as `libvulkan.so`; `libvulkan.so.1`, the name Wine
+ * actually opens, is **not** a copy of it (`native-libs-5`) but the APK's own `libvulkan_shim.so`
+ * (`cpp/vulkan/vulkan_shim.c`, built by CMake and packaged as a JNI library; see [Spec.shim]).
+ * Android's loader has no Xlib WSI: it doesn't export
+ * `vkGetPhysicalDeviceXlibPresentationSupportKHR`, which winex11 dlsym's at Vulkan init, so with a
+ * plain copy winevulkan asserts (`!status`, loader.c, status 0xc000007a) and DXVK still gets no
+ * instance. The shim dlopen's the real loader, forwards the entry points Wine dlsym's and answers
+ * the Xlib query itself. When the shim isn't in the APK the alias falls back to the plain copy.
  *
  * For the rest, once per [VERSION], system build and bundled set, each [Spec] missing from the
  * library directory is looked up in [SYSTEM_LIB_DIRS] under its candidate names and the first
@@ -50,8 +60,14 @@ internal object NativeLibResolver {
     private const val TAG = "NativeLibResolver"
 
     /** Bump when [SPECS] or the copy logic changes so existing installs re-resolve. */
-    private const val VERSION = "native-libs-4"
+    private const val VERSION = "native-libs-5"
     private const val MARKER = ".fable-native-libs"
+
+    /** The ABI this app builds its JNI libraries for (`ndk.abiFilters` in app/build.gradle.kts). */
+    private const val JNI_ABI = "arm64-v8a"
+
+    /** The CMake `vulkan_shim` target: the libvulkan.so.1 shim installed over the system loader. */
+    const val VULKAN_SHIM = "libvulkan_shim.so"
 
     /** Where Android keeps 64-bit shared libraries, in search order. */
     val SYSTEM_LIB_DIRS = listOf(
@@ -81,9 +97,34 @@ internal object NativeLibResolver {
         val required: Boolean = false,
         val systemFallback: Boolean = true,
         val incompatible: List<String> = emptyList(),
+        val shim: Shim? = null,
     ) {
         /** Every file name this library may have in the library directory. */
         val names: List<String> get() = (listOf(target) + aliases + candidates).distinct()
+
+        init {
+            require(shim == null || shim.alias in aliases) { "$target: the shim alias ${shim?.alias} must be one of the aliases" }
+        }
+    }
+
+    /**
+     * One of a [Spec]'s [Spec.aliases] that is written from a library packaged in the APK
+     * ([library], a CMake target in `app/src/main/cpp`) instead of as a copy of the system file.
+     * The library wraps the system copy installed under [Spec.target] and adds what Wine needs on
+     * top of it. When the APK doesn't have it the alias falls back to a copy of the system file.
+     */
+    data class Shim(val alias: String, val library: String, val purpose: String)
+
+    /**
+     * Opens libraries packaged in the APK under `lib/<abi>/` (CMake targets, `jniLibs`), by file
+     * name. Returns null when this build has no such library. Separated from [Context] for tests.
+     */
+    internal fun interface JniLibs {
+        fun open(name: String): InputStream?
+
+        companion object {
+            val NONE = JniLibs { null }
+        }
     }
 
     /** Android's FreeType build; too old / too stripped for Wine (see the class comment). */
@@ -163,14 +204,18 @@ internal object NativeLibResolver {
         Spec("libxkbcommon.so", listOf("libxkbcommon.so", "libxkbcommon.so.0"), "xkbcommon (SDL2)", systemFallback = false),
         Spec("libdecor-0.so", listOf("libdecor-0.so", "libdecor-0.so.0"), "libdecor (SDL2)", systemFallback = false),
         // Android's own Vulkan loader. winevulkan dlopens the Linux SONAME "libvulkan.so.1", which
-        // Android never provides, so the system copy is installed under that alias too (see the
-        // class comment). Not required: Wine starts without Vulkan, only DXVK / D3D don't.
+        // Android never provides. That name gets the APK's libvulkan_shim.so (cpp/vulkan/vulkan_shim.c):
+        // it wraps the system copy installed as libvulkan.so and supplies the Xlib WSI entry point
+        // Android's loader lacks (vkGetPhysicalDeviceXlibPresentationSupportKHR), without which
+        // winex11's Vulkan init fails and winevulkan asserts (see the class comment). Not required:
+        // Wine starts without Vulkan, only DXVK / D3D don't.
         Spec(
             target = "libvulkan.so",
             candidates = listOf("libvulkan.so", "libvulkan.so.1"),
             purpose = "Vulkan loader (DXVK / winevulkan)",
             aliases = listOf("libvulkan.so.1"),
             systemFallback = true,
+            shim = Shim(alias = "libvulkan.so.1", library = VULKAN_SHIM, purpose = "Xlib WSI shim over the system loader"),
         ),
     )
 
@@ -185,7 +230,10 @@ internal object NativeLibResolver {
         MISSING,
     }
 
-    /** [note] explains a [Status.MISSING] library that was deliberately not taken from the system. */
+    /**
+     * [note] explains a [Status.MISSING] library that was deliberately not taken from the system,
+     * or what was installed next to a [Status.RESOLVED] / [Status.BUNDLED] one (a [Shim] alias).
+     */
     data class Entry(
         val target: String,
         val status: Status,
@@ -212,10 +260,11 @@ internal object NativeLibResolver {
         /** One line per library, for the launch log. */
         fun describe(): List<String> = entries.map { entry ->
             val tag = if (entry.required) " (required)" else ""
+            val note = entry.note?.let { " ($it)" } ?: ""
             when (entry.status) {
-                Status.BUNDLED -> "${entry.target}: bundled$tag"
-                Status.RESOLVED -> "${entry.target}: copied from ${entry.source}$tag"
-                Status.MISSING -> "${entry.target}: MISSING$tag" + (entry.note?.let { " ($it)" } ?: "")
+                Status.BUNDLED -> "${entry.target}: bundled$tag$note"
+                Status.RESOLVED -> "${entry.target}: copied from ${entry.source}$tag$note"
+                Status.MISSING -> "${entry.target}: MISSING$tag$note"
             }
         }
 
@@ -246,7 +295,7 @@ internal object NativeLibResolver {
         val dir = X11ClientLibs.libDir(context)
         val report = try {
             val bundled = X11ClientLibs.bundledLibraries(context)
-            resolveIn(dir, stamp(bundled), bundled = bundled)
+            resolveIn(dir, stamp(context, bundled), bundled = bundled, jniLibs = ApkJniLibs(context))
         } catch (error: Exception) {
             // Resolution is best effort: a failure here must not stop the launch.
             Log.e(TAG, "Native library resolution failed", error)
@@ -265,6 +314,7 @@ internal object NativeLibResolver {
         stamp: String,
         searchDirs: List<String> = SYSTEM_LIB_DIRS,
         bundled: Set<String> = emptySet(),
+        jniLibs: JniLibs = JniLibs.NONE,
     ): Report {
         dir.mkdirs()
         val marker = File(dir, MARKER)
@@ -288,7 +338,7 @@ internal object NativeLibResolver {
         purgeStaleSystemCopies(dir, previous?.second.orEmpty(), searchDirs, bundled)
         marker.delete()
 
-        val entries = SPECS.map { spec -> resolveOne(dir, spec, searchDirs, bundled) }
+        val entries = SPECS.map { spec -> resolveOne(dir, spec, searchDirs, bundled, jniLibs) }
         writeMarker(marker, stamp, entries)
         val report = Report(dir, entries, cached = false)
         report.resolved.forEach { Log.i(TAG, "Resolved ${it.target} from ${it.source}") }
@@ -340,7 +390,7 @@ internal object NativeLibResolver {
         a.length() == b.length() && a.readBytes().contentEquals(b.readBytes())
     }.getOrDefault(false)
 
-    private fun resolveOne(dir: File, spec: Spec, searchDirs: List<String>, bundled: Set<String>): Entry {
+    private fun resolveOne(dir: File, spec: Spec, searchDirs: List<String>, bundled: Set<String>, jniLibs: JniLibs): Entry {
         val dest = File(dir, spec.target)
         // Shipped in the APK (X11ClientLibs): always preferred over anything on the system.
         val shipped = spec.names.firstOrNull { it in bundled && File(dir, it).let { f -> f.isFile && f.length() > 0 } }
@@ -355,8 +405,10 @@ internal object NativeLibResolver {
         }
         if (dest.isFile && dest.length() > 0) {
             // Not from the APK, but not a known system copy either (purgeStaleSystemCopies ran).
+            // A shim alias is still (re)written: whatever sits under the alias isn't the shim.
             Log.d(TAG, "${spec.target} already present in ${dir.absolutePath}")
-            return Entry(spec.target, Status.BUNDLED, dest.absolutePath, spec.required)
+            val note = spec.shim?.let { installShim(dir, spec, it, bundled, jniLibs, fallback = dest) }
+            return Entry(spec.target, Status.BUNDLED, dest.absolutePath, spec.required, note)
         }
         if (!spec.systemFallback) {
             // Don't fall back to a system copy that is known not to work (Android's libft2.so).
@@ -385,10 +437,12 @@ internal object NativeLibResolver {
                 try {
                     copy(source, dest)
                     for (alias in spec.aliases) {
+                        if (alias == spec.shim?.alias) continue
                         val aliasFile = File(dir, alias)
                         if (alias !in bundled && !aliasFile.isFile) copy(source, aliasFile)
                     }
-                    return Entry(spec.target, Status.RESOLVED, source.absolutePath, spec.required)
+                    val note = spec.shim?.let { installShim(dir, spec, it, bundled, jniLibs, fallback = source) }
+                    return Entry(spec.target, Status.RESOLVED, source.absolutePath, spec.required, note)
                 } catch (error: Exception) {
                     Log.w(TAG, "Couldn't copy ${source.absolutePath} to ${dest.absolutePath}", error)
                     dest.delete()
@@ -398,10 +452,46 @@ internal object NativeLibResolver {
         return Entry(spec.target, Status.MISSING, required = spec.required)
     }
 
+    /**
+     * Writes [shim]'s library from the APK under its alias in [dir], replacing whatever was there
+     * (a plain system copy from an older resolver, a previous build's shim). Without the library in
+     * this build, or when it can't be written, the alias gets a copy of [fallback] (the system
+     * library) so Wine at least finds the name. Returns the line for the report.
+     */
+    private fun installShim(dir: File, spec: Spec, shim: Shim, bundled: Set<String>, jniLibs: JniLibs, fallback: File): String {
+        val aliasFile = File(dir, shim.alias)
+        if (shim.alias in bundled) return "${shim.alias} bundled"
+        val stream = runCatching { jniLibs.open(shim.library) }
+            .onFailure { Log.w(TAG, "Couldn't open ${shim.library} from the APK", it) }
+            .getOrNull()
+        if (stream != null) {
+            try {
+                stream.use { copy(it, aliasFile) }
+                Log.i(TAG, "Installed ${shim.library} as ${shim.alias} (${shim.purpose})")
+                return "${shim.alias} is the APK's ${shim.library}: ${shim.purpose}"
+            } catch (error: Exception) {
+                Log.w(TAG, "Couldn't install ${shim.library} as ${shim.alias}", error)
+                aliasFile.delete()
+            }
+        } else {
+            Log.w(TAG, "${shim.library} is not in this build; ${shim.alias} falls back to a copy of ${fallback.absolutePath}")
+        }
+        if (!aliasFile.isFile) {
+            runCatching { copy(fallback, aliasFile) }
+                .onFailure { Log.w(TAG, "Couldn't copy ${fallback.absolutePath} to ${aliasFile.absolutePath}", it) }
+        }
+        return "${shim.alias} is a plain copy, ${shim.library} unavailable: ${spec.purpose} may fail"
+    }
+
     /** Copies [source] to [dest] through a temp file, then marks it readable + executable like [X11ClientLibs]. */
     private fun copy(source: File, dest: File) {
+        source.inputStream().use { copy(it, dest) }
+    }
+
+    /** Writes [source] to [dest] through a temp file, then marks it readable + executable like [X11ClientLibs]. */
+    private fun copy(source: InputStream, dest: File) {
         val tmp = File(dest.parentFile, "${dest.name}.tmp")
-        source.copyTo(tmp, overwrite = true)
+        tmp.outputStream().use { source.copyTo(it) }
         if (!tmp.renameTo(dest)) {
             dest.delete()
             if (!tmp.renameTo(dest)) {
@@ -413,9 +503,50 @@ internal object NativeLibResolver {
         dest.setExecutable(true, false)
     }
 
-    /** Re-resolve when the resolver, the system image or the bundled set changes. */
-    private fun stamp(bundled: Set<String>): String =
-        "$VERSION\n${Build.FINGERPRINT}\n${X11ClientLibs.bundleStamp()}\n${bundled.sorted().joinToString(",")}"
+    /**
+     * Re-resolve when the resolver, the system image, the bundled set or the APK itself changes
+     * (a new build may carry a different [VULKAN_SHIM]; the APK's modification time changes on
+     * every install).
+     */
+    private fun stamp(context: Context, bundled: Set<String>): String {
+        val apk = runCatching { File(context.applicationInfo.sourceDir).lastModified() }.getOrDefault(0L)
+        return "$VERSION\n${Build.FINGERPRINT}\n${X11ClientLibs.bundleStamp()}\n${bundled.sorted().joinToString(",")}\napk:$apk"
+    }
+
+    /**
+     * The APK's JNI libraries: from `nativeLibraryDir` when the installer extracted them
+     * (`extractNativeLibs="true"`), else read straight out of the APK (and its splits), where the
+     * default packaging stores them uncompressed under `lib/<abi>/`.
+     */
+    private class ApkJniLibs(context: Context) : JniLibs {
+        private val info = context.applicationInfo
+
+        override fun open(name: String): InputStream? {
+            val extracted = info.nativeLibraryDir?.let { File(it, name) }
+            if (extracted != null && extracted.isFile && extracted.length() > 0) return extracted.inputStream()
+            val entryName = "lib/$JNI_ABI/$name"
+            val apks = listOfNotNull(info.sourceDir) + info.splitSourceDirs.orEmpty()
+            for (path in apks) {
+                val zip = runCatching { ZipFile(path) }.getOrNull() ?: continue
+                val entry = zip.getEntry(entryName)
+                if (entry == null) {
+                    zip.close()
+                    continue
+                }
+                // Closing the stream closes the archive with it.
+                return object : FilterInputStream(zip.getInputStream(entry)) {
+                    override fun close() {
+                        try {
+                            super.close()
+                        } finally {
+                            zip.close()
+                        }
+                    }
+                }
+            }
+            return null
+        }
+    }
 
     private fun readMarker(marker: File): Pair<String, List<Entry>>? = runCatching {
         if (!marker.isFile) return null

@@ -76,3 +76,31 @@ target_link_libraries(winlator
     ${jnigraphics-lib}
     ${android-lib}
 )
+
+# libvulkan.so.1 shim (vulkan/vulkan_shim.c): wraps Android's /system/lib64/libvulkan.so,
+# forwards the entry points Wine's win32u / winex11 dlsym directly and stubs
+# vkGetPhysicalDeviceXlibPresentationSupportKHR, which Android's loader doesn't export (without
+# it winevulkan asserts and DXVK gets no instance). Packaged in the APK as libvulkan_shim.so;
+# NativeLibResolver installs it as <filesDir>/x11/lib/libvulkan.so.1. Nothing JNI-loads it.
+add_library(vulkan_shim SHARED
+    vulkan/vulkan_shim.c
+)
+
+target_compile_options(vulkan_shim PRIVATE
+    -O2
+    -Wall
+    -Wextra
+    -fvisibility=hidden
+)
+
+# Only the vk* entry points (VK_SHIM_EXPORT) are visible. The SONAME is the name Wine asks for;
+# --no-undefined keeps a missing dl/log symbol from becoming a runtime failure.
+set_target_properties(vulkan_shim PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    LINK_FLAGS "-Wl,-soname,libvulkan.so.1 -Wl,--no-undefined -Wl,--exclude-libs,ALL"
+)
+
+target_link_libraries(vulkan_shim
+    ${dl-lib}
+    ${log-lib}
+)
