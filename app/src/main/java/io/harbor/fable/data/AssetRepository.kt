@@ -558,8 +558,9 @@ class AssetRepository internal constructor(
          *      VKD3D, Box64, FEXCore) added, and the Wine source there also lists the x86_64
          *      Proton package. Default sources already in the file are re-synced to their current
          *      definition (globs, names) from here on; user-added sources are left alone.
+         * - 6: Unsupported Proton packages removed from the default Wine source.
          */
-        internal const val DEFAULTS_VERSION = 5
+        internal const val DEFAULTS_VERSION = 6
 
         /** Former default sources that are removed from persisted catalogs on migration. */
         internal val retiredDefaultSlugs: List<String> = listOf("ptitSeb/box64", "Kron4ek/Wine-Builds")
@@ -582,18 +583,15 @@ class AssetRepository internal constructor(
             CatalogSource(
                 owner = "StevenMXZ",
                 repo = "Winlator-Contents",
-                displayName = "Wine / Proton (Winlator bionic)",
+                displayName = "Wine (Winlator bionic)",
                 type = AssetType.WINE,
                 // wine-9.20.wcp: xz tar, profile.json + bin/ + lib/wine/{x86_64,i386}-windows +
-                // x86_64-unix + prefixPack.txz. Proton.9.0-x86_64.wcp has the very same layout
-                // (profile.json type "Proton", wine.binPath/libPath/prefixPack), so it is a Wine
-                // build to Fable. proton-10-arm64ec.wcp.xz needs FEXCore / WOWBox64 DLLs an
-                // x86_64 Box64 setup can't use and stays out.
+                // x86_64-unix + prefixPack.txz. Proton packages are not supported, even when
+                // their archive layout resembles Wine, and must not be auto-downloaded.
                 assetGlobs = listOf(
                     "regex:^wine-[0-9][0-9.]*\\.wcp$",
-                    "regex:^proton[.-][0-9][0-9.]*-x86_64\\.wcp$",
                 ),
-                notes = "Bionic x86_64 Wine and Proton for Box64 (Winlator .wcp format)",
+                notes = "Bionic x86_64 Wine for Box64; Wine 9.20 is recommended (Winlator .wcp format)",
             ),
             // Upstream ptitSeb/box64 releases ship no Android or ARM64 binaries (only the
             // x86 library bundles), so Box64 comes from projects that publish Android NDK

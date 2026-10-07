@@ -35,15 +35,19 @@ internal object CatalogPolicy {
     private val StableAmd64 = Regex("""^wine-[0-9][0-9.]*-amd64\.tar\.(xz|gz)$""", RegexOption.IGNORE_CASE)
 
     /**
-     * Lower is better. The stable WoW64 build comes first: it is x86_64 like every other build
+     * Lower is better. Wine 9.20 is the supported default, before other bionic Wine builds.
+     * Among legacy tarballs the stable WoW64 build comes first: it is x86_64 like every other build
      * here, and it also runs 32-bit programs without a separate Box86. Staging and TkG builds
      * come last.
      */
     fun wineRank(name: String): Int = when {
-        StableWow64.matches(name) -> 0
-        StableAmd64.matches(name) -> 1
-        !name.contains("staging", ignoreCase = true) -> 2
-        else -> 3
+        name.startsWith("proton", ignoreCase = true) -> Int.MAX_VALUE
+        name.equals("wine-9.20.wcp", ignoreCase = true) -> 0
+        WineRuntime.isBionicWinePackageName(name) -> 1
+        StableWow64.matches(name) -> 2
+        StableAmd64.matches(name) -> 3
+        !name.contains("staging", ignoreCase = true) -> 4
+        else -> 5
     }
 
     /**

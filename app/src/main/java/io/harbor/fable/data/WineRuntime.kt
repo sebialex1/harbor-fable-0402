@@ -93,13 +93,14 @@ internal class WineRuntime(
      */
     fun wineArchives(): List<File> = assets.downloadedFiles(AssetType.WINE)
         .filter { isBionicWinePackageName(it.name) }
+        .sortedBy { CatalogPolicy.wineRank(it.name) }
 
     /** [wineArchives] as picker entries: id is the build name stored on the container. */
     fun wineBuilds(): List<WineBuild> = wineArchives().map { archive ->
         WineBuild(id = buildName(archive), label = displayName(archive), archive = archive)
     }
 
-    /** The downloaded package to use: [preferred] (e.g. `wine-9.20`) when present, else the newest. */
+    /** The downloaded package to use: [preferred] when present, else the recommended Wine 9.20. */
     fun pickWineArchive(preferred: String?): File? {
         val archives = wineArchives()
         val key = preferred?.trim()?.lowercase().orEmpty()
@@ -113,6 +114,7 @@ internal class WineRuntime(
     fun installedWine(containerDir: File): InstalledWine? {
         val marker = readTextOrNull(File(containerDir, WINE_MARKER)) ?: return null
         val build = runCatching { JSONObject(marker).optString("build") }.getOrNull()?.ifBlank { null } ?: return null
+        if (build.startsWith("proton", ignoreCase = true)) return null
         val binary = wineBinary(containerDir) ?: return null
         // A glibc tree left by an older Fable (Kron4ek builds) can never start: treat it as absent
         // so the container is re-provisioned from a bionic package.
@@ -586,12 +588,13 @@ internal class WineRuntime(
 
         /**
          * Winlator bionic Wine packages: `.wcp` (zstd tar) or `.wcp.xz`. ARM64EC builds are left
-         * out (they need FEXCore / WOWBox64 DLLs Fable doesn't install); glibc tarballs never match.
+         * out (they need FEXCore / WOWBox64 DLLs Fable doesn't install); glibc tarballs and
+         * unsupported Proton packages never match.
          */
         fun isBionicWinePackageName(name: String): Boolean {
             val lower = name.lowercase()
             if (!(lower.endsWith(".wcp") || lower.endsWith(".wcp.xz"))) return false
-            return !lower.contains("arm64ec")
+            return (lower.startsWith("wine-") || lower.startsWith("wine.")) && !lower.contains("arm64ec")
         }
 
         /** Headers, man pages and static import libraries are only needed to build Wine programs. */

@@ -269,7 +269,7 @@ class SetupManager internal constructor(
 
     private fun pickRecommended(entries: List<AssetEntry>, releases: List<RadvRelease>): Map<RecommendedKind, Pick> {
         val picks = LinkedHashMap<RecommendedKind, Pick>()
-        entries.filter { it.type == AssetType.WINE }
+        entries.filter { it.type == AssetType.WINE && WineRuntime.isBionicWinePackageName(it.name) }
             .minByOrNull { wineRank(it.name) }
             ?.let { picks[RecommendedKind.WINE] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
         entries.filter { it.type == AssetType.BOX64 }
