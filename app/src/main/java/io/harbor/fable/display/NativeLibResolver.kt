@@ -115,7 +115,26 @@ internal object NativeLibResolver {
         Spec("libXrandr.so", listOf("libXrandr.so", "libXrandr.so.2"), "X RandR (winex11)"),
         Spec("libXinerama.so", listOf("libXinerama.so", "libXinerama.so.1"), "Xinerama (winex11)"),
         Spec("libXcomposite.so", listOf("libXcomposite.so", "libXcomposite.so.1"), "X Composite (winex11)"),
-        Spec("libgnutls.so", listOf("libgnutls.so", "libgnutls.so.30"), "TLS (secur32, bcrypt)"),
+        // Bundled (Termux GnuTLS 3.8.13); Android has no GnuTLS to fall back to.
+        Spec(
+            target = "libgnutls.so",
+            candidates = listOf("libgnutls.so", "libgnutls.so.30"),
+            purpose = "TLS (secur32, bcrypt)",
+            aliases = listOf("libgnutls.so.30"),
+            systemFallback = false,
+        ),
+        // GnuTLS's DT_NEEDED closure, bundled alongside it (libz.so.1 is listed above; libandroid-support.so
+        // ships with the X11 libraries).
+        Spec("libnettle.so", listOf("libnettle.so", "libnettle.so.8"), "Nettle crypto (GnuTLS)", aliases = listOf("libnettle.so.8"), systemFallback = false),
+        Spec("libhogweed.so", listOf("libhogweed.so", "libhogweed.so.6"), "Nettle public-key crypto (GnuTLS)", aliases = listOf("libhogweed.so.6"), systemFallback = false),
+        Spec("libgmp.so", listOf("libgmp.so", "libgmp.so.10"), "GMP bignums (libhogweed)", systemFallback = false),
+        Spec("libtasn1.so", listOf("libtasn1.so", "libtasn1.so.6"), "ASN.1 (GnuTLS)", systemFallback = false),
+        Spec("libidn2.so", listOf("libidn2.so", "libidn2.so.0"), "IDN (GnuTLS)", systemFallback = false),
+        Spec("libunistring.so", listOf("libunistring.so", "libunistring.so.5"), "Unicode strings (GnuTLS, libidn2)", systemFallback = false),
+        Spec("libiconv.so", listOf("libiconv.so", "libiconv.so.2"), "iconv (libidn2, libunistring)", systemFallback = false),
+        Spec("libp11-kit.so", listOf("libp11-kit.so", "libp11-kit.so.0"), "PKCS#11 (GnuTLS)", systemFallback = false),
+        Spec("libffi.so", listOf("libffi.so", "libffi.so.8"), "libffi (p11-kit)", systemFallback = false),
+        Spec("libzstd.so", listOf("libzstd.so", "libzstd.so.1"), "Zstandard (GnuTLS)", aliases = listOf("libzstd.so.1"), systemFallback = false),
         Spec(
             target = "libSDL2.so",
             candidates = listOf("libSDL2.so", "libSDL2-2.0.so.0", "libSDL2-2.0.so"),

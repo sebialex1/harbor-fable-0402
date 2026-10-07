@@ -1,0 +1,17 @@
+GNU Libtasn1 4.21.0 (Termux package libtasn1_4.21.0_aarch64), shipped as libtasn1.so.
+Source: https://ftp.gnu.org/gnu/libtasn1/libtasn1-4.21.0.tar.gz
+
+Copyright (C) 2002-2026 Free Software Foundation, Inc.
+
+The LIBTASN1 library is free software; you can redistribute it
+and/or modify it under the terms of the GNU Lesser General Public
+License as published by the Free Software Foundation; either
+version 2.1 of the License, or (at your option) any later version.
+
+This library is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Lesser General Public License for more details.
+
+The full text of the GNU Lesser General Public License version 2.1 is in
+LGPL-2.1.txt in this directory.

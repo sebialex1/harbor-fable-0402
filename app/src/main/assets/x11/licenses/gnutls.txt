@@ -1,0 +1,20 @@
+GnuTLS 3.8.13 (Termux package libgnutls_3.8.13-1_aarch64), shipped as libgnutls.so / libgnutls.so.30.
+Source: https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz
+
+Copyright (C) Free Software Foundation, Inc., Red Hat, Inc., Nikos Mavrogiannopoulos
+and the other GnuTLS authors (see AUTHORS and the individual source files in the
+source distribution).
+
+The GnuTLS library is free software; you can redistribute it and/or
+modify it under the terms of the GNU Lesser General Public License
+as published by the Free Software Foundation; either version 2.1 of
+the License, or (at your option) any later version.
+
+This library is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Lesser General Public License for more details.
+
+The full text of the GNU Lesser General Public License version 2.1 is in
+LGPL-2.1.txt in this directory. The library is shipped unmodified as a
+separate shared object and may be replaced by the user.

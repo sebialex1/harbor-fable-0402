@@ -203,6 +203,28 @@ to load (status c0000135). Fontconfig needs FreeType (above) and expat.
 | libfontconfig.so, libfontconfig.so.1 | fontconfig 2.18.3 | MIT/X11-style (`fontconfig.txt`) |
 | libexpat.so.1, libexpat.so | libexpat 2.9.0 | MIT (`libexpat.txt`) |
 
+### GnuTLS and its dependencies (Termux builds)
+
+Wine's `secur32` / `bcrypt` load `libgnutls.so.30` through Box64; Android has no GnuTLS, so
+Fable bundles it with its full DT_NEEDED closure. The libraries are shipped unmodified as separate
+shared objects. The LGPL / GPL texts are in `assets/x11/licenses/` (`LGPL-2.1.txt`,
+`LGPL-3.0.txt`, `GPL-2.0.txt`, `GPL-3.0.txt`); the dual-licensed GNU libraries are used under
+the LGPL version 3 or later. The LGPL license files name the upstream source tarball of each
+library; the Termux build recipes are at https://github.com/termux/termux-packages.
+
+| Library (file names) | Termux package | License |
+|---|---|---|
+| libgnutls.so, libgnutls.so.30 | libgnutls 3.8.13-1 | LGPL-2.1-or-later (`gnutls.txt`) |
+| libnettle.so.8, libnettle.so, libhogweed.so.6, libhogweed.so | libnettle 4.0+really3.10.2 (nettle 3.10.2) | LGPL-3.0-or-later or GPL-2.0-or-later (`nettle.txt`) |
+| libgmp.so | libgmp 6.3.0-2 | LGPL-3.0-or-later or GPL-2.0-or-later (`libgmp.txt`) |
+| libtasn1.so | libtasn1 4.21.0 | LGPL-2.1-or-later (`libtasn1.txt`) |
+| libidn2.so | libidn2 2.3.8-1 | LGPL-3.0-or-later or GPL-2.0-or-later, Unicode data license (`libidn2.txt`) |
+| libunistring.so | libunistring 1.4.2 | LGPL-3.0-or-later or GPL-2.0-or-later (`libunistring.txt`) |
+| libiconv.so | libiconv 1.19 | LGPL-2.1-or-later (`libiconv.txt`) |
+| libp11-kit.so | p11-kit 0.26.5 | BSD-3-Clause (`p11-kit.txt`) |
+| libffi.so | libffi 3.8.0 | MIT (`libffi.txt`) |
+| libzstd.so.1, libzstd.so | zstd 1.5.7-1 | BSD-3-Clause or GPL-2.0; used under BSD (`zstd.txt`) |
+
 The full license texts ship in the APK under `assets/x11/licenses/`. At install time Fable
 patches one string in its copy of libxcb (the compiled-in socket directory
 `/data/data/com.termux/files/usr/tmp/.X11-unix/X` -> `<filesDir>/.X11-unix/X`); no other change.
