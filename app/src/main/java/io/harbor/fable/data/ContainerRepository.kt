@@ -396,7 +396,7 @@ class ContainerRepository internal constructor(
     }
 
     /**
-     * Starts the full Wine desktop (`wine explorer /desktop=Fable,<resolution>`) in the
+     * Starts the full Wine desktop (`wine explorer /desktop=shell,<resolution>`) in the
      * container, without any executable.
      */
     suspend fun launchDesktop(containerId: String): LaunchResult {
@@ -616,14 +616,16 @@ class ContainerRepository internal constructor(
         }
         val desktopSize = screen?.resolution ?: current.screenResolution
 
-        // 4. Resolve what to run: `wine explorer /desktop=shell,WxH [start /d <dir> <exe>]`,
+        // 4. Resolve what to run: `wine explorer /desktop=<name>,WxH [start /d <dir> <exe>]`,
         //    Winlator's guest command, so every app runs inside a virtual desktop the size of the
-        //    X screen. Desktop mode opens a file browser at C:\ so the user sees something
-        //    instead of a black screen.
+        //    X screen. Winlator names the desktop "nogui" when it launches a shortcut (its
+        //    explorer.exe skips the taskbar/start menu for that name, so the game owns the whole
+        //    screen) and "shell" for desktop mode, which opens a file browser at C:\ so the user
+        //    sees something instead of a black screen.
         val program = "explorer"
         val arguments: List<String>
         if (exe == null) {
-            arguments = listOf("/desktop=shell,$desktopSize", "/root,C:\\")
+            arguments = listOf("/desktop=$DESKTOP_SHELL,$desktopSize", "/root,C:\\")
         } else {
             val path = runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
                 ?: run {
@@ -634,7 +636,7 @@ class ContainerRepository internal constructor(
             log.line("program: $path (exists=${programFile.isFile}, size=${programFile.length()})")
             val windowsPath = toWindowsPath(path, dir)
             val windowsDir = windowsPath.substringBeforeLast('\\', missingDelimiterValue = "C:\\")
-            arguments = listOf("/desktop=shell,$desktopSize", "start", "/d", windowsDir, windowsPath)
+            arguments = listOf("/desktop=$DESKTOP_NOGUI,$desktopSize", "start", "/d", windowsDir, windowsPath)
         }
         val label = exe?.name ?: "${current.name} desktop"
 
@@ -1448,6 +1450,15 @@ class ContainerRepository internal constructor(
 
         /** Wine's DLL load-order variable; Fable's and the container's values are merged. */
         private const val DLL_OVERRIDES_ENV = "WINEDLLOVERRIDES"
+
+        /**
+         * Virtual desktop names passed to `wine explorer /desktop=<name>,WxH`, as Winlator's
+         * GuestProgramLauncherComponent uses them: [DESKTOP_NOGUI] when a single app is launched
+         * (Winlator's explorer.exe shows no taskbar or start menu for that name), [DESKTOP_SHELL]
+         * for desktop mode.
+         */
+        private const val DESKTOP_NOGUI = "nogui"
+        private const val DESKTOP_SHELL = "shell"
 
         /** The prefix's 64-bit system directory, where DXVK's DLLs go. */
         private const val SYSTEM32_DIR = "drive_c/windows/system32"

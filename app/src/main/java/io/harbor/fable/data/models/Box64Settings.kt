@@ -224,10 +224,10 @@ data class Box64Settings(
         get() = if (overrides.isEmpty()) preset.label else "${preset.label}, ${overrides.size} change${if (overrides.size == 1) "" else "s"}"
 
     /**
-     * `KEY=VALUE` pairs for the Wine process: the base variables every Fable launch needs, then
-     * [values]. [rcFile] is the `box64rc` shipped with the Box64 package, used when [useRcFile]
-     * is on. With logging on, the banner and missing-opcode reports are printed too (Winlator's
-     * "enable Box64 logs").
+     * `KEY=VALUE` pairs for the Wine process: the base variables every Fable launch needs
+     * (banner, GLX, no dynarec cache, rc file handling), then [values]. [rcFile] is the `box64rc`
+     * shipped with the Box64 package, used when [useRcFile] is on. With logging on, the banner
+     * and missing-opcode reports are printed too (Winlator's "enable Box64 logs").
      */
     fun environment(rcFile: String? = null): List<String> = buildList {
         val logging = value(Box64Options.LOG).let { it.isNotEmpty() && it != "0" }
@@ -235,6 +235,10 @@ data class Box64Settings(
         if (logging) add("BOX64_DYNAREC_MISSING=1")
         // Box64's wrapped libX11 advertises GLX.
         add("BOX64_X11GLX=1")
+        // Winlator's GuestProgramLauncherComponent sets this before every launch: no on-disk
+        // dynarec cache. Box64 would otherwise write cache files into the container (or fail
+        // trying, on Android's app-private storage), and a stale cache can hide a preset change.
+        add("BOX64_DYNACACHE=0")
         if (useRcFile) {
             rcFile?.let { add("BOX64_RCFILE=$it") }
         } else {
