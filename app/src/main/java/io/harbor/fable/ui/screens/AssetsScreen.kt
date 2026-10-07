@@ -185,7 +185,6 @@ internal fun AssetsContent(
                             expanded = expanded,
                             onToggle = { expansion.toggle(typeKey, default = true) },
                             modifier = Modifier.animateItem().entrance(appear, typeIndex + 1),
-                            leading = { MonogramTile(text = typeMonogram(type), tone = typeTone(type)) },
                             badge = { Pill(text = "${versions.count { v -> v.variants.any { it.asset.isDownloaded } }}/${versions.size}") },
                         ) {
                             versions.forEachIndexed { index, group ->
@@ -304,7 +303,6 @@ internal fun SetupBanner(
             subtitle = detail,
             subtitleMaxLines = 2,
             showChevron = false,
-            leading = { ToneIconTile(icon = FableIcons.Download, tone = TileTone.Blue) },
             trailing = {
                 AnimatedContent(
                     targetState = busy,
@@ -324,29 +322,6 @@ internal fun SetupBanner(
             },
         )
     }
-}
-
-/** Two-letter mark for an asset kind's section tile. */
-private fun typeMonogram(type: AssetType): String = when (type) {
-    AssetType.WINE -> "Wi"
-    AssetType.BOX64 -> "64"
-    AssetType.FEX -> "Fx"
-    AssetType.DXVK -> "DX"
-    AssetType.VKD3D -> "12"
-    AssetType.VULKAN_DRIVER -> "Vk"
-    AssetType.PROTON -> "Pr"
-    AssetType.RUNTIME -> "Rt"
-    AssetType.OTHER -> "··"
-}
-
-/** Each asset kind's tone: Wine and Proton share one, the D3D layers sit in blues. */
-private fun typeTone(type: AssetType): TileTone = when (type) {
-    AssetType.WINE, AssetType.PROTON -> TileTone.Violet
-    AssetType.BOX64, AssetType.FEX -> TileTone.Amber
-    AssetType.DXVK -> TileTone.Blue
-    AssetType.VKD3D -> TileTone.Indigo
-    AssetType.VULKAN_DRIVER -> TileTone.Teal
-    AssetType.RUNTIME, AssetType.OTHER -> TileTone.Graphite
 }
 
 /** Prefix for a version row ("Wine 11.19", "DXVK 2.7"). */

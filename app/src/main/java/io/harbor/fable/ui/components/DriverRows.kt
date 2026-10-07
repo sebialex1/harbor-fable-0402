@@ -176,8 +176,6 @@ fun DriverSummaryRow(
             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ToneIconTile(icon = icon, tone = tone, size = 38.dp, dimmed = iconTint != FableText)
-        Spacer(Modifier.width(Spacing.md))
         Column(Modifier.weight(1f)) {
             Text(
                 text = title,

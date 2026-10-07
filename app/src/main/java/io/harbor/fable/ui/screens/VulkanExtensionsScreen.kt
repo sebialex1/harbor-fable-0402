@@ -304,8 +304,7 @@ private fun VulkanSummaryCard(
                             .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        ToneIconTile(icon = FableIcons.GpuInfo, tone = TileTone.Blue, size = 44.dp)
-                        Column(Modifier.weight(1f).padding(horizontal = Spacing.md)) {
+                        Column(Modifier.weight(1f).padding(end = Spacing.md)) {
                             Text(
                                 text = device?.name ?: "No physical device",
                                 style = MaterialTheme.typography.titleMedium,

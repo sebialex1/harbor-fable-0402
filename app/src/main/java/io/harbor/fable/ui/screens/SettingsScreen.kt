@@ -215,8 +215,6 @@ private fun DeviceHeroCard(deviceInfo: DeviceGpuInfo, modifier: Modifier = Modif
                 .padding(horizontal = RowPaddingHorizontal, vertical = Spacing.lg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ToneIconTile(icon = FableIcons.GpuInfo, tone = TileTone.Indigo, size = 48.dp)
-            Spacer(Modifier.width(Spacing.md))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
                 Text(
                     text = deviceInfo.gpu.takeIf { it.isNotBlank() && !it.equals("unknown", ignoreCase = true) } ?: "Unknown GPU",

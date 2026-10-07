@@ -196,10 +196,9 @@ internal fun DriversContent(
                 onUninstall = onUninstall,
                 modifier = Modifier.animateItem().entrance(appear, 0),
                 footer = {
-                    CardDivider(afterIcon = true)
+                    CardDivider()
                     ListRow(
                         title = "Vulkan Extensions",
-                        leading = { ToneIconTile(icon = FableIcons.Extension, tone = TileTone.Blue) },
                         trailing = {
                             Text(
                                 text = deviceInfo.gpu.takeIf { it.isNotBlank() && !it.equals("unknown", ignoreCase = true) } ?: "System",
@@ -331,8 +330,7 @@ internal fun ActiveDriverCard(
                             .padding(horizontal = RowPaddingHorizontal, vertical = RowPaddingVertical),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        ToneIconTile(icon = FableIcons.Drivers, tone = TileTone.Teal, size = 38.dp)
-                        Column(Modifier.weight(1f).padding(start = Spacing.md)) {
+                        Column(Modifier.weight(1f)) {
                             Text("Installing ${installing ?: lastInstalling[0].orEmpty()}", style = MaterialTheme.typography.titleSmall)
                             Text(
                                 text = if (installed != null) "Replacing ${installed.tag}" else "Extracting the package",
