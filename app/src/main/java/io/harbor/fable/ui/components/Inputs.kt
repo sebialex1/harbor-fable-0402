@@ -148,6 +148,9 @@ fun <T> OptionSelector(
     var expanded by rememberSaveable { mutableStateOf(false) }
     val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, Motion.inPlace(), label = "selectorChevron")
     val selectedLabel = options.firstOrNull { it.value == selected }?.label ?: selected?.toString() ?: "None"
+    // While the list is open the checked row already says what is selected, so the value on the
+    // header fades out instead of repeating it.
+    val valueAlpha by animateFloatAsState(if (expanded) 0f else 1f, Motion.inPlace(Motion.Fast), label = "selectorValue")
 
     Column(modifier.fillMaxWidth()) {
         Row(
@@ -171,7 +174,9 @@ fun <T> OptionSelector(
                 textAlign = TextAlign.End,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .graphicsLayer { alpha = valueAlpha },
             )
             Spacer(Modifier.width(Spacing.xs))
             Icon(

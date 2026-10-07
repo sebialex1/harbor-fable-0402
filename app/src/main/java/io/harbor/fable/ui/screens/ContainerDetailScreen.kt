@@ -1,6 +1,41 @@
 package io.harbor.fable.ui.screens
 
 import androidx.compose.animation.core.animateDpAsState
+import android.graphics.Bitmap
+import android.os.Build
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import io.harbor.fable.ui.theme.FableBlue
+import io.harbor.fable.ui.theme.PillRadius
+import io.harbor.fable.ui.theme.PlayGradientBottom
+import io.harbor.fable.ui.theme.PlayGradientTop
+import io.harbor.fable.ui.theme.TileTone
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -276,9 +311,16 @@ internal fun ContainerDetailContent(
                         FableCard(Modifier.animateItem().entrance(appear, 1)) {
                             apps.forEachIndexed { index, exe ->
                                 if (index > 0) CardDivider(afterIcon = true)
+                                val isPrimary = container.exePath == exe.path
                                 ListRow(
                                     title = exe.name,
-                                    subtitle = if (container.exePath == exe.path) "Primary" else null,
+                                    // The launch card above already names the primary app; here a
+                                    // blue dot marks it instead of repeating the word on the row.
+                                    titleBadge = if (isPrimary) {
+                                        { PrimaryDot() }
+                                    } else {
+                                        null
+                                    },
                                     leading = { ExeIcon(name = exe.name, iconPath = exe.icon) },
                                     showChevron = false,
                                     // No per-row play button: tapping a row makes it the primary
@@ -436,6 +478,20 @@ internal fun ContainerDetailContent(
     }
 }
 
+/** Marks the primary app in the Apps list: a small blue dot with a soft glow. */
+@Composable
+private fun PrimaryDot() {
+    Box(
+        Modifier
+            .size(14.dp)
+            .semantics { contentDescription = "Primary app" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(14.dp).clip(CircleShape).background(FableBlue.copy(alpha = 0.18f)))
+        Box(Modifier.size(6.dp).clip(CircleShape).background(FableBlue))
+    }
+}
+
 /** The container screen's tabs, in order: idle glyph, and its filled weight for the active tab. */
 private enum class ContainerTab(val label: String, val icon: ImageVector, val activeIcon: ImageVector) {
     Apps("Apps", FableIcons.Apps, FableIcons.AppsFill),
@@ -496,8 +552,11 @@ private fun ContainerTabRow(selected: ContainerTab, onSelect: (ContainerTab) -> 
 
 /**
  * What the Apps tab launches: the primary app (name, icon and the container's graphics summary)
- * with a filled play button, and the Wine desktop as a second row. Without a primary app the
+ * with a glass play button, and the Wine desktop as a second row. Without a primary app the
  * first row explains how to get one and the desktop row carries the play button instead.
+ *
+ * On Android 12+ the primary row sits on a faint, heavily blurred wash of the app's own icon, so
+ * the card takes on the game's colours and the hollow play button blends straight into it.
  */
 @Composable
 private fun LaunchCard(
@@ -508,23 +567,44 @@ private fun LaunchCard(
     onLaunchDesktop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val primaryBitmap = rememberExeBitmap(primaryIconPath)
     FableCard(modifier) {
         if (primaryName != null) {
-            ListRow(
-                title = primaryName,
-                subtitle = subtitle,
-                leading = { ExeIcon(name = primaryName, iconPath = primaryIconPath, size = LaunchIconSize) },
-                showChevron = false,
-                onClick = onLaunchPrimary,
-                trailing = { PlayButton(contentDescription = "Launch $primaryName", onClick = onLaunchPrimary) },
-            )
+            Box(Modifier.fillMaxWidth()) {
+                if (primaryBitmap != null && BlurSupported) {
+                    Image(
+                        bitmap = primaryBitmap.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .matchParentSize()
+                            .graphicsLayer { alpha = 0.22f }
+                            .blur(40.dp),
+                    )
+                }
+                ListRow(
+                    title = primaryName,
+                    subtitle = subtitle,
+                    leading = { ExeIcon(name = primaryName, iconPath = primaryIconPath, size = LaunchIconSize) },
+                    showChevron = false,
+                    onClick = onLaunchPrimary,
+                    trailing = {
+                        GlassPlayButton(
+                            contentDescription = "Launch $primaryName",
+                            filler = primaryBitmap,
+                            tone = TileTone.Blue,
+                            onClick = onLaunchPrimary,
+                        )
+                    },
+                )
+            }
         } else {
             ListRow(
-                title = "No app selected",
-                subtitle = "Add an .exe with +, or tap an app below to make it the primary",
+                title = "Choose an app",
+                subtitle = "Add an .exe with +, or tap one below",
                 subtitleMaxLines = 2,
                 titleColor = FableTextDim,
-                leading = { IconTile(icon = FableIcons.Apps, tint = FableTextFaint, size = LaunchIconSize) },
+                leading = { ToneIconTile(icon = FableIcons.Apps, tone = TileTone.Graphite, size = LaunchIconSize, dimmed = true) },
                 showChevron = false,
             )
         }
@@ -532,14 +612,21 @@ private fun LaunchCard(
         CardDivider(afterIcon = true, modifier = Modifier.padding(start = LaunchIconSize - RowIconSize))
         val desktopPlay: (@Composable RowScope.() -> Unit)? =
             if (primaryName == null) {
-                { PlayButton(contentDescription = "Launch desktop", onClick = onLaunchDesktop) }
+                {
+                    GlassPlayButton(
+                        contentDescription = "Launch desktop",
+                        filler = null,
+                        tone = TileTone.Indigo,
+                        onClick = onLaunchDesktop,
+                    )
+                }
             } else {
                 null
             }
         ListRow(
             title = "Wine Desktop",
-            subtitle = "Explorer, file manager and the Windows shell",
-            leading = { IconTile(icon = FableIcons.Desktop, size = LaunchIconSize) },
+            subtitle = "Explorer and the Windows shell",
+            leading = { ToneIconTile(icon = FableIcons.Desktop, tone = TileTone.Indigo, size = LaunchIconSize) },
             showChevron = primaryName != null,
             onClick = onLaunchDesktop,
             trailing = desktopPlay,
@@ -547,23 +634,74 @@ private fun LaunchCard(
     }
 }
 
-/** The one filled control on the Apps tab: a white disc with a black play glyph. */
+/**
+ * The play control: hollow glass instead of a solid white disc. Behind a white sheen and a
+ * light-catching rim sits [filler] — the app's own icon, enlarged and blurred into a soft field
+ * of its colours (Android 12+; older versions show it faded instead) — or, with no icon, the
+ * [tone] gradient. So the button looks cut from the same material as the tile it sits on.
+ */
 @Composable
-private fun PlayButton(contentDescription: String, onClick: () -> Unit) {
-    FableIconButton(
-        icon = FableIcons.Play,
-        contentDescription = contentDescription,
-        tint = FableOnAccent,
-        containerColor = FableAccent,
-        size = PlayButtonSize,
-        onClick = onClick,
-    )
+private fun GlassPlayButton(
+    contentDescription: String,
+    filler: Bitmap?,
+    tone: TileTone,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.9f else 1f, Motion.press(), label = "playPress")
+    Box(
+        Modifier
+            .size(PlayButtonSize)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (filler != null) {
+            Image(
+                bitmap = filler.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        scaleX = 1.8f
+                        scaleY = 1.8f
+                        alpha = if (BlurSupported) 0.95f else 0.4f
+                    }
+                    .blur(10.dp),
+            )
+        } else {
+            Box(Modifier.matchParentSize().background(Brush.linearGradient(listOf(tone.start, tone.end))))
+        }
+        // Hollow glass: a white sheen falling off towards the bottom, a slight darkening so the
+        // glyph reads on bright icons, and a rim brighter at the top.
+        Box(
+            Modifier
+                .matchParentSize()
+                .background(Color(0x2E000000))
+                .background(Brush.verticalGradient(listOf(PlayGradientTop, PlayGradientBottom)))
+                .border(1.dp, Brush.verticalGradient(listOf(Color(0x8CFFFFFF), Color(0x14FFFFFF))), CircleShape),
+        )
+        Icon(
+            imageVector = FableIcons.Play,
+            contentDescription = null,
+            tint = FableText,
+            // Optical centring: a play triangle looks left-heavy when centred by its bounds.
+            modifier = Modifier.size(PlayButtonSize * 0.42f).offset(x = 1.dp),
+        )
+    }
 }
 
 /**
- * The built-in tools as a 2×2 grid of equal cards, so they stay out of the apps' way: tap one to
- * launch it. Each card is an icon tile, the short name and what the tool checks. A tool this
- * build doesn't bundle is dimmed and says so; launching it explains.
+ * The built-in tools as a compact 2×2 cluster: four gradient tiles whose outer corners are round
+ * and inner corners tight, so the grid reads as one shaped block. Each tool has its own tone and
+ * a mini-graphic instead of a repeated generic glyph — the Direct3D version as an oversized
+ * numeral, GPU Info as a little bar graph. Tap one to launch it. A tool this build doesn't bundle
+ * is dimmed and says so. Under the grid, a note explains that the X server can't present
+ * Direct3D 12.
  */
 @Composable
 private fun ToolTiles(
@@ -572,22 +710,45 @@ private fun ToolTiles(
     onLaunch: (ExeEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        tools.chunked(TOOL_COLUMNS).forEach { rowTools ->
+    val rows = tools.chunked(TOOL_COLUMNS)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(ToolGap)) {
+        rows.forEachIndexed { rowIndex, rowTools ->
             Row(
-                Modifier.fillMaxWidth().height(IntrinsicSize.Max),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(ToolGap),
             ) {
-                rowTools.forEach { exe ->
+                rowTools.forEachIndexed { colIndex, exe ->
                     ToolTile(
                         exe = exe,
                         available = exe.id !in unavailable,
+                        shape = clusterShape(rowIndex, colIndex, rows.size, TOOL_COLUMNS),
                         onClick = { onLaunch(exe) },
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        modifier = Modifier.weight(1f),
                     )
                 }
                 // Keep a lone tile on the last row at half width, aligned with the grid.
                 repeat(TOOL_COLUMNS - rowTools.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        if (tools.any { it.toolId == ContainerTools.D3D12_TEST.id }) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = Spacing.xs, start = Spacing.xs, end = Spacing.xs),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(
+                    imageVector = FableIcons.Warning,
+                    contentDescription = null,
+                    tint = TileTone.Violet.glyph,
+                    modifier = Modifier.size(14.dp).padding(top = 1.dp),
+                )
+                Text(
+                    text = "XServer doesn't support DX12. The Direct3D 12 test may start but not present frames.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = FableTextDim,
+                )
             }
         }
     }
@@ -597,30 +758,72 @@ private fun ToolTiles(
 private fun ToolTile(
     exe: ExeEntry,
     available: Boolean,
+    shape: Shape,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val titleTint = if (available) FableText else FableTextFaint
-    val caption = if (available) toolCaption(exe) else "Not bundled in this build"
-    FableCard(modifier, onClick = onClick) {
+    val look = toolLook(exe.toolId)
+    val tone = look.tone
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.96f else 1f, Motion.press(), label = "toolPress")
+    val caption = when {
+        !available -> "Not bundled"
+        else -> toolCaption(exe)
+    }
+    Box(
+        modifier
+            .height(ToolTileHeight)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                alpha = if (available) 1f else 0.55f
+            }
+            .gradientTile(shape = shape, start = tone.start, end = tone.end)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick),
+    ) {
+        ToolGraphic(look = look, modifier = Modifier.align(Alignment.BottomEnd))
+        if (exe.toolId == ContainerTools.D3D12_TEST.id) {
+            Text(
+                text = "No DX12",
+                style = MaterialTheme.typography.labelSmall,
+                color = tone.glyph,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(Spacing.sm)
+                    .clip(RoundedCornerShape(PillRadius))
+                    .background(Color(0x33000000))
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
+            )
+        }
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            Modifier
+                .fillMaxSize()
+                .padding(Spacing.md),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            IconTile(icon = toolIcon(exe.toolId), tint = titleTint, size = ToolIconSize)
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0x26FFFFFF)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(look.icon, contentDescription = null, tint = tone.glyph, modifier = Modifier.size(15.dp))
+            }
+            Column {
                 Text(
                     text = toolLabel(exe),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = titleTint,
+                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp),
+                    color = FableText,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = caption,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (available) FableTextDim else FableTextFaint,
-                    maxLines = 2,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tone.glyph.copy(alpha = 0.8f),
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -628,11 +831,85 @@ private fun ToolTile(
     }
 }
 
+/** A tool's identity: its tone, its small glyph and its background mini-graphic. */
+private class ToolLook(val tone: TileTone, val icon: ImageVector, val numeral: String?)
+
+private fun toolLook(toolId: String?): ToolLook = when (toolId) {
+    ContainerTools.GPU_INFO.id -> ToolLook(TileTone.Teal, FableIcons.GpuInfo, numeral = null)
+    ContainerTools.D3D9_TEST.id -> ToolLook(TileTone.Amber, FableIcons.Test3d, numeral = "9")
+    ContainerTools.D3D11_TEST.id -> ToolLook(TileTone.Blue, FableIcons.Test3d, numeral = "11")
+    ContainerTools.D3D12_TEST.id -> ToolLook(TileTone.Violet, FableIcons.Test3d, numeral = "12")
+    else -> ToolLook(TileTone.Graphite, FableIcons.Test3d, numeral = null)
+}
+
+/**
+ * The tile's background graphic, bleeding off its bottom-end corner: an oversized numeral for
+ * the Direct3D tests, a small bar graph for GPU Info.
+ */
+@Composable
+private fun ToolGraphic(look: ToolLook, modifier: Modifier = Modifier) {
+    if (look.numeral != null) {
+        Text(
+            text = look.numeral,
+            style = MaterialTheme.typography.displaySmall.copy(
+                fontSize = 64.sp,
+                lineHeight = 64.sp,
+                letterSpacing = (-3).sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
+            color = look.tone.glyph.copy(alpha = 0.16f),
+            maxLines = 1,
+            modifier = modifier.offset(x = 4.dp, y = 14.dp).padding(end = Spacing.sm),
+        )
+    } else {
+        val bar = look.tone.glyph.copy(alpha = 0.22f)
+        Canvas(modifier.padding(end = Spacing.md, bottom = Spacing.md).size(width = 44.dp, height = 30.dp)) {
+            val heights = floatArrayOf(0.45f, 0.8f, 0.55f, 1f, 0.7f)
+            val gap = 3.dp.toPx()
+            val w = (size.width - gap * (heights.size - 1)) / heights.size
+            heights.forEachIndexed { i, h ->
+                val barHeight = size.height * h
+                drawRoundRect(
+                    color = bar,
+                    topLeft = Offset(i * (w + gap), size.height - barHeight),
+                    size = Size(w, barHeight),
+                    cornerRadius = CornerRadius(w / 2f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Corners for a tile in an [rows]×[cols] cluster: round on the cluster's outside corners,
+ * tight where tiles meet, so the grid reads as one rounded block cut into pieces.
+ */
+private fun clusterShape(row: Int, col: Int, rows: Int, cols: Int): Shape {
+    val outer = ToolOuterRadius
+    val inner = ToolInnerRadius
+    val top = row == 0
+    val bottom = row == rows - 1
+    val start = col == 0
+    val end = col == cols - 1
+    return RoundedCornerShape(
+        topStart = if (top && start) outer else inner,
+        topEnd = if (top && end) outer else inner,
+        bottomEnd = if (bottom && end) outer else inner,
+        bottomStart = if (bottom && start) outer else inner,
+    )
+}
+
+/** Real blur (RenderEffect) is only available from Android 12. */
+private val BlurSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
 /** Tool grid geometry and the launch card's tile sizes, one step up from a list row's. */
 private const val TOOL_COLUMNS = 2
 private val LaunchIconSize = 44.dp
 private val PlayButtonSize = 40.dp
-private val ToolIconSize = 40.dp
+private val ToolTileHeight = 88.dp
+private val ToolGap = 6.dp
+private val ToolOuterRadius = 20.dp
+private val ToolInnerRadius = 8.dp
 
 /** Settings-tab group keys for [ExpansionState]. */
 private const val GRAPHICS_KEY = "graphics"
@@ -754,12 +1031,6 @@ private fun dxvkOptions(builds: List<ComponentBuild>): List<SelectOption<String?
     add(SelectOption(ContainerDefaults.DXVK_OFF, "Off", "WineD3D: needs OpenGL, most games won't render"))
 }
 
-/** Glyph for a built-in tool's tile. */
-private fun toolIcon(toolId: String?): ImageVector = when (toolId) {
-    ContainerTools.GPU_INFO.id -> FableIcons.GpuInfo
-    else -> FableIcons.Test3d
-}
-
 /** Title for a built-in tool's tile, short enough for two tiles in a row. */
 private fun toolLabel(exe: ExeEntry): String = when (exe.toolId) {
     ContainerTools.D3D9_TEST.id -> "Direct3D 9"
@@ -770,9 +1041,9 @@ private fun toolLabel(exe: ExeEntry): String = when (exe.toolId) {
 
 /** One line under the title: what the tool renders through, from [ContainerTools]. */
 private fun toolCaption(exe: ExeEntry): String = when (exe.toolId) {
-    ContainerTools.GPU_INFO.id -> "Vulkan and Direct3D report"
-    ContainerTools.D3D9_TEST.id -> "Test render via DXVK d3d9"
-    ContainerTools.D3D11_TEST.id -> "Test render via DXVK d3d11"
-    ContainerTools.D3D12_TEST.id -> "Test render via VKD3D-Proton"
+    ContainerTools.GPU_INFO.id -> "Vulkan report"
+    ContainerTools.D3D9_TEST.id -> "via DXVK"
+    ContainerTools.D3D11_TEST.id -> "via DXVK"
+    ContainerTools.D3D12_TEST.id -> "via VKD3D-Proton"
     else -> "Built-in tool"
 }

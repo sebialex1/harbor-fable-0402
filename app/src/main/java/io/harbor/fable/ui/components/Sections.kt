@@ -33,6 +33,7 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.Role
@@ -132,6 +133,8 @@ fun CollapsibleSection(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val chevronRotation by animateFloatAsState(if (expanded) 180f else 0f, Motion.inPlace(), label = "sectionChevron")
+    // The badge summarises the group while it is closed; open, the rows say the same thing.
+    val badgeAlpha by animateFloatAsState(if (expanded) 0f else 1f, Motion.inPlace(Motion.Fast), label = "sectionBadge")
     FableCard(modifier.fillMaxWidth()) {
         Row(
             Modifier
@@ -149,7 +152,9 @@ fun CollapsibleSection(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            badge?.invoke()
+            if (badge != null) {
+                Box(Modifier.graphicsLayer { alpha = badgeAlpha }) { badge() }
+            }
             Spacer(Modifier.width(Spacing.sm))
             Icon(
                 imageVector = FableIcons.ExpandMore,

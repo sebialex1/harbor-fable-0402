@@ -112,3 +112,16 @@ internal fun initialsOf(name: String): String {
     }
     return letters.uppercase().ifEmpty { "?" }
 }
+
+/**
+ * The stored icon of a program, decoded off the main thread; null while loading or when it has
+ * none. Used where the icon is a material rather than a tile (the play button's blurred filler).
+ */
+@Composable
+fun rememberExeBitmap(iconPath: String?): Bitmap? {
+    val loaded by produceState<Bitmap?>(initialValue = null, iconPath) {
+        value = iconPath?.let { ExeIcons.load(it) }
+    }
+    return loaded
+}
+

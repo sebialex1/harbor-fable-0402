@@ -1,27 +1,11 @@
 package io.harbor.fable.ui.components
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import io.harbor.fable.data.DownloadStatus
 import io.harbor.fable.data.DownloadTask
 import io.harbor.fable.data.formatBytes
-import io.harbor.fable.ui.theme.FableAccent
-import io.harbor.fable.ui.theme.FableSuccess
-import io.harbor.fable.ui.theme.Motion
-import io.harbor.fable.ui.theme.RowPaddingHorizontal
-import io.harbor.fable.ui.theme.Spacing
-import io.harbor.fable.ui.icons.FableIcons
 
 private enum class DownloadUi { AVAILABLE, QUEUED, DOWNLOADING, VERIFYING, DONE }
 
@@ -34,9 +18,10 @@ internal fun displayAssetName(fileName: String): String {
 }
 
 /**
- * A catalog row with a live download state. The trailing control animates between the
- * download button, the progress and a quiet "Downloaded" as the [task] moves along, and a thin
- * progress line runs along the bottom edge while bytes are coming in.
+ * A catalog row with a live download state. The trailing control is a [MorphPill]: a round
+ * download button that, once tapped, stretches into a pill and fills with the progress itself
+ * (percentage inside), breathes while verifying, then settles into a check and "Downloaded".
+ * The progress extends out of the button; there is no separate bar under the row.
  */
 @Composable
 fun DownloadRow(
@@ -72,55 +57,40 @@ fun DownloadRow(
         note,
     ).joinToString(" · ")
     val percent = ((task?.progressFraction ?: 0f) * 100).toInt()
-    val active = ui == DownloadUi.QUEUED || ui == DownloadUi.DOWNLOADING || ui == DownloadUi.VERIFYING
     val progress: Float? = when {
         ui == DownloadUi.DOWNLOADING && (task?.totalBytes ?: 0L) > 0 -> task?.progressFraction
-        ui == DownloadUi.VERIFYING -> 1f
         else -> null
     }
-
-    // The progress strip participates in measurement rather than overlaying the row's bottom
-    // edge; build/version chips below the row can never occupy the same space.
-    Column(modifier) {
-        ListRow(
-            title = displayAssetName(title),
-            subtitle = subtitle,
-            onClick = onClick,
-            titleBadge = titleBadge,
-            showChevron = false,
-            trailing = {
-                AnimatedContent(
-                    targetState = ui,
-                    transitionSpec = {
-                        (fadeIn(Motion.enter(Motion.Quick)) + scaleIn(Motion.pop(), initialScale = 0.8f)) togetherWith
-                            fadeOut(Motion.exit(Motion.Fast))
-                    },
-                    label = "downloadState",
-                ) { current ->
-                    when (current) {
-                        DownloadUi.AVAILABLE -> FableIconButton(
-                            icon = FableIcons.Download,
-                            contentDescription = "Download $title",
-                            size = 32.dp,
-                            onClick = onDownload,
-                        )
-                        DownloadUi.QUEUED -> StateText("Queued")
-                        DownloadUi.DOWNLOADING -> StateText("$percent%")
-                        DownloadUi.VERIFYING -> StateText("Verifying")
-                        DownloadUi.DONE -> StateText("Downloaded")
-                    }
-                }
-            },
-        )
-        AnimatedVisibility(
-            visible = active,
-            enter = fadeIn(Motion.enter(Motion.Quick)),
-            exit = fadeOut(Motion.exit(Motion.Standard)),
-            modifier = Modifier
-                .padding(horizontal = RowPaddingHorizontal)
-                .padding(top = Spacing.xs, bottom = Spacing.sm),
-        ) {
-            ThinProgressBar(progress = progress)
-        }
+    val phase = when (ui) {
+        DownloadUi.AVAILABLE -> MorphPhase.Idle
+        DownloadUi.QUEUED -> MorphPhase.Waiting
+        DownloadUi.DOWNLOADING -> MorphPhase.Active
+        DownloadUi.VERIFYING -> MorphPhase.Verifying
+        DownloadUi.DONE -> MorphPhase.Done
     }
+    val label = when (ui) {
+        DownloadUi.AVAILABLE -> ""
+        DownloadUi.QUEUED -> "Queued"
+        DownloadUi.DOWNLOADING -> if (progress != null) "$percent%" else "Starting"
+        DownloadUi.VERIFYING -> "Verifying"
+        DownloadUi.DONE -> "Downloaded"
+    }
+
+    ListRow(
+        title = displayAssetName(title),
+        subtitle = subtitle,
+        onClick = onClick,
+        titleBadge = titleBadge,
+        showChevron = false,
+        modifier = modifier,
+        trailing = {
+            MorphPill(
+                phase = phase,
+                progress = progress,
+                label = label,
+                contentDescription = if (phase == MorphPhase.Idle) "Download $title" else "$title: $label",
+                onClick = onDownload,
+            )
+        },
+    )
 }
