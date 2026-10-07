@@ -323,6 +323,15 @@ object FableIcons {
             ),
         )
     }
+
+    val Trash: ImageVector by lazy {
+        phosphor(
+            "Trash",
+            listOf(
+                "M216,48H168V40a16,16,0,0,0-16-16H104A16,16,0,0,0,88,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM104,40h48v8H104Zm88,168H64V64H192ZM112,104v64a8,8,0,0,0,16,0V104a8,8,0,0,0-16,0Zm48,0v64a8,8,0,0,0,16,0V104a8,8,0,0,0-16,0Z",
+            ),
+        )
+    }
 }
 
 /** A 24 dp icon on Phosphor's 256-unit grid, filled with black so `Icon`'s tint recolours it. */

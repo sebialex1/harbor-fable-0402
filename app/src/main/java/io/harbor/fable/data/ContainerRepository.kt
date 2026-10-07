@@ -531,7 +531,7 @@ class ContainerRepository internal constructor(
         log.section("Direct3D (DXVK / VKD3D-Proton)")
         val direct3d = installDxWrappers(runtime, configured, dir, log)
         direct3d.describe().forEach { log.line(it) }
-        checkDxvk(direct3d, configured, exe, dir, log)
+        checkDxvk(direct3d, configured, exe, dir, log)?.let { return it }
         val dxvkInstalled = direct3d.installed[DxWrappers.Kind.DXVK] != null
         val dxvkConf = if (dxvkInstalled) DxWrappers.ensureDxvkConf(dir) else null
         dxvkConf?.let { log.line("dxvk.conf: ${it.absolutePath}") }
@@ -598,7 +598,7 @@ class ContainerRepository internal constructor(
                 }
             val programFile = File(path)
             log.line("program: $path (exists=${programFile.isFile}, size=${programFile.length()})")
-            val windowsPath = toWindowsPath(path)
+            val windowsPath = toWindowsPath(path, dir)
             val windowsDir = windowsPath.substringBeforeLast('\\', missingDelimiterValue = "C:\\")
             arguments = listOf("/desktop=shell,$desktopSize", "start", "/d", windowsDir, windowsPath)
         }
@@ -649,6 +649,20 @@ class ContainerRepository internal constructor(
             add("WINEDEBUG=$DIAGNOSTIC_WINEDEBUG")
             // Box64 reports native dlopen()/dlsym() failures instead of failing silently.
             add("BOX64_DLSYM_ERROR=1")
+            // Winlator sets these in setupXEnvironment before every launch. They are safe
+            // defaults that improve compatibility; the container's own env vars (below) can
+            // override any of them.
+            // - WINEESYNC=1: enables eventfd-based synchronization (faster than server-side).
+            // - WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER=1: stops Wine's dxgi.dll from creating
+            //   its own DXGI device manager, which would conflict with DXVK's dxgi.dll and can
+            //   cause D3D11CreateDeviceAndSwapChain to return DXGI_ERROR_UNSUPPORTED.
+            // - MESA_NO_ERROR=1, MESA_DEBUG=silent: suppress Mesa error spam in the log.
+            // - vblank_mode=0: disable vsync wait in Mesa (Fable's X server syncs).
+            if (current.envVars["WINEESYNC"].isNullOrEmpty()) add("WINEESYNC=1")
+            add("WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER=1")
+            add("MESA_NO_ERROR=1")
+            add("MESA_DEBUG=silent")
+            add("vblank_mode=0")
             addAll(translator.environment)
             // What Winlator's bionic Wine reads instead of /etc/resolv.conf and netlink.
             addAll(runtime.bionicWineEnvironment())
@@ -659,7 +673,7 @@ class ContainerRepository internal constructor(
             dllOverrides?.let { add("$DLL_OVERRIDES_ENV=$it") }
             if (dxvkConf != null) {
                 // A Windows path: DXVK opens it through Wine's file APIs.
-                add("DXVK_CONFIG_FILE=${toWindowsPath(dxvkConf.absolutePath)}")
+                add("DXVK_CONFIG_FILE=${toWindowsPath(dxvkConf.absolutePath, dir)}")
             }
             if (direct3d.installed[DxWrappers.Kind.VKD3D] != null) {
                 // Winlator's default VKD3D feature level.
@@ -942,11 +956,13 @@ class ContainerRepository internal constructor(
      * in the prefix's system32, where Wine loads the native DLLs WINEDLLOVERRIDES asks for.
      * Logging only: the launch goes on either way.
      */
-    private fun checkDxvk(direct3d: DxWrappers.Report, container: Container, exe: ExeEntry?, dir: File, log: LaunchLog) {
+    private fun checkDxvk(direct3d: DxWrappers.Report, container: Container, exe: ExeEntry?, dir: File, log: LaunchLog): LaunchResult? {
         val dxvk = direct3d.installed[DxWrappers.Kind.DXVK]
+        // The Wine desktop and GPU Info are useful without DXVK; D3D tests and games aren't.
+        val needsDxvk = exe != null && !exe.isTool ||
+            exe?.toolId == ContainerTools.D3D9_TEST.id || exe?.toolId == ContainerTools.D3D11_TEST.id
         if (dxvk == null) {
-            // The Wine desktop and the built-in tools are useful without DXVK; a game isn't.
-            if (exe == null || exe.isTool) return
+            if (!needsDxvk) return null
             val off = container.dxvkVersion?.trim().equals(ContainerDefaults.DXVK_OFF, ignoreCase = true)
             val warning = if (off) {
                 "DXVK is off for this container — Direct3D games will not render. Pick a DXVK build in the container's Settings."
@@ -955,7 +971,7 @@ class ContainerRepository internal constructor(
             }
             log.line("WARNING $warning")
             Log.w(TAG, "${container.name}: $warning")
-            return
+            return LaunchResult.Failed(warning)
         }
         val system32 = File(dir, SYSTEM32_DIR)
         val native = direct3d.nativeDlls[DxWrappers.Kind.DXVK].orEmpty()
@@ -985,6 +1001,7 @@ class ContainerRepository internal constructor(
         } else {
             Log.w(TAG, "${container.name}: DXVK $dxvk is recorded as installed but its DLLs aren't all in place")
         }
+        return null
     }
 
     /**
@@ -1122,8 +1139,25 @@ class ContainerRepository internal constructor(
     }
 
     /** `/data/x/game.exe` -> `Z:\\data\\x\\game.exe` (the prefix maps Z: to /); Windows paths pass through. */
-    private fun toWindowsPath(path: String): String =
-        if (path.startsWith("/")) "Z:" + path.replace('/', '\\') else path
+    /**
+     * Converts a host path to a Windows path Wine can open. Paths inside the container's
+     * `drive_c` directory map to `C:\\...` (where the Wine prefix's C: drive is); everything
+     * else maps to `Z:\\...` (Wine's default mapping of the host filesystem).
+     *
+     * This mirrors Winlator's `WineUtils.unixToDOSPath`, which walks the container's drives
+     * (drive_c → C:, D:, E:, …) to find the shortest DOS path for a Unix path. Fable's
+     * containers only have a C: drive and an implicit Z: for the host, so this is simpler.
+     */
+    private fun toWindowsPath(path: String, containerDir: File): String {
+        if (!path.startsWith("/")) return path
+        val driveC = File(containerDir, "drive_c")
+        val driveCAbs = driveC.absolutePath
+        if (path.startsWith(driveCAbs + "/") || path == driveCAbs) {
+            val relative = path.removePrefix(driveCAbs).removePrefix("/")
+            return "C:\\" + relative.replace('/', '\\')
+        }
+        return "Z:" + path.replace('/', '\\')
+    }
 
     /** Logs what [file] is: size, exec bit, ELF machine and loader (bionic vs glibc). */
     private fun describeBinary(log: LaunchLog, label: String, file: File) {
