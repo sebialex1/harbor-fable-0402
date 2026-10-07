@@ -88,7 +88,6 @@ class DisplayActivity : Activity() {
     private var drawerPanel: View? = null
     private var drawerOpen = false
     private var controlsOverlay: View? = null
-    private var keyboardShown = false
     private var winePaused = false
     private var pauseItem: TextView? = null
     private var pauseIcon: ImageView? = null
@@ -274,22 +273,17 @@ class DisplayActivity : Activity() {
     }
 
     /**
-     * Shows or hides Android's soft keyboard over the X screen. The content view has no
+     * Opens Android's soft keyboard over the X screen; Android Back dismisses it. The content view has no
      * InputConnection, so the IME falls back to sending plain key events, which
      * [dispatchKeyEvent] forwards to the X server like a hardware keyboard's. (Winlator does the
      * same with `toggleSoftInput`.)
      */
-    private fun setKeyboardShown(shown: Boolean) {
+    private fun showKeyboard() {
         val target = root ?: return
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
-        keyboardShown = shown
-        if (shown) {
-            target.requestFocus()
-            @Suppress("DEPRECATION")
-            imm.showSoftInput(target, InputMethodManager.SHOW_FORCED)
-        } else {
-            imm.hideSoftInputFromWindow(target.windowToken, 0)
-        }
+        target.requestFocus()
+        @Suppress("DEPRECATION")
+        imm.showSoftInput(target, InputMethodManager.SHOW_FORCED)
     }
 
     /** Freezes / thaws the container's Wine processes; the status label says so while paused. */
@@ -342,7 +336,25 @@ class DisplayActivity : Activity() {
             addView(menuCard(
                 menuSwitch("On-screen controls", R.drawable.ic_menu_gamepad, "D-pad and Enter / Esc / Space / Shift") { setControlsShown(it) },
                 menuDivider(),
-                menuSwitch("On-screen keyboard", R.drawable.ic_menu_keyboard, "Android's keyboard, typed into Wine") { setKeyboardShown(it) },
+                Button(this@DisplayActivity).apply {
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    text = "On-screen keyboard"
+                    isAllCaps = false
+                    textSize = 16f
+                    typeface = fableFont(R.font.inter_regular)
+                    setTextColor(0xFFFFFFFF.toInt())
+                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                    minimumHeight = dp(MENU_ROW_MIN_DP)
+                    setPadding(dp(16f), dp(10f), dp(12f), dp(10f))
+                    background = menuRowBackground()
+                    setCompoundDrawablesRelative(menuIcon(R.drawable.ic_menu_keyboard), null, null, null)
+                    compoundDrawablePadding = dp(16f)
+                    contentDescription = "Open Android's keyboard to type into Wine"
+                    setOnClickListener {
+                        setDrawerOpen(false)
+                        showKeyboard()
+                    }
+                },
             ))
 
             addView(menuSectionLabel("Wine"))
