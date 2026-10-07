@@ -749,6 +749,15 @@ class ContainerRepository internal constructor(
         log.section("Command")
         log.line("${translator.executable.absolutePath} ${wineBinary.absolutePath} $program ${arguments.joinToString(" ")}".trim())
         log.line("driver: ${driver ?: "none (system Vulkan)"}")
+        if (screen != null) {
+            // winevulkan dlopens libvulkan.so.1 from LD_LIBRARY_PATH; it must be the APK's shim
+            // (cpp/vulkan/vulkan_shim.c), whose "[vulkan_shim]" lines then appear in the process log.
+            val shim = File(screen.x11LibDir, "libvulkan.so.1")
+            log.line(
+                if (shim.isFile) "vulkan shim: ${shim.absolutePath} (${shim.length()} bytes)"
+                else "vulkan shim: MISSING at ${shim.absolutePath} — winevulkan will not find libvulkan.so.1",
+            )
+        }
         log.line("launcher: ${if (useNative) "native JNI fork/execve ($LAUNCHER_ENV=$LAUNCHER_NATIVE)" else "ProcessBuilder"}")
         log.section("Environment (Fable additions; the launcher also sets WINEPREFIX, HOME, TMPDIR, PATH, BOX64_*)")
         environment.forEach { log.line(it) }

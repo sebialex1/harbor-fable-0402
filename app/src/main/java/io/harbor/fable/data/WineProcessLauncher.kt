@@ -23,6 +23,10 @@ internal object WineProcessLauncher {
     private const val TAG = "WineProcessLauncher"
     private const val ICD_NAME = "fable_icd.json"
     private const val LINKER64 = "/system/bin/linker64"
+    private const val SHIM_LOG_ENV = "FABLE_VULKAN_SHIM_LOG"
+
+    /** Where the Vulkan shim mirrors its diagnostics, in the container directory. */
+    const val SHIM_LOG_NAME = "vulkan_shim.log"
 
     data class Request(
         val containerDir: File,
@@ -98,10 +102,21 @@ internal object WineProcessLauncher {
         prependPath(env, "PATH", "$containerPath/bin")
         log.line("env: base variables set")
 
+        // The libvulkan.so.1 shim (cpp/vulkan/vulkan_shim.c) logs which Vulkan implementation it
+        // picked, and why vkCreateInstance failed, to stderr (this process log) and to this file.
+        val shimLog = File(dir, SHIM_LOG_NAME)
+        runCatching { shimLog.writeText("") }
+        env[SHIM_LOG_ENV] = shimLog.absolutePath
+
         val driverPath = request.driverPath
-        if (driverPath != null) {
+        if (driverPath == null) {
+            log.line("vulkan: no custom driver active; the shim uses the system Vulkan loader")
+            note(processLog, "[fable] vulkan: no custom driver (FABLE_VULKAN_DRIVER unset)")
+        } else {
             val driver = File(driverPath)
             if (!driver.isFile) return failed("Driver library not found: $driverPath")
+            log.line("vulkan: FABLE_VULKAN_DRIVER=$driverPath (${driver.length()} bytes)")
+            note(processLog, "[fable] vulkan: FABLE_VULKAN_DRIVER=$driverPath (${driver.length()} bytes)")
             val icd = try {
                 writeIcd(driver)
             } catch (error: IOException) {
@@ -161,7 +176,7 @@ internal object WineProcessLauncher {
                 if (key == "DISPLAY" || key == "WINEDLLPATH" || key == "WINELOADER" || key == "WINESERVER" ||
                     key.startsWith("WINE") || key.startsWith("BOX64") || key.startsWith("LD_") ||
                     key == "PATH" || key == "HOME" || key == "TMPDIR" || key.startsWith("VK_") || key.startsWith("FEX") ||
-                    key == "USER" || key == "XDG_CACHE_HOME" || key.startsWith("ADRENOTOOLS") || key == "FABLE_VULKAN_DRIVER" ||
+                    key == "USER" || key == "XDG_CACHE_HOME" || key.startsWith("ADRENOTOOLS") || key.startsWith("FABLE_VULKAN") ||
                     key == "FONTCONFIG_FILE" || key.startsWith("ANDROID_") || key.startsWith("DXVK") ||
                     key.startsWith("VKD3D")
                 ) {

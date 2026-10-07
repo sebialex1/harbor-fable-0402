@@ -64,17 +64,32 @@
  *   otherwise / on failure   Android's system loader, as before.
  *
  * The log says which: "Using Fable Vulkan driver: <path>" or "Using system Vulkan loader: <path>".
+ * Those lines (and every other shim diagnostic) go to logcat, to stderr — i.e. the Wine process
+ * log — prefixed "[vulkan_shim]", and to $FABLE_VULKAN_SHIM_LOG.
+ *
+ * A directly opened ICD must provide VK_KHR_surface and VK_KHR_android_surface. RADV Xclipse is
+ * built with -Dplatforms=android, i.e. as an Android Vulkan HAL that leaves all WSI to the
+ * platform loader: it has neither, and instance creation on it fails with res=-7. open_direct_icd
+ * probes for both and falls back to the system loader when they are missing (override with
+ * FABLE_VULKAN_DRIVER_FORCE=1); vkCreateInstance also retries on the system loader if a direct
+ * ICD still answers VK_ERROR_EXTENSION_NOT_PRESENT before any instance exists on it.
  *
  * Only vk* symbols are exported (-fvisibility=hidden + VK_SHIM_EXPORT).
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* dladdr; bionic always declares it, glibc only with this */
+#endif
 #include <dlfcn.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <android/log.h>
 #include <android/native_window.h>
@@ -88,9 +103,53 @@
 #define VK_SHIM_EXPORT __attribute__((visibility("default")))
 
 #define LOG_TAG "vulkan_shim"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGI(...) shim_log(ANDROID_LOG_INFO, __VA_ARGS__)
+#define LOGW(...) shim_log(ANDROID_LOG_WARN, __VA_ARGS__)
+#define LOGE(...) shim_log(ANDROID_LOG_ERROR, __VA_ARGS__)
+
+/* --- Diagnostic logging -------------------------------------------------------------------
+ *
+ * logcat alone is not enough: the user only sees the Wine process log, which is the process's
+ * stdout/stderr (WineProcessLauncher uses redirectErrorStream). Every shim line therefore goes to
+ *   - logcat (tag vulkan_shim),
+ *   - stderr, prefixed "[vulkan_shim]", so it lands in the Wine process log next to winevulkan's
+ *     own err:vulkan lines,
+ *   - a log file: $FABLE_VULKAN_SHIM_LOG (WineProcessLauncher points it into the container), else
+ *     /data/user/0/io.harbor.fable/files/vulkan_shim.log.
+ * If no "[vulkan_shim]" line shows up in the Wine log at all, Wine did not load this shim. */
+#define SHIM_LOG_ENV "FABLE_VULKAN_SHIM_LOG"
+#define SHIM_LOG_DEFAULT "/data/user/0/io.harbor.fable/files/vulkan_shim.log"
+
+static pthread_mutex_t shim_log_mutex = PTHREAD_MUTEX_INITIALIZER;
+static FILE *shim_log_file;
+static int shim_log_file_tried;
+
+__attribute__((format(printf, 2, 3)))
+static void shim_log(int prio, const char *fmt, ...) {
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+
+    __android_log_write(prio, LOG_TAG, msg);
+
+    const char *level = prio >= ANDROID_LOG_ERROR ? "err" : prio >= ANDROID_LOG_WARN ? "warn" : "info";
+    pthread_mutex_lock(&shim_log_mutex);
+    dprintf(STDERR_FILENO, "[vulkan_shim] %s: %s\n", level, msg);
+    if (!shim_log_file_tried) {
+        shim_log_file_tried = 1;
+        const char *path = getenv(SHIM_LOG_ENV);
+        if (!path || !*path) path = SHIM_LOG_DEFAULT;
+        shim_log_file = fopen(path, "a");
+        if (shim_log_file) {
+            setvbuf(shim_log_file, NULL, _IOLBF, 0);
+            fprintf(shim_log_file, "---- vulkan_shim pid %d ----\n", (int)getpid());
+        }
+    }
+    if (shim_log_file) fprintf(shim_log_file, "%s: %s\n", level, msg);
+    pthread_mutex_unlock(&shim_log_mutex);
+}
 
 /* Where Android keeps its Vulkan loader; tried first, then the plain SONAME (which the
  * linker resolves through LD_LIBRARY_PATH / the default system directories). Only used when
@@ -104,6 +163,8 @@ static const char *const REAL_LOADER_PATHS[] = {
  * .so itself. Android's loader cannot be pointed at it (it ignores VK_ICD_FILENAMES and always
  * picks the vendor driver), so the shim opens the ICD directly and acts as the loader. */
 #define FABLE_DRIVER_ENV "FABLE_VULKAN_DRIVER"
+/* "1" keeps a directly opened ICD even when it lacks VK_KHR_surface / VK_KHR_android_surface. */
+#define FABLE_DRIVER_FORCE_ENV "FABLE_VULKAN_DRIVER_FORCE"
 
 /* Highest loader <-> ICD interface version the shim speaks (Vulkan loader interface v5). */
 #define SHIM_ICD_INTERFACE_VERSION 5u
@@ -292,11 +353,29 @@ static char *icd_library_from_manifest(const char *manifest) {
 /* Opens a Vulkan ICD .so directly and makes it the implementation the shim forwards to.
  * `origin` only labels the log lines. Returns 1 on success; on failure nothing is kept. */
 static int open_direct_icd(const char *path, const char *origin) {
+    /* Say plainly when the file is simply not there: a stale active.json or a half-extracted
+     * driver otherwise only shows up as an opaque dlopen error. */
+    if (strchr(path, '/')) {
+        struct stat st;
+        if (stat(path, &st) != 0) {
+            LOGE("Fable Vulkan driver %s [%s] does not exist; falling back to the system Vulkan loader", path, origin);
+            return 0;
+        }
+        if (!S_ISREG(st.st_mode)) {
+            LOGE("Fable Vulkan driver %s [%s] is not a regular file; falling back to the system Vulkan loader", path, origin);
+            return 0;
+        }
+        if (access(path, R_OK) != 0) {
+            LOGE("Fable Vulkan driver %s [%s] is not readable; falling back to the system Vulkan loader", path, origin);
+            return 0;
+        }
+    }
+
     /* RTLD_NOW: an ICD with unresolvable dependencies must fail here, where the shim can still
      * fall back to the system loader, not on first call. */
     void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
-        LOGW("dlopen(%s) [%s] failed: %s", path, origin, dlerror());
+        LOGE("dlopen(%s) [%s] failed: %s; falling back to the system Vulkan loader", path, origin, dlerror());
         return 0;
     }
 
@@ -334,6 +413,57 @@ static int open_direct_icd(const char *path, const char *origin) {
         return 0;
     }
 
+    /* WSI probe. An ICD built for Android (Mesa -Dplatforms=android, which is how RADV Xclipse is
+     * built) is a Vulkan *HAL*: it implements VK_ANDROID_native_buffer and leaves VK_KHR_surface,
+     * VK_KHR_android_surface and VK_KHR_swapchain to Android's platform loader. Opened directly,
+     * it has no window-system integration at all, so the vkCreateInstance below (which needs
+     * VK_KHR_surface + VK_KHR_android_surface in place of winevulkan's VK_KHR_xlib_surface)
+     * would fail with VK_ERROR_EXTENSION_NOT_PRESENT (-7) and DXVK would never get a device.
+     * Such a driver is only kept when FABLE_VULKAN_DRIVER_FORCE=1 (headless experiments). */
+    int has_surface = 0, has_android_surface = 0;
+    uint32_t ext_count = 0;
+    VkResult probe = enumerate(NULL, &ext_count, NULL);
+    VkExtensionProperties *exts = NULL;
+    if (probe == VK_SUCCESS && ext_count) {
+        exts = calloc(ext_count, sizeof(*exts));
+        if (exts) probe = enumerate(NULL, &ext_count, exts);
+    }
+    if (exts && (probe == VK_SUCCESS || probe == VK_INCOMPLETE)) {
+        char list[768];
+        size_t used = 0;
+        list[0] = '\0';
+        for (uint32_t i = 0; i < ext_count; i++) {
+            const char *name = exts[i].extensionName;
+            if (strcmp(name, VK_KHR_SURFACE_EXTENSION_NAME) == 0) has_surface = 1;
+            if (strcmp(name, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME) == 0) has_android_surface = 1;
+            int w = snprintf(list + used, sizeof(list) - used, "%s%s", used ? " " : "", name);
+            if (w > 0 && (size_t)w < sizeof(list) - used) used += (size_t)w;
+        }
+        LOGI("%s [%s] instance extensions (%u): %s", path, origin, ext_count, list);
+    } else {
+        LOGW("%s [%s]: vkEnumerateInstanceExtensionProperties failed (res=%d)", path, origin, (int)probe);
+    }
+    free(exts);
+
+    if (!has_surface || !has_android_surface) {
+        const char *force = getenv(FABLE_DRIVER_FORCE_ENV);
+        LOGE("%s [%s] has no window-system integration (%s%s%s missing): it is an Android Vulkan HAL "
+             "driver that relies on the platform loader for surfaces/swapchains, so DXVK cannot create "
+             "a presentable instance on it directly",
+             path, origin,
+             has_surface ? "" : VK_KHR_SURFACE_EXTENSION_NAME,
+             (!has_surface && !has_android_surface) ? ", " : "",
+             has_android_surface ? "" : VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+        if (!(force && strcmp(force, "1") == 0)) {
+            LOGE("Not using %s; falling back to the system Vulkan loader (textureCompressionBC is forced on "
+                 "there). Set %s=1 to keep the driver anyway", path, FABLE_DRIVER_FORCE_ENV);
+            /* Not dlclose'd: the driver has already run code (static init, debug options) and
+             * unloading Mesa mid-process is not something it is written to survive. */
+            return 0;
+        }
+        LOGW("%s=1: keeping %s despite the missing WSI extensions", FABLE_DRIVER_FORCE_ENV, path);
+    }
+
     real.handle = handle;
     real.path = strdup(path);
     if (!real.path) real.path = "(fable vulkan driver)";
@@ -359,8 +489,14 @@ static int open_direct_icd(const char *path, const char *origin) {
  * library_path of the VK_ICD_FILENAMES / VK_DRIVER_FILES manifest. */
 static int open_fable_driver(void) {
     const char *driver = getenv(FABLE_DRIVER_ENV);
+    const char *icd_files = getenv("VK_ICD_FILENAMES");
+    const char *driver_files = getenv("VK_DRIVER_FILES");
+    LOGI("env: %s=%s VK_ICD_FILENAMES=%s VK_DRIVER_FILES=%s", FABLE_DRIVER_ENV,
+         driver ? driver : "(unset)", icd_files ? icd_files : "(unset)", driver_files ? driver_files : "(unset)");
     if (driver && *driver) {
         if (open_direct_icd(driver, FABLE_DRIVER_ENV)) return 1;
+    } else {
+        LOGI("%s is not set: no custom Vulkan driver is active in Fable", FABLE_DRIVER_ENV);
     }
 
     static const char *const manifest_vars[] = { "VK_ICD_FILENAMES", "VK_DRIVER_FILES" };
@@ -401,7 +537,10 @@ static int open_system_loader(void) {
         }
         LOGW("dlopen(%s) failed: %s", REAL_LOADER_PATHS[i], dlerror());
     }
-    if (!real.handle) return 0;
+    if (!real.handle) {
+        LOGE("Could not open the system Vulkan loader (tried /system/lib64/libvulkan.so, libvulkan.so)");
+        return 0;
+    }
     real.direct_icd = 0;
 
     real.vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)load_real("vkGetInstanceProcAddr", 1);
@@ -421,6 +560,14 @@ static int open_system_loader(void) {
 }
 
 static void shim_init(void) {
+    Dl_info self;
+    const char *ld_path = getenv("LD_LIBRARY_PATH");
+    if (dladdr((void *)&shim_init, &self) && self.dli_fname) {
+        LOGI("libvulkan.so.1 shim loaded from %s (pid %d)", self.dli_fname, (int)getpid());
+    } else {
+        LOGI("libvulkan.so.1 shim loaded (pid %d)", (int)getpid());
+    }
+    LOGI("env: LD_LIBRARY_PATH=%s", ld_path ? ld_path : "(unset)");
     if (!open_fable_driver() && !open_system_loader()) {
         LOGE("No Vulkan loader found; every forwarded call will fail");
         return;
@@ -658,6 +805,35 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const 
     return written < total ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
+/* Number of instances successfully created; once non-zero the implementation is pinned. */
+static int instances_created;
+
+/* Names every requested instance extension the current implementation does not offer. */
+static void log_missing_extensions(const VkInstanceCreateInfo *info) {
+    VkExtensionProperties *props = NULL;
+    uint32_t count = 0;
+    if (fetch_real_extensions(NULL, &props, &count) != VK_SUCCESS) return;
+    for (uint32_t i = 0; i < info->enabledExtensionCount; i++) {
+        const char *name = info->ppEnabledExtensionNames[i];
+        if (name && !real_has_extension(props, count, name)) {
+            LOGE("vkCreateInstance: %s does not support instance extension %s", real.path, name);
+        }
+    }
+    free(props);
+}
+
+/* Drops a direct ICD (left mapped, see open_direct_icd) and re-initialises on Android's system
+ * loader. Only valid while no instance exists on the ICD. Returns 1 on success. */
+static int switch_to_system_loader(void) {
+    memset(&real, 0, sizeof(real));
+    for (int id = 0; id < RP_COUNT; id++) __atomic_store_n(&real_procs[id], NULL, __ATOMIC_RELEASE);
+    if (!open_system_loader()) {
+        LOGE("System Vulkan loader unavailable as well; Vulkan will not work");
+        return 0;
+    }
+    return 1;
+}
+
 /* Forwards instance creation with Android WSI in place of the X11 surface extensions.
  * satisfy. If the loader still rejects the request, names the extensions it is missing so the
  * Wine log says *which* one, not just res=-7. */
@@ -701,26 +877,46 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *
         info.ppEnabledExtensionNames = filtered;
     }
 
+    {
+        char list[1024];
+        size_t used = 0;
+        list[0] = '\0';
+        for (uint32_t i = 0; i < info.enabledExtensionCount; i++) {
+            const char *name = info.ppEnabledExtensionNames[i];
+            int w = snprintf(list + used, sizeof(list) - used, "%s%s", used ? " " : "", name ? name : "(null)");
+            if (w > 0 && (size_t)w < sizeof(list) - used) used += (size_t)w;
+        }
+        LOGI("vkCreateInstance on %s (%s): %u extensions requested, forwarding %u: %s", real.path,
+             real.direct_icd ? "direct ICD" : "system loader", requested, info.enabledExtensionCount, list);
+    }
+
     VkResult res = real.vkCreateInstance(&info, pAllocator, pInstance);
 
     if (res == VK_ERROR_EXTENSION_NOT_PRESENT) {
-        VkExtensionProperties *props = NULL;
-        uint32_t count = 0;
-        if (fetch_real_extensions(NULL, &props, &count) == VK_SUCCESS) {
-            for (uint32_t i = 0; i < info.enabledExtensionCount; i++) {
-                const char *name = info.ppEnabledExtensionNames[i];
-                if (name && !real_has_extension(props, count, name)) {
-                    LOGE("vkCreateInstance: %s does not support instance extension %s", real.path, name);
-                }
+        log_missing_extensions(&info);
+        /* Last line of defence for a direct ICD that passed the init-time probe but still rejects
+         * the request: as long as no instance lives on it, swap in the system loader and retry. */
+        if (real.direct_icd && __atomic_load_n(&instances_created, __ATOMIC_ACQUIRE) == 0) {
+            LOGE("vkCreateInstance: %s rejected the instance (res=-7); retrying on the system Vulkan loader",
+                 real.path);
+            if (switch_to_system_loader()) {
+                res = real.vkCreateInstance(&info, pAllocator, pInstance);
+                if (res == VK_ERROR_EXTENSION_NOT_PRESENT) log_missing_extensions(&info);
             }
-            free(props);
         }
-    } else if (res != VK_SUCCESS) {
-        LOGE("vkCreateInstance: real loader failed, res=%d", (int)res);
-    } else {
+    }
+
+    if (res == VK_SUCCESS) {
+        __atomic_add_fetch(&instances_created, 1, __ATOMIC_ACQ_REL);
         cache_instance_procs(*pInstance);
         LOGI("vkCreateInstance: instance created on %s (%u extensions requested, %u forwarded)",
              real.path, requested, info.enabledExtensionCount);
+    } else {
+        LOGE("vkCreateInstance: failed on %s, res=%d%s", real.path ? real.path : "(no loader)", (int)res,
+             res == VK_ERROR_EXTENSION_NOT_PRESENT ? " (VK_ERROR_EXTENSION_NOT_PRESENT)" :
+             res == VK_ERROR_INCOMPATIBLE_DRIVER ? " (VK_ERROR_INCOMPATIBLE_DRIVER)" :
+             res == VK_ERROR_INITIALIZATION_FAILED ? " (VK_ERROR_INITIALIZATION_FAILED)" :
+             res == VK_ERROR_LAYER_NOT_PRESENT ? " (VK_ERROR_LAYER_NOT_PRESENT)" : "");
     }
 
     free(filtered);
@@ -827,9 +1023,12 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPres
  */
 
 static void force_texture_compression_bc(VkPhysicalDeviceFeatures *features) {
+    static int logged;
     if (features && !features->textureCompressionBC) {
         features->textureCompressionBC = VK_TRUE;
-        LOGI("vkGetPhysicalDeviceFeatures: forcing textureCompressionBC = VK_TRUE (RDNA2 hardware supports it; driver omits it)");
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_ACQ_REL)) {
+            LOGI("vkGetPhysicalDeviceFeatures: forcing textureCompressionBC = VK_TRUE (RDNA2 hardware supports it; driver omits it)");
+        }
     }
 }
 
