@@ -255,7 +255,7 @@ private fun AssetVersionRow(
             FlowRow(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = RowPaddingHorizontal, end = RowPaddingHorizontal, bottom = Spacing.md),
+                    .padding(start = RowPaddingHorizontal, end = RowPaddingHorizontal, top = Spacing.sm, bottom = Spacing.md),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {

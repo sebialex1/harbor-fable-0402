@@ -6,12 +6,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.harbor.fable.data.DownloadStatus
@@ -21,6 +20,7 @@ import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableSuccess
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
+import io.harbor.fable.ui.theme.Spacing
 import io.harbor.fable.ui.icons.FableIcons
 
 private enum class DownloadUi { AVAILABLE, QUEUED, DOWNLOADING, VERIFYING, DONE }
@@ -79,7 +79,9 @@ fun DownloadRow(
         else -> null
     }
 
-    Box(modifier) {
+    // The progress strip participates in measurement rather than overlaying the row's bottom
+    // edge; build/version chips below the row can never occupy the same space.
+    Column(modifier) {
         ListRow(
             title = displayAssetName(title),
             subtitle = subtitle,
@@ -115,8 +117,8 @@ fun DownloadRow(
             enter = fadeIn(Motion.enter(Motion.Quick)),
             exit = fadeOut(Motion.exit(Motion.Standard)),
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = RowPaddingHorizontal),
+                .padding(horizontal = RowPaddingHorizontal)
+                .padding(top = Spacing.xs, bottom = Spacing.sm),
         ) {
             ThinProgressBar(progress = progress)
         }
