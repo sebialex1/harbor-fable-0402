@@ -505,6 +505,11 @@ class ContainerRepository internal constructor(
                 // dependencies there, so those directories go last.
                 val extra = screen.nativeLibs?.extraSearchDirs.orEmpty()
                 add("LD_LIBRARY_PATH=" + (listOf(screen.x11LibDir, NativeLibResolver.DEFAULT_SYSTEM_DIR) + extra).joinToString(":"))
+                // Fontconfig's compiled-in config path (/data/data/com.termux/files/usr/etc/fonts)
+                // doesn't exist on this device. Point it at the fonts.conf X11ClientLibs installed
+                // next to the native libraries, so Wine can enumerate fonts and load kernel32.dll.
+                val fontsConf = File(screen.x11LibDir, "fonts.conf")
+                if (fontsConf.isFile) add("FONTCONFIG_FILE=${fontsConf.absolutePath}")
             }
             // The container's own variables come last so they can override anything above.
             current.envVars.forEach { (key, value) -> if (key != LAUNCHER_ENV) add("$key=$value") }

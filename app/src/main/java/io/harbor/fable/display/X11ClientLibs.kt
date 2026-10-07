@@ -47,8 +47,10 @@ import java.io.IOException
 internal object X11ClientLibs {
     private const val TAG = "X11ClientLibs"
     private const val ASSET_DIR = "x11/arm64-v8a"
+    private const val CONF_DIR = "x11"
+    private const val FONTS_CONF = "fonts.conf"
     /** Bump whenever the bundled assets change so existing installs copy them again. */
-    private const val VERSION = "termux-libx11-1.8.13_libxcb-1.17.0_freetype-2.14.3_xext-libs-2_fontconfig-2.18.3_gnutls-3.8.13_sdl2-2.32.10"
+    private const val VERSION = "termux-libx11-1.8.13_libxcb-1.17.0_freetype-2.14.3_xext-libs-2_fontconfig-2.18.3_gnutls-3.8.13_sdl2-2.32.10_fontsconf-1"
     private const val MARKER = ".fable-x11"
     private const val TERMUX_SOCKET_PREFIX = "/data/data/com.termux/files/usr/tmp/.X11-unix/X"
 
@@ -100,6 +102,7 @@ internal object X11ClientLibs {
         dir.mkdirs()
         marker.delete()
         removeStaleSystemFreeType(dir)
+        installFontsConf(context, dir)
         for (name in names) {
             val bytes = context.assets.open("$ASSET_DIR/$name").use { it.readBytes() }
             val out = if (name == "libxcb.so") patchSocketPrefix(bytes, prefix) else bytes
@@ -116,6 +119,33 @@ internal object X11ClientLibs {
             Log.e(TAG, "This build bundles no FreeType; Wine will report it missing (Android's libft2.so is not used)")
         }
         return dir
+    }
+
+    /** Path to the installed `fonts.conf`, for `FONTCONFIG_FILE`. Null if not installed. */
+    fun fontsConfPath(context: Context): String? {
+        val dir = libDir(context)
+        val file = File(dir, FONTS_CONF)
+        return if (file.isFile) file.absolutePath else null
+    }
+
+    /**
+     * Copies `assets/x11/fonts.conf` into [dir]. Fontconfig's compiled-in config path
+     * (`/data/data/com.termux/files/usr/etc/fonts`) doesn't exist on this device, so without this
+     * file it logs "Cannot load default config file" and Wine can't enumerate fonts.
+     */
+    private fun installFontsConf(context: Context, dir: File) {
+        val dest = File(dir, FONTS_CONF)
+        runCatching {
+            context.assets.open("$CONF_DIR/$FONTS_CONF").use { input ->
+                val tmp = File(dir, "$FONTS_CONF.tmp")
+                tmp.outputStream().use { input.copyTo(it) }
+                if (!tmp.renameTo(dest)) {
+                    dest.delete()
+                    if (!tmp.renameTo(dest)) throw IOException("Couldn't install $FONTS_CONF")
+                }
+                dest.setReadable(true, false)
+            }
+        }.onFailure { Log.w(TAG, "Couldn't install $FONTS_CONF", it) }
     }
 
     /**
