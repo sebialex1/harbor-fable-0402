@@ -486,6 +486,13 @@ class ContainerRepository internal constructor(
         }
         val label = exe?.name ?: "${current.name} desktop"
 
+        // Android has no lscpu; Box64 builds that don't read BOX64_SYSINFO_* run it through
+        // popen(), so put a stub first on the Wine process's PATH (<container>/bin).
+        val cpu = HostCpu.get()
+        val lscpu = cpu.installLscpu(File(dir, "bin"))
+        log.line("host CPU: ${cpu.name}, ${cpu.count} cores, max ${cpu.maxFrequencyHz?.let { "${it / 1_000_000} MHz" } ?: "unknown"}")
+        log.line("lscpu stub: ${lscpu?.absolutePath ?: "couldn't be written"}")
+
         // 5. Start the process.
         val environment = buildList {
             add("WINEDEBUG=-all")
@@ -670,7 +677,8 @@ class ContainerRepository internal constructor(
                     ResolvedTranslator(
                         name = NativeLoader.TRANSLATOR_BOX64,
                         executable = status.executable,
-                        environment = BOX64_ENVIRONMENT,
+                        // CPU facts from the environment so Box64 doesn't popen("lscpu") (HostCpu).
+                        environment = BOX64_ENVIRONMENT + HostCpu.get().box64Environment(),
                     )
                 )
                 Box64Status.NotDownloaded -> Result.failure(
@@ -1009,7 +1017,8 @@ private data class ResolvedTranslator(
  * Box64 settings Winlator bionic launches Wine with (GuestProgramLauncherComponent's base
  * variables plus its default "COMPATIBILITY" Box64 preset). BOX64_X11GLX makes Box64's wrapped
  * libX11 advertise GLX; BOX64_NORCFILES stops it reading /etc/box64.box64rc-style files that
- * don't exist on Android.
+ * don't exist on Android. The per-device BOX64_SYSINFO_* variables (no `lscpu` on Android) are
+ * added by [HostCpu.box64Environment].
  */
 internal val BOX64_ENVIRONMENT = listOf(
     "BOX64_NOBANNER=1",
