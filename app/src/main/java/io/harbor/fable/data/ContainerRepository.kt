@@ -7,6 +7,7 @@ import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.display.DisplayServer
+import io.harbor.fable.display.NativeLibResolver
 import io.harbor.fable.display.X11ClientLibs
 import io.harbor.fable.nativebridge.NativeLoader
 import kotlinx.coroutines.CancellationException
@@ -434,6 +435,18 @@ class ContainerRepository internal constructor(
         if (screen != null) {
             log.line("X server: DISPLAY=${screen.display}, socket ${screen.socketPath}, screen ${screen.resolution}")
             log.line("X11 client libraries: ${screen.x11LibDir}")
+            screen.nativeLibs?.let { report ->
+                // FreeType & co. that Android only has as libft2.so / versioned names (NativeLibResolver).
+                log.section("Native libraries (${report.dir.absolutePath})")
+                log.line(report.summary())
+                report.describe().forEach { log.line(it) }
+                if (report.missingRequired.isNotEmpty()) {
+                    log.error(
+                        "required native libraries not found on this device: ${report.missingRequired.joinToString()} " +
+                            "(searched ${NativeLibResolver.SYSTEM_LIB_DIRS.joinToString()}); Wine will likely fail to start",
+                    )
+                }
+            }
         } else {
             log.line("no display server in this build")
         }
@@ -469,7 +482,10 @@ class ContainerRepository internal constructor(
                 add("DISPLAY=${screen.display}")
                 // Native (aarch64 bionic) libX11/libxcb for Box64's wrapped libX11, then the system
                 // libraries, as Winlator's LD_LIBRARY_PATH={imagefs}/usr/lib:/system/lib64.
-                add("LD_LIBRARY_PATH=${screen.x11LibDir}:/system/lib64")
+                // Libraries NativeLibResolver copied from /vendor or /system_ext keep their own
+                // dependencies there, so those directories go last.
+                val extra = screen.nativeLibs?.extraSearchDirs.orEmpty()
+                add("LD_LIBRARY_PATH=" + (listOf(screen.x11LibDir, NativeLibResolver.DEFAULT_SYSTEM_DIR) + extra).joinToString(":"))
             }
             // The container's own variables come last so they can override anything above.
             current.envVars.forEach { (key, value) -> if (key != LAUNCHER_ENV) add("$key=$value") }
@@ -844,8 +860,11 @@ class ContainerRepository internal constructor(
             val runtime = WineRuntime(app, AssetRepository.get(app), DriverRepository.get(app), File(app.filesDir, "runtime"))
             val display = DisplayProvider { resolution ->
                 val libDir = X11ClientLibs.install(app)
+                // Native deps Box64 wraps (libfreetype.so, …) that Android doesn't ship under the
+                // names Box64 asks for, copied next to the X11 libraries. Never throws.
+                val nativeLibs = NativeLibResolver.resolveWithReport(app)
                 val ready = DisplayServer.ensureStarted(app, resolution).getOrThrow()
-                DisplayEnv(ready.display, ready.socketPath, ready.resolution, libDir.absolutePath)
+                DisplayEnv(ready.display, ready.socketPath, ready.resolution, libDir.absolutePath, nativeLibs)
             }
             val created = ContainerRepository(
                 FileContainerStore(File(root, "index.json")),
@@ -909,6 +928,8 @@ internal data class DisplayEnv(
     val socketPath: String,
     val resolution: String,
     val x11LibDir: String,
+    /** What [NativeLibResolver] put into [x11LibDir] (FreeType, …); null when it didn't run. */
+    val nativeLibs: NativeLibResolver.Report? = null,
 )
 
 /** Outcome of [ContainerRepository.launch]. */
