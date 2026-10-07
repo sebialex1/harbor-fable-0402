@@ -2,9 +2,16 @@
 //
 // Bundled into every Fable container as C:\fable\tools\d3d11-test.exe (see ContainerTools.kt).
 // It draws through d3d11.dll and dxgi.dll only, i.e. DXVK when the container uses it, so a
-// turning triangle means Direct3D 11 works. The title bar names the adapter Direct3D reports and
-// shows the frame rate. The shaders are compiled at start-up by D3DCompile from
-// d3dcompiler_47.dll, which Wine provides. Esc or closing the window quits.
+// turning triangle means Direct3D 11 works. The title bar names the adapter Direct3D reports,
+// which d3d11.dll is loaded (DXVK or Wine's builtin WineD3D) and the frame rate. The shaders are
+// compiled at start-up by D3DCompile from d3dcompiler_47.dll, which Wine provides. Esc or
+// closing the window quits.
+//
+// The device and the swap chain are created in two steps (D3D11CreateDevice, then
+// IDXGIFactory::CreateSwapChain) rather than with D3D11CreateDeviceAndSwapChain, so a failure
+// names the layer that broke: the Direct3D device (feature level / Vulkan) or DXGI (window,
+// presentation). Every error box also says which d3d11.dll and dxgi.dll are loaded, since
+// Wine's builtin ones failing is a DXVK installation problem rather than a GPU one.
 //
 // Plain Win32 + Direct3D 11, built with MinGW-w64 (see the Makefile).
 
@@ -18,6 +25,7 @@
 #include <d3dcompiler.h>
 
 #include <cstdio>
+#include <cstring>
 #include <cwchar>
 
 namespace {
@@ -89,10 +97,50 @@ void Release(T*& object) {
     }
 }
 
-// Error box naming the step that failed, which tells which layer is broken.
+// Wine marks the PE modules it builds itself with this string right after the DOS header
+// (winebuild writes it; ntdll checks it to tell builtins from native DLLs). A module without it
+// is a native DLL, which for d3d11.dll / dxgi.dll in a Fable container means DXVK.
+const wchar_t* ModuleKind(const wchar_t* name) {
+    HMODULE module = GetModuleHandleW(name);
+    if (!module) return L"not loaded";
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    static constexpr char kBuiltin[] = "Wine builtin DLL";
+    if (dos->e_magic == IMAGE_DOS_SIGNATURE &&
+        dos->e_lfanew >= static_cast<LONG>(sizeof(IMAGE_DOS_HEADER) + sizeof(kBuiltin)) &&
+        std::memcmp(reinterpret_cast<const char*>(module) + sizeof(IMAGE_DOS_HEADER), kBuiltin, sizeof(kBuiltin)) == 0) {
+        return L"Wine builtin";
+    }
+    return L"native (DXVK)";
+}
+
+// Names for the HRESULTs Direct3D / DXGI set-up fails with, so the box is readable without a
+// lookup. 0x887A0001 in particular is INVALID_CALL, not UNSUPPORTED.
+const wchar_t* HResultName(HRESULT hr) {
+    switch (static_cast<unsigned long>(hr)) {
+    case 0x80004005UL: return L"E_FAIL";
+    case 0x80070057UL: return L"E_INVALIDARG";
+    case 0x8007000EUL: return L"E_OUTOFMEMORY";
+    case 0x80004001UL: return L"E_NOTIMPL";
+    case 0x887A0001UL: return L"DXGI_ERROR_INVALID_CALL";
+    case 0x887A0002UL: return L"DXGI_ERROR_NOT_FOUND";
+    case 0x887A0004UL: return L"DXGI_ERROR_UNSUPPORTED";
+    case 0x887A0005UL: return L"DXGI_ERROR_DEVICE_REMOVED";
+    case 0x887A0006UL: return L"DXGI_ERROR_DEVICE_HUNG";
+    case 0x887A0007UL: return L"DXGI_ERROR_DEVICE_RESET";
+    case 0x887A0020UL: return L"DXGI_ERROR_DRIVER_INTERNAL_ERROR";
+    case 0x887A0022UL: return L"DXGI_ERROR_NOT_CURRENTLY_AVAILABLE";
+    default: return L"";
+    }
+}
+
+// Error box naming the step that failed (which tells which layer is broken), the HRESULT by
+// name and number, and which d3d11.dll / dxgi.dll served the call.
 int Fail(const wchar_t* what, HRESULT hr) {
-    wchar_t text[512];
-    std::swprintf(text, 512, L"%ls failed (HRESULT 0x%08lX).", what, static_cast<unsigned long>(hr));
+    wchar_t text[768];
+    const wchar_t* name = HResultName(hr);
+    std::swprintf(text, 768, L"%ls failed (HRESULT 0x%08lX%ls%ls).\n\nd3d11.dll: %ls\ndxgi.dll: %ls", what,
+                  static_cast<unsigned long>(hr), name[0] ? L" " : L"", name, ModuleKind(L"d3d11.dll"),
+                  ModuleKind(L"dxgi.dll"));
     MessageBoxW(g_window, text, kTitle, MB_OK | MB_ICONERROR);
     return 1;
 }
@@ -181,7 +229,32 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     ID3DBlob* pixelCode = Compile(compile, "ps_main", "ps_4_0");
     if (!pixelCode) return 1;
 
-    // Windowed, legacy blit model: the most widely supported swap chain.
+    // The device first. The runtime takes the highest level in the list the GPU supports and
+    // fails only when none is (vs_4_0 / ps_4_0 shaders need at least 10_0), so a failure here is
+    // the Direct3D / Vulkan layer: DXVK reports E_INVALIDARG for an unsupported feature level.
+    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
+    D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_10_0;
+    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, ARRAYSIZE(levels),
+                                   D3D11_SDK_VERSION, &g_device, &level, &g_context);
+    if (FAILED(hr)) return Fail(L"D3D11CreateDevice (feature levels 11_0, 10_1, 10_0)", hr);
+
+    // The device's adapter and DXGI factory: the adapter's name goes in the title bar, the
+    // factory makes the swap chain.
+    wchar_t adapterName[128] = L"unknown adapter";
+    IDXGIDevice* dxgiDevice = nullptr;
+    IDXGIAdapter* adapter = nullptr;
+    IDXGIFactory* factory = nullptr;
+    hr = g_device->QueryInterface(IID_PPV_ARGS(&dxgiDevice));
+    if (FAILED(hr)) return Fail(L"QueryInterface(IDXGIDevice)", hr);
+    hr = dxgiDevice->GetAdapter(&adapter);
+    if (FAILED(hr)) return Fail(L"IDXGIDevice::GetAdapter", hr);
+    DXGI_ADAPTER_DESC adapterDesc = {};
+    if (SUCCEEDED(adapter->GetDesc(&adapterDesc))) std::wcsncpy(adapterName, adapterDesc.Description, 127);
+    hr = adapter->GetParent(IID_PPV_ARGS(&factory));
+    if (FAILED(hr)) return Fail(L"IDXGIAdapter::GetParent(IDXGIFactory)", hr);
+
+    // Windowed, legacy blit model: the most widely supported swap chain. A failure here is
+    // DXGI's: the window, the monitor it is on, or presentation to the X server.
     DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
     swapChainDesc.BufferDesc.Width = g_width;
     swapChainDesc.BufferDesc.Height = g_height;
@@ -192,30 +265,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     swapChainDesc.OutputWindow = g_window;
     swapChainDesc.Windowed = TRUE;
     swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
-    D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_10_0;
-    HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels,
-                                               ARRAYSIZE(levels), D3D11_SDK_VERSION, &swapChainDesc,
-                                               &g_swapChain, &g_device, &level, &g_context);
-    if (FAILED(hr)) return Fail(L"D3D11CreateDeviceAndSwapChain", hr);
-    hr = CreateTarget();
-    if (FAILED(hr)) return Fail(L"CreateRenderTargetView", hr);
-
-    // The adapter's name for the title bar, and no Alt+Enter: the test stays windowed.
-    wchar_t adapterName[128] = L"unknown adapter";
-    IDXGIDevice* dxgiDevice = nullptr;
-    IDXGIAdapter* adapter = nullptr;
-    IDXGIFactory* factory = nullptr;
-    if (SUCCEEDED(g_device->QueryInterface(IID_PPV_ARGS(&dxgiDevice))) && SUCCEEDED(dxgiDevice->GetAdapter(&adapter))) {
-        DXGI_ADAPTER_DESC adapterDesc = {};
-        if (SUCCEEDED(adapter->GetDesc(&adapterDesc))) std::wcsncpy(adapterName, adapterDesc.Description, 127);
-        if (SUCCEEDED(adapter->GetParent(IID_PPV_ARGS(&factory)))) {
-            factory->MakeWindowAssociation(g_window, DXGI_MWA_NO_ALT_ENTER);
-        }
-    }
+    hr = factory->CreateSwapChain(g_device, &swapChainDesc, &g_swapChain);
+    if (FAILED(hr)) return Fail(L"IDXGIFactory::CreateSwapChain", hr);
+    // No Alt+Enter: the test stays windowed.
+    factory->MakeWindowAssociation(g_window, DXGI_MWA_NO_ALT_ENTER);
     Release(factory);
     Release(adapter);
     Release(dxgiDevice);
+    hr = CreateTarget();
+    if (FAILED(hr)) return Fail(L"CreateRenderTargetView", hr);
+    const wchar_t* d3d11Kind = ModuleKind(L"d3d11.dll");
 
     ID3D11VertexShader* vertexShader = nullptr;
     ID3D11PixelShader* pixelShader = nullptr;
@@ -306,10 +365,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
 
         ++frames;
         if (now.QuadPart - lastTitle.QuadPart >= frequency.QuadPart) {
-            wchar_t title[256];
-            std::swprintf(title, 256, L"%ls - %ls - feature level %u_%u - %u fps", kTitle, adapterName,
+            wchar_t title[320];
+            std::swprintf(title, 320, L"%ls - %ls - feature level %u_%u - d3d11 %ls - %u fps", kTitle, adapterName,
                           (static_cast<unsigned>(level) >> 12) & 0xFu, (static_cast<unsigned>(level) >> 8) & 0xFu,
-                          frames);
+                          d3d11Kind, frames);
             SetWindowTextW(g_window, title);
             frames = 0;
             lastTitle = now;

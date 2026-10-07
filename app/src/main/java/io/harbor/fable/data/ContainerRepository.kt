@@ -986,24 +986,27 @@ class ContainerRepository internal constructor(
     }
 
     /**
-     * After [installDxWrappers]: warns when an app is about to start without DXVK (Direct3D
-     * would go through WineD3D, which needs OpenGL Android doesn't have, so the game stays
-     * black), and when DXVK is installed checks that its `d3d11.dll` and `dxgi.dll` really are
-     * in the prefix's system32, where Wine loads the native DLLs WINEDLLOVERRIDES asks for.
-     * Logging only: the launch goes on either way.
+     * After [installDxWrappers]: when a game or one of the Direct3D 9/11 tests is about to start
+     * without DXVK, fails the launch with a message that says what to do (Direct3D would go
+     * through WineD3D, which needs OpenGL Android doesn't have: the game stays black and the
+     * D3D11 test's swap chain creation fails with DXGI_ERROR_INVALID_CALL, 0x887A0001). The Wine
+     * desktop and GPU Info run without DXVK. When DXVK is installed, checks that its `d3d11.dll`
+     * and `dxgi.dll` really are in the prefix's system32 and load as native; that part only logs.
+     * Returns the failure to report, or null to go on.
      */
     private fun checkDxvk(direct3d: DxWrappers.Report, container: Container, exe: ExeEntry?, dir: File, log: LaunchLog): LaunchResult? {
         val dxvk = direct3d.installed[DxWrappers.Kind.DXVK]
         // The Wine desktop and GPU Info are useful without DXVK; D3D tests and games aren't.
-        val needsDxvk = exe != null && !exe.isTool ||
-            exe?.toolId == ContainerTools.D3D9_TEST.id || exe?.toolId == ContainerTools.D3D11_TEST.id
+        val isD3dTest = exe?.toolId == ContainerTools.D3D9_TEST.id || exe?.toolId == ContainerTools.D3D11_TEST.id
+        val needsDxvk = exe != null && !exe.isTool || isD3dTest
         if (dxvk == null) {
             if (!needsDxvk) return null
             val off = container.dxvkVersion?.trim().equals(ContainerDefaults.DXVK_OFF, ignoreCase = true)
+            val subject = if (isD3dTest) "${exe?.name} needs it" else "Direct3D games will not render"
             val warning = if (off) {
-                "DXVK is off for this container — Direct3D games will not render. Pick a DXVK build in the container's Settings."
+                "DXVK is off for this container — $subject. Pick a DXVK build in the container's Settings."
             } else {
-                "DXVK is not installed — Direct3D games will not render. Go to the Assets tab to download DXVK."
+                "DXVK is not installed — $subject. Go to the Assets tab to download DXVK."
             }
             log.line("WARNING $warning")
             Log.w(TAG, "${container.name}: $warning")
