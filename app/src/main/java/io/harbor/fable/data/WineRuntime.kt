@@ -373,6 +373,45 @@ internal class WineRuntime(
         /** Name of the file in the container directory that Wine/Box64/FEX output goes to. */
         const val LAUNCH_LOG = "fable-launch.log"
 
+        /**
+         * Directories (relative to the container) that can hold Wine's built-in PE DLLs, in the
+         * order Wine should search them. Bionic packages put them in `lib/wine/x86_64-windows`
+         * and `lib/wine/i386-windows`; some builds use `lib64/`. The plain `lib/wine` entries are
+         * kept for older layouts where Wine appends the `<arch>-windows` subdirectory itself.
+         */
+        val WINE_DLL_DIRS = listOf(
+            "lib/wine/x86_64-windows",
+            "lib64/wine/x86_64-windows",
+            "lib/wine/i386-windows",
+            "lib64/wine/i386-windows",
+            "lib/wine",
+            "lib64/wine",
+        )
+
+        /** Existing [WINE_DLL_DIRS] in [containerDir], as absolute paths. */
+        fun wineDllDirs(containerDir: File): List<File> =
+            WINE_DLL_DIRS.map { File(containerDir, it) }.filter { it.isDirectory }
+
+        /**
+         * `KEY=VALUE` variables that tell Wine where its own files are.
+         *
+         * Wine's compiled-in dll_dir is the Termux build path
+         * (`/data/data/com.termux/files/usr/lib/wine/x86_64-windows`), which doesn't exist on this
+         * device, so without WINEDLLPATH Wine can't find kernel32.dll / ntdll.dll and dies with
+         * `could not load kernel32.dll, status c0000135`. WINEDLLPATH points it at the PE DLLs
+         * actually installed in the container. WINELOADER / WINESERVER (set the way Winlator does)
+         * make Wine re-exec itself and start wineserver from the container instead of the
+         * compiled-in Termux `bin/`.
+         */
+        fun wineLocationEnvironment(containerDir: File): List<String> = buildList {
+            val dllPath = wineDllDirs(containerDir).joinToString(":") { it.absolutePath }
+            if (dllPath.isNotEmpty()) add("WINEDLLPATH=$dllPath")
+            val loader = File(containerDir, "bin/wine")
+            if (loader.isFile) add("WINELOADER=${loader.absolutePath}")
+            val server = File(containerDir, "bin/wineserver")
+            if (server.isFile) add("WINESERVER=${server.absolutePath}")
+        }
+
         /** `wine-9.20.wcp` -> `wine-9.20`, `Proton.9.0-x86_64.wcp` -> `Proton.9.0-x86_64`. */
         fun buildName(archive: File): String = archive.name
             .removeSuffix(".wcp.xz").removeSuffix(".wcp")

@@ -493,6 +493,25 @@ class ContainerRepository internal constructor(
         log.line("host CPU: ${cpu.name}, ${cpu.count} cores, max ${cpu.maxFrequencyHz?.let { "${it / 1_000_000} MHz" } ?: "unknown"}")
         log.line("lscpu stub: ${lscpu?.absolutePath ?: "couldn't be written"}")
 
+        // Wine's compiled-in dll_dir is the Termux build path, which doesn't exist on this
+        // device, so say exactly where Wine will look for its PE DLLs (WINEDLLPATH) and whether
+        // kernel32.dll / ntdll.dll are actually there. A c0000135 with these present means the
+        // search path is wrong; with them missing, the Wine package itself is incomplete.
+        val wineLocations = WineRuntime.wineLocationEnvironment(dir)
+        log.section("Wine DLL search path")
+        val wineDllPath = wineLocations.firstOrNull { it.startsWith("WINEDLLPATH=") }?.substringAfter('=')
+        log.line("WINEDLLPATH=${wineDllPath ?: "(not set: none of ${WineRuntime.WINE_DLL_DIRS.joinToString()} exist in ${dir.absolutePath})"}")
+        val dllDirs = WineRuntime.wineDllDirs(dir)
+        val kernel32 = dllDirs.map { File(it, "kernel32.dll") }.filter { it.isFile }
+        log.line(
+            "kernel32.dll in a WINEDLLPATH dir: " +
+                if (kernel32.isEmpty()) "NO (Wine will fail with c0000135)" else "yes (${kernel32.joinToString { it.absolutePath }})",
+        )
+        val ntdll = File(dir, "lib/wine/x86_64-windows/ntdll.dll").takeIf { it.isFile }
+            ?: File(dir, "lib64/wine/x86_64-windows/ntdll.dll").takeIf { it.isFile }
+        log.line("ntdll.dll in x86_64-windows: ${ntdll?.let { "yes (${it.absolutePath}, ${it.length()} bytes)" } ?: "NO"}")
+        wineLocations.filterNot { it.startsWith("WINEDLLPATH=") }.forEach { log.line(it) }
+
         // 5. Start the process.
         val environment = buildList {
             // Diagnostics: WINEDEBUG=-all hid why Wine stopped (it only printed "could not load
@@ -506,6 +525,9 @@ class ContainerRepository internal constructor(
             addAll(translator.environment)
             // What Winlator's bionic Wine reads instead of /etc/resolv.conf and netlink.
             addAll(runtime.bionicWineEnvironment())
+            // WINEDLLPATH / WINELOADER / WINESERVER: Wine's compiled-in paths point into Termux's
+            // prefix, so tell it where kernel32.dll, ntdll.dll and wineserver really are.
+            addAll(wineLocations)
             if (screen != null) {
                 add("DISPLAY=${screen.display}")
                 // Native (aarch64 bionic) libX11/libxcb for Box64's wrapped libX11, then the system

@@ -146,10 +146,14 @@ internal object WineProcessLauncher {
         log.line("argv built: $printable")
 
         // Same header the native launcher wrote, so a failed start can be reproduced from the log.
+        // WINEDLLPATH / WINELOADER / WINESERVER are named explicitly (the WINE prefix also matches
+        // them) because they are what fixes `could not load kernel32.dll, status c0000135`: they
+        // must stay visible in the log even if the WINE* filter is ever narrowed.
         val header = buildString {
             append("[fable] ").append(printable).append('\n')
             env.toSortedMap().forEach { (key, value) ->
-                if (key == "DISPLAY" || key.startsWith("WINE") || key.startsWith("BOX64") || key.startsWith("LD_") ||
+                if (key == "DISPLAY" || key == "WINEDLLPATH" || key == "WINELOADER" || key == "WINESERVER" ||
+                    key.startsWith("WINE") || key.startsWith("BOX64") || key.startsWith("LD_") ||
                     key == "PATH" || key == "HOME" || key == "TMPDIR" || key.startsWith("VK_") || key.startsWith("FEX") ||
                     key == "USER" || key == "XDG_CACHE_HOME" || key.startsWith("ADRENOTOOLS") || key == "FABLE_VULKAN_DRIVER" ||
                     key == "FONTCONFIG_FILE" || key.startsWith("ANDROID_")
