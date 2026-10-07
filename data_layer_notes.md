@@ -86,14 +86,29 @@ Wired up as the application entry point.
   Screens use this to reach the repositories.
 
 ### Default catalog
-| Owner | Repo | Type | Globs |
-|---|---|---|---|
-| Kron4ek | Wine-Builds | WINE | `*amd64*.tar.xz`, `*amd64*.tar.gz` |
-| KreitinnSoftware | MiceWine-Repository | BOX64 | `box64-*-aarch64.rat` (tar.xz, `usr/bin/box64`; Android NDK build) |
-| Xnick417x | winlator-nightly-wcp | BOX64 | `Box64-*.wcp` (tar.xz, `box64` at the root; nightly Android NDK build) |
-| FEX-Emu | FEX | FEX | ARM64 binary globs; upstream ships none, so this lists nothing |
-| doitsujin | dxvk | DXVK | `regex:^dxvk-[0-9][0-9.]*\.tar\.(gz\|zst)$` (not the `dxvk-native-*` Linux builds) |
-| GGlessT | modern-treex | OTHER | `*.zip`, `*.tar.gz` |
+| Owner | Repo | Type | Source | Globs |
+|---|---|---|---|---|
+| StevenMXZ | Winlator-Contents | WINE | GitHub release | `regex:^wine-[0-9][0-9.]*\.wcp$`, `regex:^proton[.-][0-9][0-9.]*-x86_64\.wcp$` (bionic `.wcp`: `profile.json`, `bin/`, `lib/`, `prefixPack.txz`) |
+| KreitinnSoftware | MiceWine-Repository | BOX64 | GitHub release | `box64-*-aarch64.rat` (tar.xz, `usr/bin/box64`; Android NDK build) |
+| Xnick417x | winlator-nightly-wcp | BOX64 | GitHub release | `Box64-*.wcp` (tar.xz, `box64` at the root; nightly Android NDK build) |
+| StevenMXZ | Winlator-Contents | BOX64 | `contents.json` (`Box64`) | `regex:^box64-.*\.wcp$` |
+| StevenMXZ | Winlator-Contents | DXVK | `contents.json` (`DXVK`) | `regex:^(?!.*arm64ec)dxvk-.*\.wcp$` (gplasync, sarek, async, 1.x) |
+| StevenMXZ | Winlator-Contents | VKD3D | `contents.json` (`VKD3D`) | `regex:^(?!.*arm64ec)vkd3d-.*\.wcp$` |
+| StevenMXZ | Winlator-Contents | FEX | `contents.json` (`FEXCore`) | `*.wcp` (ARM64EC Wine DLLs, not a FEXInterpreter; never the recommended FEX pick) |
+| FEX-Emu | FEX | FEX | GitHub release | ARM64 binary globs; upstream ships none, so this lists nothing |
+| doitsujin | dxvk | DXVK | GitHub release | `regex:^dxvk-[0-9][0-9.]*\.tar\.(gz\|zst)$` (not the `dxvk-native-*` Linux builds) |
+| HansKristian-Work | vkd3d-proton | VKD3D | GitHub release | `regex:^vkd3d-proton-[0-9][0-9a-z.]*\.tar\.(zst\|gz\|xz)$` |
+| GGlessT | modern-treex | OTHER | GitHub release | `*.zip`, `*.tar.gz` |
+
+A `contents.json` source (`CatalogSource.contentsIndex`, read by `WinlatorContentsFetcher`) is
+the index Winlator's Contents Manager installs from: `[{type, verName, verCode, remoteUrl}]`.
+The `.wcp` files it points at are plain files in the repository tree, not release assets, which
+is why these sources don't go through the GitHub releases API. Their slug carries a `@<types>`
+suffix (`StevenMXZ/Winlator-Contents@dxvk`) so each gets its own download directory and
+`downloadedFiles(type)` keeps typing files by directory. `.wcp` is a tar (xz in this index,
+zstd elsewhere) with a `profile.json`; `ArchiveExtractor` sniffs the compression, `DxWrappers`
+installs the `system32/` + `syswow64/` layout, and `WineRuntime.ensureBox64` finds the bare
+`box64`.
 
 The RADV Xclipse driver has its own feed (`RadvReleaseProvider`); a persisted
 catalog from an older build that still lists a `VULKAN_DRIVER` source is

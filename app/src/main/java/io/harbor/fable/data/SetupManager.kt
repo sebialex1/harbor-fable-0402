@@ -3,6 +3,7 @@ package io.harbor.fable.data
 import android.content.Context
 import android.util.Log
 import io.harbor.fable.data.models.AssetEntry
+import io.harbor.fable.data.models.AssetSource
 import io.harbor.fable.data.models.AssetType
 import io.harbor.fable.data.models.InstalledDriver
 import io.harbor.fable.data.models.RadvRelease
@@ -274,11 +275,16 @@ class SetupManager internal constructor(
         entries.filter { it.type == AssetType.BOX64 }
             .minByOrNull { box64Rank(it.name) }
             ?.let { picks[RecommendedKind.BOX64] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
-        entries.firstOrNull { it.type == AssetType.DXVK && WineRuntime.isDxvkPackageName(it.name) }
+        // Upstream release tarballs stay the recommendation for DXVK / VKD3D-Proton; the Winlator
+        // .wcp variants (gplasync, sarek, …) are there to pick by hand in Assets.
+        val upstreamFirst = entries.sortedBy { if (it.source == AssetSource.GITHUB_RELEASE) 0 else 1 }
+        upstreamFirst.firstOrNull { it.type == AssetType.DXVK && WineRuntime.isDxvkPackageName(it.name) }
             ?.let { picks[RecommendedKind.DXVK] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
-        entries.firstOrNull { it.type == AssetType.VKD3D && WineRuntime.isVkd3dPackageName(it.name) }
+        upstreamFirst.firstOrNull { it.type == AssetType.VKD3D && WineRuntime.isVkd3dPackageName(it.name) }
             ?.let { picks[RecommendedKind.VKD3D] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
-        entries.filter { it.type == AssetType.FEX }
+        // Winlator's FEXCore .wcp packages are ARM64EC Wine DLLs, not a FEXInterpreter, so they
+        // are never what a FEX container needs first.
+        entries.filter { it.type == AssetType.FEX && !it.name.endsWith(".wcp", ignoreCase = true) }
             .minByOrNull { box64Rank(it.name) }
             ?.let { picks[RecommendedKind.FEX] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
         releases.firstOrNull { it.channel == ReleaseChannel.LATEST }

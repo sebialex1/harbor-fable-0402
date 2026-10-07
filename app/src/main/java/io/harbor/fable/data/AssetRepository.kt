@@ -19,11 +19,13 @@ import java.io.File
 import java.io.IOException
 
 /**
- * One GitHub release source in the catalog.
+ * One source in the catalog: a GitHub repository's releases or, with [contentsIndex], a Winlator
+ * `contents.json` index of `.wcp` packages (see [WinlatorContentsFetcher]).
  *
- * [assetGlobs] filters the release assets. An empty list keeps every non-
- * checksum asset. [displayName] is the user-facing label; [type] determines
- * which [AssetType] the resulting [AssetEntry] records get.
+ * [assetGlobs] filters the release assets (or the index's file names). An empty list keeps every
+ * non-checksum asset. [displayName] is the user-facing label; [type] determines which [AssetType]
+ * the resulting [AssetEntry] records get. [contentsTypes] are the index's own `type` values
+ * (`DXVK`, `VKD3D`, `Box64`, `FEXCore`, `Wine`, `Proton`) this source lists; empty keeps all.
  */
 data class CatalogSource(
     val owner: String,
@@ -32,8 +34,22 @@ data class CatalogSource(
     val type: AssetType,
     val assetGlobs: List<String> = emptyList(),
     val notes: String? = null,
+    val contentsIndex: String? = null,
+    val contentsTypes: List<String> = emptyList(),
 ) {
-    val slug: String get() = "$owner/$repo"
+    /**
+     * Catalog key and download directory. An index source of the same repository gets a suffix
+     * so its files don't share a directory with the release source's (the download directory
+     * is what [AssetRepository.downloadedFiles] types files by).
+     */
+    val slug: String
+        get() = if (contentsIndex == null) {
+            "$owner/$repo"
+        } else {
+            "$owner/$repo@" + (contentsTypes.ifEmpty { listOf("contents") }).joinToString("+") { it.lowercase() }
+        }
+
+    val isContentsIndex: Boolean get() = contentsIndex != null
 }
 
 /**
@@ -64,6 +80,7 @@ class AssetRepository internal constructor(
     private val catalogFile: File,
     private val assetsRoot: File,
     initialCatalog: List<CatalogSource> = defaultCatalog,
+    private val contentsFetcher: WinlatorContentsFetcher = WinlatorContentsFetcher.get(appContext),
 ) {
     private val mutex = Mutex()
 
@@ -140,6 +157,10 @@ class AssetRepository internal constructor(
 
             for (source in catalogSources.values) {
                 try {
+                    if (source.isContentsIndex) {
+                        for (entry in resolveContents(source, forceRefresh)) newEntries[entry.id] = entry
+                        continue
+                    }
                     // Newest release first, so "first match" consumers (setup picks) see the latest build.
                     for ((release, filtered) in resolveReleases(source, forceRefresh)) {
                         val builds = filtered.map { asset ->
@@ -184,6 +205,36 @@ class AssetRepository internal constructor(
             _refreshErrors.value = errors.toMap()
         } finally {
             _isRefreshing.value = false
+        }
+    }
+
+    /**
+     * The packages a Winlator index source lists, newest first: the index's items of the source's
+     * [CatalogSource.contentsTypes] whose file names match its globs, trimmed to
+     * [CatalogPolicy.indexLimit]. Indexes list oldest first and carry no sizes or checksums; the
+     * download manager learns the size from the server.
+     */
+    private suspend fun resolveContents(source: CatalogSource, forceRefresh: Boolean): List<AssetEntry> {
+        val indexUrl = source.contentsIndex ?: return emptyList()
+        val wanted = source.contentsTypes.map { it.lowercase() }.toSet()
+        val items = contentsFetcher.fetchOrCached(indexUrl, forceRefresh)
+            .filter { wanted.isEmpty() || it.type.lowercase() in wanted }
+            .filter { matchesAnyPattern(it.fileName, source.assetGlobs) }
+            .distinctBy { it.remoteUrl }
+            .asReversed()
+            .take(CatalogPolicy.indexLimit(source.type))
+        return items.map { item ->
+            AssetEntry(
+                id = "${source.slug}/${item.fileName}",
+                name = item.fileName,
+                version = item.versionName,
+                type = source.type,
+                downloadUrl = item.remoteUrl,
+                source = AssetSource.DIRECT_URL,
+                sourceRepo = source.slug,
+                fileSizeBytes = 0,
+                sha256 = null,
+            ).let { reconcileDownloadStatus(it) }
         }
     }
 
@@ -426,9 +477,16 @@ class AssetRepository internal constructor(
             }
         }
         for (source in initialDefaults) {
-            if (!catalogSources.containsKey(source.slug)) {
+            val existing = catalogSources[source.slug]
+            if (existing == null) {
                 catalogSources[source.slug] = source
                 Log.i(TAG, "Added default source ${source.slug} (catalog defaults v$fromVersion -> v$DEFAULTS_VERSION)")
+                changed = true
+            } else if (existing != source) {
+                // A default whose definition moved on (new globs, a renamed label): take the
+                // current one. Only defaults are keyed by these slugs, so nothing user-made is hit.
+                catalogSources[source.slug] = source
+                Log.i(TAG, "Updated default source ${source.slug} (catalog defaults v$fromVersion -> v$DEFAULTS_VERSION)")
                 changed = true
             }
         }
@@ -452,6 +510,8 @@ class AssetRepository internal constructor(
         put("type", source.type.name)
         put("assetGlobs", JSONArray().apply { source.assetGlobs.forEach { put(it) } })
         putNullable("notes", source.notes)
+        putNullable("contentsIndex", source.contentsIndex)
+        put("contentsTypes", JSONArray().apply { source.contentsTypes.forEach { put(it) } })
     }
 
     private fun catalogSourceFromJson(obj: JSONObject): CatalogSource {
@@ -460,6 +520,11 @@ class AssetRepository internal constructor(
         for (i in 0 until globsArray.length()) {
             globs.add(globsArray.optString(i))
         }
+        val typesArray = obj.optJSONArray("contentsTypes") ?: JSONArray()
+        val contentsTypes = ArrayList<String>(typesArray.length())
+        for (i in 0 until typesArray.length()) {
+            typesArray.optString(i).takeIf { it.isNotBlank() }?.let { contentsTypes.add(it) }
+        }
         return CatalogSource(
             owner = obj.getString("owner"),
             repo = obj.getString("repo"),
@@ -467,6 +532,8 @@ class AssetRepository internal constructor(
             type = runCatching { AssetType.valueOf(obj.optString("type")) }.getOrDefault(AssetType.OTHER),
             assetGlobs = globs,
             notes = obj.stringOrNull("notes"),
+            contentsIndex = obj.stringOrNull("contentsIndex"),
+            contentsTypes = contentsTypes,
         )
     }
 
@@ -487,8 +554,12 @@ class AssetRepository internal constructor(
          *      rootfs) to bionic `.wcp` packages from `StevenMXZ/Winlator-Contents`.
          * - 4: VKD3D-Proton (`HansKristian-Work/vkd3d-proton`) added, so Direct3D 12 games get a
          *      d3d12.dll next to DXVK.
+         * - 5: Winlator `.wcp` packages from the `StevenMXZ/Winlator-Contents` index (DXVK,
+         *      VKD3D, Box64, FEXCore) added, and the Wine source there also lists the x86_64
+         *      Proton package. Default sources already in the file are re-synced to their current
+         *      definition (globs, names) from here on; user-added sources are left alone.
          */
-        internal const val DEFAULTS_VERSION = 4
+        internal const val DEFAULTS_VERSION = 5
 
         /** Former default sources that are removed from persisted catalogs on migration. */
         internal val retiredDefaultSlugs: List<String> = listOf("ptitSeb/box64", "Kron4ek/Wine-Builds")
@@ -511,13 +582,18 @@ class AssetRepository internal constructor(
             CatalogSource(
                 owner = "StevenMXZ",
                 repo = "Winlator-Contents",
-                displayName = "Wine (Winlator bionic)",
+                displayName = "Wine / Proton (Winlator bionic)",
                 type = AssetType.WINE,
-                // wine-9.20.wcp: zstd tar, profile.json + bin/ + lib/wine/{x86_64,i386}-windows +
-                // x86_64-unix + prefixPack.txz. Proton.9.0-x86_64.wcp and proton-10-arm64ec are
-                // skipped exactly as Winlator-Ludashi's ContentsManager skips them.
-                assetGlobs = listOf("regex:^wine-[0-9][0-9.]*\\.wcp$"),
-                notes = "Bionic x86_64 Wine for Box64 (Winlator .wcp format)",
+                // wine-9.20.wcp: xz tar, profile.json + bin/ + lib/wine/{x86_64,i386}-windows +
+                // x86_64-unix + prefixPack.txz. Proton.9.0-x86_64.wcp has the very same layout
+                // (profile.json type "Proton", wine.binPath/libPath/prefixPack), so it is a Wine
+                // build to Fable. proton-10-arm64ec.wcp.xz needs FEXCore / WOWBox64 DLLs an
+                // x86_64 Box64 setup can't use and stays out.
+                assetGlobs = listOf(
+                    "regex:^wine-[0-9][0-9.]*\\.wcp$",
+                    "regex:^proton[.-][0-9][0-9.]*-x86_64\\.wcp$",
+                ),
+                notes = "Bionic x86_64 Wine and Proton for Box64 (Winlator .wcp format)",
             ),
             // Upstream ptitSeb/box64 releases ship no Android or ARM64 binaries (only the
             // x86 library bundles), so Box64 comes from projects that publish Android NDK
@@ -542,6 +618,57 @@ class AssetRepository internal constructor(
                 // WOWBox64-*.wcp (Wine WoW64 DLL) and FEXCore-*.wcp assets are not picked up.
                 assetGlobs = listOf("Box64-*.wcp"),
                 notes = "Daily builds of upstream Box64 for Android (bionic). Newer, less tested",
+            ),
+            // Winlator's own content index (contents.json, what Winlator-Ludashi's Contents
+            // Manager installs from). Its .wcp files live in the repository tree, not in
+            // releases, so these sources read the index instead of the GitHub releases API.
+            CatalogSource(
+                owner = "StevenMXZ",
+                repo = "Winlator-Contents",
+                displayName = "Box64 (Winlator .wcp)",
+                type = AssetType.BOX64,
+                contentsIndex = WinlatorContentsFetcher.STEVENMXZ_INDEX,
+                contentsTypes = listOf("Box64"),
+                // box64-0.4.4.wcp: xz tar with profile.json + a bare bionic `box64`.
+                assetGlobs = listOf("regex:^box64-.*\\.wcp$"),
+                notes = "Box64 builds Winlator ships, including the -fix variants",
+            ),
+            CatalogSource(
+                owner = "StevenMXZ",
+                repo = "Winlator-Contents",
+                displayName = "DXVK (Winlator .wcp)",
+                type = AssetType.DXVK,
+                contentsIndex = WinlatorContentsFetcher.STEVENMXZ_INDEX,
+                contentsTypes = listOf("DXVK"),
+                // dxvk-2.7.1-gplasync.wcp: system32/ + syswow64/ DLLs next to profile.json
+                // (DxWrappers installs that layout). ARM64EC builds can't load in x86_64 Wine.
+                assetGlobs = listOf("regex:^(?!.*arm64ec)dxvk-.*\\.wcp$"),
+                notes = "DXVK variants Winlator ships: gplasync, sarek, async, legacy 1.x",
+            ),
+            CatalogSource(
+                owner = "StevenMXZ",
+                repo = "Winlator-Contents",
+                displayName = "VKD3D-Proton (Winlator .wcp)",
+                type = AssetType.VKD3D,
+                contentsIndex = WinlatorContentsFetcher.STEVENMXZ_INDEX,
+                contentsTypes = listOf("VKD3D"),
+                // vkd3d-proton-3.0b-2763dd2.wcp: system32/ + syswow64/ d3d12.dll + d3d12core.dll.
+                assetGlobs = listOf("regex:^(?!.*arm64ec)vkd3d-.*\\.wcp$"),
+                notes = "VKD3D-Proton builds Winlator ships",
+            ),
+            CatalogSource(
+                owner = "StevenMXZ",
+                repo = "Winlator-Contents",
+                displayName = "FEXCore (Winlator .wcp)",
+                type = AssetType.FEX,
+                contentsIndex = WinlatorContentsFetcher.STEVENMXZ_INDEX,
+                contentsTypes = listOf("FEXCore"),
+                assetGlobs = listOf("*.wcp"),
+                // 2609.wcp: libarm64ecfex / libwow64fex .dll + .so — the in-Wine FEX of ARM64EC
+                // Wine builds, not a standalone FEXInterpreter. Listed so the packages are at
+                // hand; a container set to FEX still needs an interpreter build to launch.
+                notes = "FEXCore DLLs for ARM64EC Wine. Not a standalone FEXInterpreter: " +
+                    "containers set to FEX can't launch with only this",
             ),
             CatalogSource(
                 owner = "FEX-Emu",

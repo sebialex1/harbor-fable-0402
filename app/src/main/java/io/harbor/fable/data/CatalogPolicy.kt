@@ -21,6 +21,16 @@ internal object CatalogPolicy {
         else -> DEFAULT_RELEASES_PER_SOURCE
     }
 
+    /**
+     * How many packages a Winlator `contents.json` source lists, newest first. The index is the
+     * whole history of a component (every DXVK since 1.5.5), and the variants are the point of
+     * it (gplasync, sarek, -fix builds), so more than one is kept — but not a decade's worth.
+     */
+    fun indexLimit(type: AssetType): Int = when (type) {
+        AssetType.DXVK, AssetType.VKD3D -> 8
+        else -> DEFAULT_RELEASES_PER_SOURCE
+    }
+
     private val StableWow64 = Regex("""^wine-[0-9][0-9.]*-amd64-wow64\.tar\.(xz|gz)$""", RegexOption.IGNORE_CASE)
     private val StableAmd64 = Regex("""^wine-[0-9][0-9.]*-amd64\.tar\.(xz|gz)$""", RegexOption.IGNORE_CASE)
 
