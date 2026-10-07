@@ -24,6 +24,7 @@ import com.winlator.xserver.XLock;
 import com.winlator.xserver.XServer;
 
 import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -50,6 +51,8 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private boolean magnifierEnabled = true;
     private int surfaceWidth;
     private int surfaceHeight;
+    /** Frames drawn since the last {@link #takeFrameCount()} (read by the performance HUD). */
+    private final AtomicInteger frameCounter = new AtomicInteger();
 
     public GLRenderer(XServerView xServerView, XServer xServer) {
         this.xServerView = xServerView;
@@ -96,6 +99,12 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         }
 
         drawFrame();
+        frameCounter.incrementAndGet();
+    }
+
+    /** Returns the number of frames drawn since the previous call and resets the counter. */
+    public int takeFrameCount() {
+        return frameCounter.getAndSet(0);
     }
 
     private void drawFrame() {
