@@ -2,6 +2,7 @@ package io.harbor.fable.display
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
@@ -17,13 +18,25 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.winlator.widget.XServerView
 import io.harbor.fable.data.ContainerRepository
+import io.harbor.fable.data.WineFailure
 import com.winlator.xserver.Pointer
+import com.winlator.xserver.Window
+import com.winlator.xserver.WindowManager as XWindowManager
 import com.winlator.xserver.XServer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlin.math.hypot
 
 /**
@@ -40,6 +53,11 @@ import kotlin.math.hypot
  * A small performance HUD in the top-left corner shows the display's frame rate (frames the
  * renderer actually drew — it renders on demand, so an idle desktop reads low), the X screen
  * resolution and, when `/proc` allows it, CPU usage.
+ *
+ * Until Wine maps its first window a "Starting Wine…" label is shown. If the Wine process dies
+ * meanwhile (or later) with a failure status, [ContainerRepository.wineFailures] reports why and
+ * the screen shows that reason — overlay plus dialog with a Close button — instead of staying
+ * black with only the cursor.
  */
 class DisplayActivity : Activity() {
     @Volatile private var view: XServerView? = null
@@ -58,6 +76,14 @@ class DisplayActivity : Activity() {
     private var carryY = 0f
     private var tapCandidate = false
     private val touchSlopPx by lazy { TOUCH_SLOP_DP * resources.displayMetrics.density }
+
+    // Startup status and failure reporting.
+    private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var statusText: TextView? = null
+    private var errorPanel: View? = null
+    private var failureDialog: AlertDialog? = null
+    private var shownFailure: WineFailure? = null
+    private var windowListener: XWindowManager.OnWindowModificationListener? = null
 
     // Performance HUD. Sampling (frame counter, /proc reads) runs on its own thread; the text
     // is posted back to the main thread.
@@ -97,14 +123,19 @@ class DisplayActivity : Activity() {
         xServer.renderer = created.renderer
         created.setOnTouchListener { _, event -> onTouch(xServer, created, event) }
         val hud = createHud(xServer)
+        val status = createStatusText()
         setContentView(FrameLayout(this).apply {
             addView(created)
             addView(hud)
+            addView(status)
         })
         view = created
         hudText = hud
+        statusText = status
         server = xServer
         hideSystemBars()
+        watchFirstWindow(xServer)
+        observeWineFailures()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -125,10 +156,17 @@ class DisplayActivity : Activity() {
     }
 
     override fun onDestroy() {
+        uiScope.cancel()
+        failureDialog?.dismiss()
+        failureDialog = null
+        server?.let { xServer -> windowListener?.let { listener -> removeWindowListener(xServer, listener) } }
+        windowListener = null
         view?.renderer?.release()
         view = null
         server = null
         hudText = null
+        statusText = null
+        errorPanel = null
         // Only a real exit stops Wine; a recreate (config change not covered by the manifest)
         // comes straight back to the same display.
         if (isFinishing && !isChangingConfigurations) stopContainer()
@@ -245,6 +283,155 @@ class DisplayActivity : Activity() {
             }
         }
         return true
+    }
+
+    /** Centered "Starting Wine…" label, hidden once Wine maps a window (see [watchFirstWindow]). */
+    private fun createStatusText(): TextView {
+        val density = resources.displayMetrics.density
+        return TextView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER,
+            )
+            setTextColor(0xAAFFFFFF.toInt())
+            textSize = 14f
+            val pad = (8f * density).toInt()
+            setPadding(pad * 2, pad, pad * 2, pad)
+            isClickable = false
+            isFocusable = false
+            text = "Starting Wine\u2026"
+        }
+    }
+
+    /** Hides the startup label as soon as any top-level X window is mapped (Wine's desktop). */
+    private fun watchFirstWindow(xServer: XServer) {
+        val alreadyMapped = runCatching {
+            xServer.lock(XServer.Lockable.WINDOW_MANAGER).use {
+                xServer.windowManager.rootWindow.children.any { it.attributes.isMapped }
+            }
+        }.getOrDefault(false)
+        if (alreadyMapped) {
+            statusText?.visibility = View.GONE
+            return
+        }
+        val listener = object : XWindowManager.OnWindowModificationListener {
+            override fun onMapWindow(window: Window) {
+                statusText?.let { label -> label.post { label.visibility = View.GONE } }
+            }
+        }
+        windowListener = listener
+        runCatching {
+            xServer.lock(XServer.Lockable.WINDOW_MANAGER).use { xServer.windowManager.addOnWindowModificationListener(listener) }
+        }.onFailure { Log.w(TAG, "Couldn't watch for Wine's first window", it) }
+    }
+
+    private fun removeWindowListener(xServer: XServer, listener: XWindowManager.OnWindowModificationListener) {
+        runCatching {
+            xServer.lock(XServer.Lockable.WINDOW_MANAGER).use { xServer.windowManager.removeOnWindowModificationListener(listener) }
+        }
+    }
+
+    /** Shows [ContainerRepository.wineFailures] for this container as soon as one is reported. */
+    private fun observeWineFailures() {
+        val id = containerId ?: return
+        val repository = runCatching { ContainerRepository.get(applicationContext) }.getOrNull() ?: return
+        uiScope.launch {
+            repository.wineFailures
+                .map { failures -> failures[id] }
+                .distinctUntilChanged()
+                .collect { failure -> if (failure != null) showFailure(failure) }
+        }
+    }
+
+    /**
+     * Replaces the black screen with why Wine stopped: an on-screen panel (stays up) and a dialog
+     * whose Close button leaves the display, which stops the container.
+     */
+    private fun showFailure(failure: WineFailure) {
+        if (isFinishing || isDestroyed || shownFailure == failure) return
+        shownFailure = failure
+        Log.w(TAG, "Wine failed for ${failure.containerId}: ${failure.reason} (missing: ${failure.missingLibraries})")
+        statusText?.visibility = View.GONE
+        val title = failureTitle(failure)
+        val message = failureMessage(failure)
+        val root = window.decorView.findViewById<ViewGroup>(android.R.id.content)?.getChildAt(0) as? FrameLayout
+        errorPanel?.let { root?.removeView(it) }
+        val panel = createErrorPanel(title, message)
+        root?.addView(panel)
+        errorPanel = panel
+        failureDialog?.dismiss()
+        failureDialog = runCatching {
+            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(title)
+                .setMessage(message)
+                .setCancelable(false)
+                .setPositiveButton("Close") { _, _ -> closeAfterFailure(failure) }
+                .setNegativeButton("Keep screen") { dialog, _ -> dialog.dismiss() }
+                .show()
+        }.onFailure { Log.w(TAG, "Couldn't show the failure dialog", it) }.getOrNull()
+    }
+
+    private fun closeAfterFailure(failure: WineFailure) {
+        Toast.makeText(applicationContext, "${failureTitle(failure)}: ${failure.reason}".take(200), Toast.LENGTH_LONG).show()
+        finish()
+    }
+
+    private fun failureTitle(failure: WineFailure): String =
+        if (failure.duringStartup) "${failure.label} couldn't start" else "${failure.label} stopped"
+
+    private fun failureMessage(failure: WineFailure): String = buildString {
+        append(failure.reason)
+        if (failure.missingLibraries.isNotEmpty()) {
+            append("\n\nMissing native libraries: ").append(failure.missingLibraries.joinToString())
+        }
+        append("\n\nWine ran for ").append(String.format(java.util.Locale.US, "%.1f", failure.uptimeMs / 1000f)).append(" s.")
+        if (failure.logPath != null) append(" The full launch log is in Settings.")
+    }
+
+    /** Opaque, touch-consuming panel over the X server view with the failure and a Close button. */
+    private fun createErrorPanel(title: String, message: String): View {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20f), dp(16f), dp(20f), dp(12f))
+            background = GradientDrawable().apply {
+                setColor(0xEE202124.toInt())
+                cornerRadius = 12f * density
+            }
+            addView(TextView(this@DisplayActivity).apply {
+                setTextColor(0xFFFFFFFF.toInt())
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+                text = title
+            })
+            addView(TextView(this@DisplayActivity).apply {
+                setTextColor(0xDDFFFFFF.toInt())
+                textSize = 14f
+                setPadding(0, dp(8f), 0, dp(8f))
+                setTextIsSelectable(true)
+                text = message
+            })
+            addView(Button(this@DisplayActivity).apply {
+                text = "Close"
+                setOnClickListener { shownFailure?.let(::closeAfterFailure) ?: finish() }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.END
+            })
+        }
+        return FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setBackgroundColor(0xCC000000.toInt())
+            // Swallow touches so they don't reach the X server underneath.
+            isClickable = true
+            isFocusable = true
+            addView(content, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER,
+            ).apply { setMargins(dp(32f), dp(24f), dp(32f), dp(24f)) })
+        }
     }
 
     /** Small semi-transparent label for the top-left corner; doesn't take touches. */

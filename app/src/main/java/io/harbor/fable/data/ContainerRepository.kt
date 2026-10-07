@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -76,6 +77,16 @@ class ContainerRepository internal constructor(
 
     /** Every executable registered against any container. */
     val exes: StateFlow<List<ExeEntry>> = _exes.asStateFlow()
+
+    private val _wineFailures = MutableStateFlow<Map<String, WineFailure>>(emptyMap())
+
+    /**
+     * Why a container's launched Wine process died after the launch had already been reported
+     * as started (so the display is up), keyed by container id. [DisplayActivity][io.harbor.fable.display.DisplayActivity]
+     * shows it instead of leaving a black screen. Cleared when the container is launched again
+     * or stopped.
+     */
+    val wineFailures: StateFlow<Map<String, WineFailure>> = _wineFailures.asStateFlow()
 
     init {
         val loaded = runCatching { dao.read() }.getOrElse { error ->
@@ -351,6 +362,7 @@ class ContainerRepository internal constructor(
     private suspend fun start(container: Container, exe: ExeEntry?): LaunchResult {
         // A second tap while the first launch is still preparing would start Wine twice.
         if (!starting.add(container.id)) return LaunchResult.Failed("${container.name} is already starting")
+        _wineFailures.update { it - container.id }
         val log = LaunchLog.begin(logsRoot, container.name, container.id)
         log.line("target: ${exe?.let { "${it.name} (${it.path})" } ?: "Wine desktop"}")
         try {
@@ -528,6 +540,7 @@ class ContainerRepository internal constructor(
             }
         }
         val pid = started.pid
+        val spawnedAt = System.nanoTime()
         log.line("spawned pid $pid")
 
         // 6. A process that dies straight away has a reason worth showing (missing libraries, …).
@@ -544,7 +557,11 @@ class ContainerRepository internal constructor(
             delay(REAPER_GRACE_MS)
             log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
             setStatus(container.id, ContainerStatus.READY)
-            val reason = WineRuntime.lastLogLine(dir)
+            // Name what broke (missing libfreetype.so, kernel32.dll c0000135, …) rather than only
+            // echoing the last line of output.
+            val diagnosis = WineDiagnosis.analyze(processLog)
+            logDiagnosis(log, diagnosis, screen)
+            val reason = diagnosis.summary() ?: WineRuntime.lastLogLine(dir)
             val hint = translator.earlyExitHint
                 ?.takeIf { current.envVars.keys.none { key -> key == FEX_ROOTFS_ENV } }
                 ?.let { " ($it)" }
@@ -553,7 +570,7 @@ class ContainerRepository internal constructor(
                 (if (reason != null) "$label stopped right away: $reason" else "$label stopped right away") + hint
             )
         }
-        markStarted(container.id, exe?.id, started, log, processLog)
+        markStarted(container.id, exe?.id, started, log, processLog, label, spawnedAt, screen)
         return LaunchResult.Started(pid)
     }
 
@@ -700,6 +717,7 @@ class ContainerRepository internal constructor(
      * parent), and the X display server. The container goes back to READY.
      */
     suspend fun stopContainer(containerId: String) = withContext(Dispatchers.IO) {
+        _wineFailures.update { it - containerId }
         runningPids.remove(containerId)
         val tracked = processes.remove(containerId).orEmpty()
         tracked.forEach { process -> runCatching { process.destroy() } }
@@ -743,8 +761,21 @@ class ContainerRepository internal constructor(
         }
     }
 
-    /** Records a started process: container RUNNING, exe play stats, and a watcher that flips back on exit. */
-    private suspend fun markStarted(containerId: String, exeId: String?, started: WineProcess, log: LaunchLog, processLog: File) {
+    /**
+     * Records a started process: container RUNNING, exe play stats, and a watcher that flips back
+     * on exit and, when the process dies on its own with a failure status, publishes a
+     * [WineFailure] for the display screen.
+     */
+    private suspend fun markStarted(
+        containerId: String,
+        exeId: String?,
+        started: WineProcess,
+        log: LaunchLog,
+        processLog: File,
+        label: String,
+        spawnedAt: Long,
+        screen: DisplayEnv?,
+    ) {
         val pid = started.pid
         mutex.withLock {
             containersById[containerId]?.let { containersById[containerId] = it.copy(status = ContainerStatus.RUNNING) }
@@ -756,12 +787,23 @@ class ContainerRepository internal constructor(
         runningPids.getOrPut(containerId) { ConcurrentHashMap.newKeySet() }.add(pid)
         processes.getOrPut(containerId) { ConcurrentHashMap.newKeySet() }.add(started)
         scope.launch {
-            while (started.isAlive()) delay(PROCESS_POLL_MS)
+            // Poll faster while Wine is starting so a failure replaces the black screen quickly.
+            while (started.isAlive()) {
+                delay(if (elapsedMs(spawnedAt) < STARTUP_FAILURE_WINDOW_MS) STARTUP_POLL_MS else PROCESS_POLL_MS)
+            }
+            val uptimeMs = elapsedMs(spawnedAt)
             // The reaper thread appends "[fable] exit code N" / "killed by signal N"; give it a beat.
             delay(PROCESS_POLL_MS)
             log.section("Process $pid ended")
             log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
+            // stopContainer() drops the container's process set before ending them: an exit it
+            // caused (the user left the display) is not a failure.
+            val stoppedByUser = processes[containerId]?.contains(started) != true
             processes[containerId]?.remove(started)
+            if (!stoppedByUser) {
+                runCatching { reportUnexpectedExit(containerId, label, started, uptimeMs, log, processLog, screen) }
+                    .onFailure { Log.w(TAG, "Couldn't analyze the exit of pid $pid", it) }
+            }
             val remaining = runningPids[containerId]?.also { it.remove(pid) }
             if (remaining.isNullOrEmpty()) {
                 mutex.withLock {
@@ -774,6 +816,68 @@ class ContainerRepository internal constructor(
             }
         }
     }
+
+    /**
+     * Publishes a [WineFailure] when [started] ended with a failure status (anything but a clean
+     * exit 0), with what [WineDiagnosis] found in its output.
+     */
+    private fun reportUnexpectedExit(
+        containerId: String,
+        label: String,
+        started: WineProcess,
+        uptimeMs: Long,
+        log: LaunchLog,
+        processLog: File,
+        screen: DisplayEnv?,
+    ) {
+        val code = started.exitCodeOrNull()
+        val dir = processLog.parentFile ?: return
+        val clean = if (started.process != null) code == 0 else WineRuntime.exitedCleanly(dir)
+        if (clean) {
+            log.line("process ${started.pid} exited cleanly after ${uptimeMs}ms")
+            return
+        }
+        val duringStartup = uptimeMs < STARTUP_FAILURE_WINDOW_MS
+        val diagnosis = WineDiagnosis.analyze(processLog)
+        logDiagnosis(log, diagnosis, screen)
+        val status = code?.let { if (it > 128) "killed by signal ${it - 128}" else "exit code $it" }
+        val detail = diagnosis.summary() ?: WineRuntime.lastLogLine(dir)
+        val reason = listOfNotNull(detail, status?.let { "($it)" }).joinToString(" ").ifBlank { "no output" }
+        log.error(
+            "$label ${if (duringStartup) "failed during startup" else "stopped"} after ${uptimeMs}ms: $reason",
+        )
+        val failure = WineFailure(
+            containerId = containerId,
+            label = label,
+            pid = started.pid,
+            exitCode = code,
+            uptimeMs = uptimeMs,
+            duringStartup = duringStartup,
+            reason = reason,
+            missingLibraries = (diagnosis.missingLibraries + screen?.nativeLibs?.missingRequired.orEmpty()).distinct(),
+            logPath = log.path,
+        )
+        _wineFailures.update { it + (containerId to failure) }
+        Log.w(TAG, "Wine for $containerId ended: $reason")
+    }
+
+    /** Writes [diagnosis] (and the native libraries that weren't found) into [log]. */
+    private fun logDiagnosis(log: LaunchLog, diagnosis: WineDiagnosis.Diagnosis, screen: DisplayEnv?) {
+        log.section("Diagnosis")
+        diagnosis.describe().forEach { log.line(it) }
+        screen?.nativeLibs?.let { report ->
+            val missing = report.missing.map { it.target }
+            log.line("native libraries not found on this device: ${missing.joinToString().ifEmpty { "none" }}")
+            if (diagnosis.freeTypeMissing || diagnosis.missingLibraries.any { it.contains("freetype") }) {
+                log.line(
+                    "libfreetype.so in ${report.dir.absolutePath}: " +
+                        (report.entries.firstOrNull { it.target == "libfreetype.so" }?.let { "${it.status} ${it.source.orEmpty()}" } ?: "unknown"),
+                )
+            }
+        }
+    }
+
+    private fun elapsedMs(sinceNanos: Long): Long = (System.nanoTime() - sinceNanos) / 1_000_000L
 
     private fun persistLocked() {
         publish()
@@ -806,6 +910,15 @@ class ContainerRepository internal constructor(
         /** How long a freshly started process is watched for an immediate crash. */
         private const val EARLY_EXIT_WINDOW_MS = 1_200L
         private const val PROCESS_POLL_MS = 1_500L
+
+        /**
+         * A Wine process that fails within this long after it was spawned failed to start (shown
+         * as "Wine couldn't start"); later failures read "Wine stopped". Box64 + Wine routinely
+         * take several seconds to get from exec to the first window, well past
+         * [EARLY_EXIT_WINDOW_MS].
+         */
+        private const val STARTUP_FAILURE_WINDOW_MS = 30_000L
+        private const val STARTUP_POLL_MS = 400L
         private const val REAPER_GRACE_MS = 200L
 
         /**
@@ -946,6 +1059,29 @@ sealed interface LaunchResult {
     /** The launch couldn't happen: a missing Box64/FEX/Wine download, a bad request, or a crash on start. */
     data class Failed(val reason: String, override val logPath: String? = null) : LaunchResult
 }
+
+/**
+ * A launched Wine process that ended by itself with a failure status while its display was up
+ * (see [ContainerRepository.wineFailures]).
+ */
+data class WineFailure(
+    val containerId: String,
+    /** The app's name, or "<container> desktop". */
+    val label: String,
+    val pid: Int,
+    /** Exit status (> 128: killed by signal status - 128); null when unknown (native launcher). */
+    val exitCode: Int?,
+    /** How long the process ran. */
+    val uptimeMs: Long,
+    /** True when it died within the startup window, i.e. Wine never came up. */
+    val duringStartup: Boolean,
+    /** Short explanation: what [WineDiagnosis] recognized, else the last line of output. */
+    val reason: String,
+    /** Native libraries that were reported missing (`libfreetype.so`, …). */
+    val missingLibraries: List<String>,
+    /** The persisted [LaunchLog] for this launch. */
+    val logPath: String?,
+)
 
 private fun LaunchResult.withLog(path: String?): LaunchResult = when (this) {
     is LaunchResult.Started -> copy(logPath = path)
