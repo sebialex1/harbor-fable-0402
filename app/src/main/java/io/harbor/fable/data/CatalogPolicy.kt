@@ -14,20 +14,22 @@ internal object CatalogPolicy {
 
     /**
      * How many releases of a source of [type] the catalog lists, newest first. DXVK and
-     * VKD3D-Proton are single drop-in packages, so only the latest release is offered.
+     * VKD3D-Proton ship a wide range of versions — legacy 1.x (1.10.3, 1.10.4), the 2.x series
+     * (2.1–2.7), and 3.x — and users may need an older one for compatibility with specific games
+     * or drivers, so the full recent history is listed.
      */
     fun releaseLimit(type: AssetType): Int = when (type) {
-        AssetType.DXVK, AssetType.VKD3D -> 1
+        AssetType.DXVK, AssetType.VKD3D -> 30
         else -> DEFAULT_RELEASES_PER_SOURCE
     }
 
     /**
      * How many packages a Winlator `contents.json` source lists, newest first. The index is the
      * whole history of a component (every DXVK since 1.5.5), and the variants are the point of
-     * it (gplasync, sarek, -fix builds), so more than one is kept — but not a decade's worth.
+     * it (gplasync, sarek, -fix builds), so the full recent history is kept for DXVK and VKD3D.
      */
     fun indexLimit(type: AssetType): Int = when (type) {
-        AssetType.DXVK, AssetType.VKD3D -> 8
+        AssetType.DXVK, AssetType.VKD3D -> 30
         else -> DEFAULT_RELEASES_PER_SOURCE
     }
 

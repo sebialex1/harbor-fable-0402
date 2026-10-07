@@ -460,6 +460,16 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *
     return res;
 }
 
+/* Forward declarations for the physical-device feature wrappers (defined below
+ * vkGetInstanceProcAddr). SHIM_PROC references them by name, so they must be
+ * declared before that point even though they are defined later. */
+VK_SHIM_EXPORT void VKAPI_CALL vkGetPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice,
+                                                           VkPhysicalDeviceFeatures *pFeatures);
+VK_SHIM_EXPORT void VKAPI_CALL vkGetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
+                                                            VkPhysicalDeviceFeatures2 *pFeatures);
+VK_SHIM_EXPORT void VKAPI_CALL vkGetPhysicalDeviceFeatures2KHR(VkPhysicalDevice physicalDevice,
+                                                               VkPhysicalDeviceFeatures2 *pFeatures);
+
 VK_SHIM_EXPORT PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName) {
     ensure_init();
     if (!pName) return NULL;
