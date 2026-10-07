@@ -1,6 +1,12 @@
 package io.harbor.fable.ui.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,16 +18,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableTextDim
@@ -110,7 +119,7 @@ fun NoticeCard(
 
 /**
  * 2dp progress line for card edges. A null [progress] renders the indeterminate variant
- * (queued / verifying / unknown size).
+ * (queued / verifying / unknown size). Fills whatever width it is given, edge to edge.
  */
 @Composable
 fun ThinProgressBar(
@@ -118,26 +127,60 @@ fun ThinProgressBar(
     modifier: Modifier = Modifier,
     color: Color = FableAccent,
 ) {
+    LineProgressBar(progress = progress, modifier = modifier, color = color, thickness = 2.dp)
+}
+
+/**
+ * A continuous progress line drawn by hand. Material3's LinearProgressIndicator splits its
+ * indeterminate variant into gapped segments and insets the ends, which reads as a broken line
+ * on a 2dp bar; this one is a single unbroken track with one solid fill.
+ *
+ * Determinate: the fill grows from the start edge. Indeterminate (null [progress]): a single
+ * segment sweeps across the track and wraps around.
+ */
+@Composable
+fun LineProgressBar(
+    progress: Float?,
+    modifier: Modifier = Modifier,
+    color: Color = FableAccent,
+    trackColor: Color = FableTrack,
+    thickness: Dp = 2.dp,
+    rounded: Boolean = false,
+) {
+    val cap = if (rounded) StrokeCap.Round else StrokeCap.Butt
     if (progress == null) {
-        LinearProgressIndicator(
-            modifier = modifier
-                .fillMaxWidth()
-                .height(2.dp),
-            color = color,
-            trackColor = FableTrack,
-            gapSize = 0.dp,
+        val transition = rememberInfiniteTransition(label = "lineProgressIndeterminate")
+        val phase by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(durationMillis = 1300, easing = LinearEasing)),
+            label = "lineProgressPhase",
         )
+        Canvas(modifier.fillMaxWidth().height(thickness).clipToBounds()) {
+            val w = size.width
+            val y = size.height / 2
+            val stroke = size.height
+            drawLine(trackColor, Offset(0f, y), Offset(w, y), strokeWidth = stroke, cap = cap)
+            // Segment is 35% of the width; it enters from the left edge and leaves on the right.
+            val segment = w * 0.35f
+            val head = (w + segment) * phase
+            val startX = (head - segment).coerceIn(0f, w)
+            val endX = head.coerceIn(0f, w)
+            if (endX > startX) {
+                drawLine(color, Offset(startX, y), Offset(endX, y), strokeWidth = stroke, cap = cap)
+            }
+        }
     } else {
-        val animated by animateFloatAsState(progress.coerceIn(0f, 1f), Motion.settle(), label = "thinProgress")
-        LinearProgressIndicator(
-            progress = { animated },
-            modifier = modifier
-                .fillMaxWidth()
-                .height(2.dp),
-            color = color,
-            trackColor = FableTrack,
-            gapSize = 0.dp,
-            drawStopIndicator = {},
-        )
+        val animated by animateFloatAsState(progress.coerceIn(0f, 1f), Motion.settle(), label = "lineProgress")
+        Canvas(modifier.fillMaxWidth().height(thickness).clipToBounds()) {
+            val w = size.width
+            val y = size.height / 2
+            val stroke = size.height
+            drawLine(trackColor, Offset(0f, y), Offset(w, y), strokeWidth = stroke, cap = cap)
+            val endX = w * animated
+            if (endX > 0f) {
+                drawLine(color, Offset(0f, y), Offset(endX, y), strokeWidth = stroke, cap = cap)
+            }
+        }
     }
 }

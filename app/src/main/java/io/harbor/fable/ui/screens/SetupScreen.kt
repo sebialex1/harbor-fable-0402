@@ -41,7 +41,6 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -87,7 +86,6 @@ import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.FableWarn
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.PillRadius
-import io.harbor.fable.ui.theme.RowPaddingHorizontal
 import io.harbor.fable.ui.theme.Spacing
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -429,14 +427,16 @@ private fun SetupItemRow(kind: RecommendedKind, item: RecommendedItem?, preparin
                 }
             },
         )
+        // Only an item that is actually downloading/installing gets its own line; the generic
+        // "Preparing" phase is already covered by the ring and the overall bar. The line runs
+        // the full card width, edge to edge.
         AnimatedVisibility(
-            visible = downloading || (preparing && !installed),
+            visible = downloading,
             enter = fadeIn(Motion.enter(Motion.Quick)),
             exit = fadeOut(Motion.exit(Motion.Standard)),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = RowPaddingHorizontal),
+                .fillMaxWidth(),
         ) {
             ThinProgressBar(
                 progress = if (downloading && progress < 1f) progress else null,
@@ -513,25 +513,14 @@ private val RingMaxSize = 240.dp
 /** Full-width overall progress: a 4dp white bar on the dark track. Null runs indeterminate. */
 @Composable
 private fun OverallProgressBar(progress: Float?, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(percent = 50)
-    if (progress == null) {
-        LinearProgressIndicator(
-            modifier = modifier.height(4.dp).clip(shape),
-            color = FableText,
-            trackColor = FableTrack,
-            gapSize = 0.dp,
-        )
-    } else {
-        val animated by animateFloatAsState(progress.coerceIn(0f, 1f), Motion.settle(), label = "overallProgress")
-        LinearProgressIndicator(
-            progress = { animated },
-            modifier = modifier.height(4.dp).clip(shape),
-            color = FableText,
-            trackColor = FableTrack,
-            gapSize = 0.dp,
-            drawStopIndicator = {},
-        )
-    }
+    LineProgressBar(
+        progress = progress,
+        modifier = modifier.clip(RoundedCornerShape(percent = 50)),
+        color = FableText,
+        trackColor = FableTrack,
+        thickness = 4.dp,
+        rounded = false,
+    )
 }
 
 // --- Step 3: ready ----------------------------------------------------------------------------
