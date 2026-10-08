@@ -68,4 +68,34 @@ class WineDiagnosisTest {
         assertTrue(diagnosis.vkd3dErrors.isEmpty())
         assertFalse(diagnosis.usedD3d12)
     }
+
+    @Test fun ntlmAuthWinediagWarningIsNotAGraphicsError() {
+        // DRAPLINE's launch: a harmless networking warning was blamed as the graphics error.
+        val output = "014c:err:winediag:ntlm_check_version ntlm_auth was not found. Make sure that ntlm_auth >= 3.0.25 " +
+            "is in your path. Usually, you can find it in the winbind package of your distribution.\n"
+        val diagnosis = WineDiagnosis.analyze(output)
+        assertTrue(diagnosis.graphicsErrors.isEmpty())
+        assertTrue(diagnosis.isEmpty)
+    }
+
+    @Test fun winediagGraphicsLinesAreStillGraphicsErrors() {
+        val output = "0024:err:winediag:wined3d_dll_init Using the OpenGL renderer.\n"
+        val diagnosis = WineDiagnosis.analyze(output)
+        assertEquals(1, diagnosis.graphicsErrors.size)
+    }
+
+    @Test fun missingExportAndBreakpointCrashAreRecognized() {
+        // DRAPLINE (CEF): kernel32 has no IsUserCetAvailableInEnvironment, Chromium CHECK-fails on int3.
+        val output = "014c:warn:module:LdrGetProcedureAddress \"IsUserCetAvailableInEnvironment\" (ordinal 0) not found in " +
+            "L\"C:\\\\windows\\\\system32\\\\kernel32.dll\"\n" +
+            "014c:trace:seh:dispatch_exception code=80000003 (EXCEPTION_BREAKPOINT) flags=0 addr=0000000140E03C6C\n"
+        val diagnosis = WineDiagnosis.analyze(output)
+        assertEquals(listOf("IsUserCetAvailableInEnvironment (kernel32.dll)"), diagnosis.missingExports)
+        assertEquals(1, diagnosis.crashes.size)
+        assertTrue(diagnosis.programFailed)
+        assertTrue(diagnosis.graphicsErrors.isEmpty())
+        val summary = diagnosis.summary()!!
+        assertTrue(summary.contains("IsUserCetAvailableInEnvironment"))
+        assertTrue(summary.contains("crashed:"))
+    }
 }

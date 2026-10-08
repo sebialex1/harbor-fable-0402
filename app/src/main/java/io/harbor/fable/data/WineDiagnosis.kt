@@ -28,18 +28,20 @@ internal object WineDiagnosis {
     private val NATIVE_INIT_FAILED = Regex("""Error initializing native (\S+)""")
     private val NEEDED_LIB_FAILED = Regex("""Error loading needed lib (\S+)""")
     private val DLL_NOT_LOADED = Regex("""could not load ([\w.\-]+\.dll), status ([0-9a-fA-Fx]+)""")
-    /** `err:module:import_dll Library UnityPlayer.dll (which is needed by L"C:\\...\\Game.exe") not found`. */
+    /** `err:module:import_dll Library UnityPlayer.dll (which is needed by L"C:\...\Game.exe") not found`. */
     private val IMPORT_NOT_FOUND = Regex("""Library ([\w.\-]+) \(which is needed by L?"([^"]+)"\) not found""")
-    /** `err:module:loader_init Importing dlls for L"C:\\...\\Game.exe" failed, status c0000135`. */
+    /** `err:module:loader_init Importing dlls for L"C:\...\Game.exe" failed, status c0000135`. */
     private val IMPORTS_FAILED = Regex("""Importing dlls for L?"([^"]+)" failed, status ([0-9a-fA-Fx]+)""")
 
     /**
      * A program crashing on its own: Wine's unhandled-exception banner (`wine: Unhandled page
-     * fault on read access to …`), `err:seh` lines and access violations (`c0000005`) from the
-     * `+seh` trace. A game that crashes before Direct3D init used to look like a clean exit.
+     * fault on read access to …`), `err:seh` lines, access violations (`c0000005`) and breakpoint
+     * exceptions (`80000003`, an int3 a program raises on a fatal CHECK when no debugger is
+     * attached — CEF/Chromium games die this way) from the `+seh` trace. A game that crashes
+     * before Direct3D init used to look like a clean exit.
      */
     private val CRASH = Regex(
-        """(wine: Unhandled .*|Unhandled exception: .*|err:seh:.*|.*code=c0000005.*|.*EXCEPTION_ACCESS_VIOLATION.*)""",
+        """(wine: Unhandled .*|Unhandled exception: .*|err:seh:.*|.*code=c0000005.*|.*EXCEPTION_ACCESS_VIOLATION.*|.*code=80000003.*|.*EXCEPTION_BREAKPOINT.*)""",
     )
     private const val MAX_CRASHES = 5
     private val SYMBOL_NOT_FOUND = Regex("""cannot locate symbol "([^"]+)" referenced by "([^"]+)"""")
@@ -47,11 +49,31 @@ internal object WineDiagnosis {
     private const val FREETYPE_TOO_OLD = "Wine cannot find certain functions that it needs inside the FreeType font library"
     private const val LSCPU_MISSING = "lscpu: inaccessible or not found"
 
-    /** Error lines from the graphics stack: WineD3D/OpenGL, winevulkan, DXVK, VKD3D-Proton. */
+    /**
+     * Error lines from the graphics stack: WineD3D/OpenGL, winevulkan, DXVK, VKD3D-Proton.
+     *
+     * `winediag` is NOT a graphics channel: it also carries harmless environment notes
+     * (`err:winediag:ntlm_check_version ntlm_auth was not found`, missing `libgnutls`, …), and
+     * DRAPLINE exited to "graphics error: ntlm_auth was not found" — a networking warning blamed
+     * for a crash that was really a missing kernel32 export. winediag lines count as graphics
+     * only when they name something graphical (OpenGL, Vulkan, D3D, DXVK, MESA, a GPU).
+     */
     private val GRAPHICS_ERROR = Regex(
-        """(err:(wgl|d3d|winediag|vulkan|dxgi|d3d11|d3d12|vkd3d)[:\s].*|err:\s+.*(Dxvk|DXGI|D3D11|D3D9|Vulkan|vk[A-Z]).*)""",
+        """(err:(wgl|d3d|wined3d|vulkan|dxgi|d3d11|d3d12|vkd3d)[:\s].*|err:\s+.*(Dxvk|DXGI|D3D11|D3D9|Vulkan|vk[A-Z]).*|err:winediag:.*(OpenGL|Vulkan|D3D|DXVK|MESA|GPU).*)""",
     )
     private const val MAX_GRAPHICS_ERRORS = 5
+
+    /**
+     * `warn:module:LdrGetProcedureAddress "IsUserCetAvailableInEnvironment" (ordinal 0) not found
+     * in L"C:\windows\system32\kernel32.dll"`: the program asked for an export this Wine build
+     * doesn't have. Programs often probe and carry on, so this alone isn't a failure — but
+     * Chromium-based apps (CEF games like DRAPLINE) CHECK-fail on it and die on a breakpoint
+     * right after, so it's recorded to explain the crash.
+     */
+    private val MISSING_EXPORT = Regex(
+        """LdrGetProcedureAddress "([^"]+)"(?: \(ordinal \d+\))? not found in L?"[^"]*?([\w.\-]+\.dll)"""",
+    )
+    private const val MAX_MISSING_EXPORTS = 5
 
     /**
      * VKD3D-Proton's own messages: `%04x:<level>:<function>: <message>` with a C function name
@@ -110,6 +132,12 @@ internal object WineDiagnosis {
         val crashes: List<String> = emptyList(),
         /** VKD3D-Proton's error messages (`function: message`), first few. */
         val vkd3dErrors: List<String> = emptyList(),
+        /**
+         * Exports the program asked for that this Wine build doesn't have
+         * (`IsUserCetAvailableInEnvironment (kernel32.dll)`). Not a failure by itself — most
+         * programs probe and carry on — but it explains a breakpoint crash right after.
+         */
+        val missingExports: List<String> = emptyList(),
         /** VKD3D-Proton printed "DXR support enabled." (the device can report D3D12 ray tracing). */
         val dxrEnabled: Boolean = false,
         /** VKD3D-Proton printed "Overriding feature level" (VKD3D_FEATURE_LEVEL forced capabilities). */
@@ -123,7 +151,8 @@ internal object WineDiagnosis {
         val isEmpty: Boolean
             get() = missingLibraries.isEmpty() && nativeInitFailures.isEmpty() && failedDlls.isEmpty() &&
                 missingSymbols.isEmpty() && !freeTypeMissing && !freeTypeTooOld && graphicsErrors.isEmpty() &&
-                missingImports.isEmpty() && failedImports.isEmpty() && crashes.isEmpty() && vkd3dErrors.isEmpty()
+                missingImports.isEmpty() && failedImports.isEmpty() && crashes.isEmpty() && vkd3dErrors.isEmpty() &&
+                missingExports.isEmpty()
 
         /** Findings that mean the program itself couldn't start, even when Wine exited with 0. */
         val programFailed: Boolean
@@ -148,6 +177,9 @@ internal object WineDiagnosis {
                     add("couldn't load the DLLs ${failedImports.first()} imports")
                 }
                 if (crashes.isNotEmpty()) add("crashed: ${crashes.first().take(120)}")
+                if (missingExports.isNotEmpty()) {
+                    add("this Wine build lacks ${missingExports.joinToString()}, which the program asked for")
+                }
                 if (vkd3dErrors.isNotEmpty()) add("VKD3D-Proton (Direct3D 12) error: ${vkd3dErrors.first().take(160)}")
                 if (featureLevelOverridden) add("VKD3D_FEATURE_LEVEL forced Direct3D 12 capabilities the driver may not have")
                 when {
@@ -169,6 +201,7 @@ internal object WineDiagnosis {
             failedDlls.forEach { add("Wine couldn't load $it") }
             failedImports.forEach { add("imports failed to load for $it") }
             crashes.forEach { add("crash: $it") }
+            missingExports.forEach { add("missing export: $it") }
             if (failedDlls.any { it.startsWith("kernel32.dll", ignoreCase = true) && it.contains("c0000135", ignoreCase = true) }) {
                 // STATUS_DLL_NOT_FOUND for the first DLL a process loads: outside wineboot's
                 // bootstrap Wine only loads builtins that exist in C:\windows\system32.
@@ -223,6 +256,7 @@ internal object WineDiagnosis {
         val importFailures = LinkedHashSet<String>()
         val crashes = LinkedHashSet<String>()
         val vkd3d = LinkedHashSet<String>()
+        val exports = LinkedHashSet<String>()
         var dxr = false
         var flOverride = false
         val graphicsDlls = LinkedHashMap<String, String>()
@@ -260,6 +294,9 @@ internal object WineDiagnosis {
                 importFailures += "$program (${it.groupValues[2]})"
             }
             if (crashes.size < MAX_CRASHES) CRASH.find(line)?.let { crashes += it.value.trim().take(200) }
+            if (exports.size < MAX_MISSING_EXPORTS) {
+                MISSING_EXPORT.find(line)?.let { exports += "${it.groupValues[1]} (${it.groupValues[2]})" }
+            }
         }
         return Diagnosis(
             missingLibraries = missing.toList(),
@@ -275,6 +312,7 @@ internal object WineDiagnosis {
             failedImports = importFailures.toList(),
             crashes = crashes.toList(),
             vkd3dErrors = vkd3d.toList(),
+            missingExports = exports.toList(),
             dxrEnabled = dxr,
             featureLevelOverridden = flOverride,
             graphicsDlls = graphicsDlls,
