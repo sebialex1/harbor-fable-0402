@@ -448,7 +448,7 @@ class ContainerRepository internal constructor(
         }
         // One extraction at a time per container; later callers find the finished tree.
         return setupLocks.getOrPut(containerId) { Mutex() }.withLock {
-            val container = mutex.withLock { containersById[container.id] }
+            val container = mutex.withLock { containersById[containerId] }
                 ?: return@withLock Result.failure(IllegalStateException("Container not found"))
             val dir = directory(container.id).also { it.mkdirs() }
             val installed = runtime.installedWine(dir)
@@ -1508,8 +1508,8 @@ class ContainerRepository internal constructor(
 
     /**
      * Converts a host path to a Windows path Wine can open. Paths inside the container's
-     * `drive_c` directory map to `C:\...` (where the Wine prefix's C: drive is); everything
-     * else maps to `Z:\...` (Wine's default mapping of the host filesystem).
+     * `drive_c` directory map to `C:\\...` (where the Wine prefix's C: drive is); everything
+     * else maps to `Z:\\...` (Wine's default mapping of the host filesystem).
      *
      * This mirrors Winlator's `WineUtils.unixToDOSPath`, which walks the container's drives
      * (drive_c → C:, D:, E:, …) to find the shortest DOS path for a Unix path. Fable's
