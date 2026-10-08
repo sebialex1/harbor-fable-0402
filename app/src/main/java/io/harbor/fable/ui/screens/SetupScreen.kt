@@ -15,17 +15,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextOverflow
-import io.harbor.fable.data.models.VulkanProbeResult
-import io.harbor.fable.data.models.VulkanSource
-import io.harbor.fable.nativebridge.DeviceGpuInfo
-import io.harbor.fable.nativebridge.DeviceProbe
-import io.harbor.fable.nativebridge.VulkanProbe
 import io.harbor.fable.ui.theme.FableBlue
 import io.harbor.fable.ui.theme.FableBlueDim
 import io.harbor.fable.ui.theme.TileTone
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -118,8 +110,10 @@ private enum class SetupStep { DOWNLOAD, READY }
  *
  * There is no welcome page any more: a first install lands straight on the download step and
  * setup starts by itself (once per process, see [io.harbor.fable.data.SetupManager.installRecommendedOnce]).
- * What the welcome page showed — the device's GPU, Vulkan version and driver — now sits on the
- * download step under the progress ring. "Skip" still leaves setup for later.
+ * The download step shows only the download progress (the device / Vulkan card that used to ride
+ * along under the ring is gone; the GPU is still identified from the system Vulkan driver, by
+ * [io.harbor.fable.data.SetupManager] before it picks the driver family). "Skip" still leaves
+ * setup for later.
  */
 @Composable
 fun SetupScreen(onFinished: () -> Unit) {
@@ -227,154 +221,6 @@ private fun SetupContent(
     }
 }
 
-// --- Device card (shown on the download step) ------------------------------------------------
-
-/**
- * What this phone can actually run — the GPU, the Vulkan version and driver the system ships,
- * and a one-line verdict on whether DXVK 2.x / VKD3D-Proton (both need Vulkan 1.3) will work.
- * This used to be the welcome page; it now rides along under the progress ring so first launch
- * goes straight to setup. The probe runs off the main thread; the card fills in as results arrive.
- */
-@Composable
-private fun DeviceSummary() {
-    var gpu by remember { mutableStateOf<DeviceGpuInfo?>(null) }
-    var vulkan by remember { mutableStateOf<VulkanProbeResult?>(null) }
-    LaunchedEffect(Unit) {
-        gpu = withContext(Dispatchers.IO) { DeviceProbe.read() }
-        vulkan = VulkanProbe.probe(VulkanSource.SYSTEM, null)
-    }
-    DeviceCapabilityCard(gpu = gpu, vulkan = vulkan)
-}
-
-/**
- * GPU hero row, three capability stats on toned gradient tiles (Vulkan, driver, extensions)
- * and a verdict line, on one glass card. Values morph in from a placeholder as the probe lands.
- */
-@Composable
-private fun DeviceCapabilityCard(gpu: DeviceGpuInfo?, vulkan: VulkanProbeResult?) {
-    val device = vulkan?.primaryDevice
-    val shape = RoundedCornerShape(22.dp)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .glassSurface(shape = shape)
-            .padding(Spacing.lg),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
-    ) {
-        Column {
-            MorphText(
-                text = device?.name ?: gpu?.gpu?.takeIf { it != "Unknown" } ?: if (gpu == null) "Checking…" else "Unknown GPU",
-                style = MaterialTheme.typography.titleMedium,
-                color = FableText,
-            )
-            MorphText(
-                text = listOfNotNull(gpu?.device?.takeIf { it.isNotBlank() }, gpu?.abi?.takeIf { it.isNotBlank() }, gpu?.sdk?.let { "API $it" })
-                    .joinToString(" · ")
-                    .ifBlank { " " },
-                style = MaterialTheme.typography.bodySmall,
-                color = FableTextDim,
-            )
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            StatTile(
-                label = "Vulkan",
-                value = when {
-                    device != null -> device.apiGeneration
-                    vulkan != null -> "—"
-                    else -> "…"
-                },
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "Driver",
-                value = when {
-                    device != null -> driverShortName(device.driverName, device.driverInfo, device.vendorName)
-                    vulkan != null -> "—"
-                    else -> "…"
-                },
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "Extensions",
-                value = when {
-                    vulkan == null -> "…"
-                    vulkan.ok -> vulkan.totalCount.toString()
-                    else -> "—"
-                },
-                modifier = Modifier.weight(1f),
-            )
-        }
-        val verdict = vulkanVerdict(vulkan)
-        AnimatedContent(
-            targetState = verdict,
-            transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit(Motion.Fast)) },
-            label = "deviceVerdict",
-        ) { (good, line) ->
-            Text(line, style = MaterialTheme.typography.bodySmall, color = if (good) FableText else FableTextDim)
-        }
-    }
-}
-
-/** One capability on a plain card: a small grey label over a large value that morphs in. */
-@Composable
-private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier
-            .fillMaxWidth()
-            .glassSurface(shape = RoundedCornerShape(12.dp))
-            .padding(horizontal = Spacing.md, vertical = Spacing.md),
-    ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = FableTextDim, maxLines = 1)
-        Spacer(Modifier.height(Spacing.xxs))
-        MorphText(text = value, style = MaterialTheme.typography.titleMedium, color = FableText)
-    }
-}
-
-/** Text that slides up and fades when it changes, so probe results arrive with motion. */
-@Composable
-private fun MorphText(text: String, style: androidx.compose.ui.text.TextStyle, color: Color) {
-    AnimatedContent(
-        targetState = text,
-        transitionSpec = {
-            (fadeIn(Motion.enter()) + slideInVertically(Motion.enter()) { it / 2 }) togetherWith
-                (fadeOut(Motion.exit(Motion.Fast)) + slideOutVertically(Motion.exit(Motion.Fast)) { -it / 2 }) using
-                SizeTransform(clip = false) { _, _ -> Motion.morph() }
-        },
-        label = "morphText",
-    ) { current ->
-        Text(current, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-/** "radv" / "Mesa 24.1" / vendor, short enough for a stat tile. */
-private fun driverShortName(driverName: String?, driverInfo: String?, vendor: String): String {
-    val name = driverName?.trim().orEmpty()
-    return when {
-        name.isNotEmpty() && name.length <= 10 -> name.uppercase().takeIf { it == "RADV" } ?: name.replaceFirstChar { it.uppercase() }
-        !driverInfo.isNullOrBlank() -> driverInfo.trim().substringBefore(' ').take(10)
-        else -> vendor
-    }
-}
-
-/** True with a positive line when DXVK 2.x / VKD3D-Proton can run (Vulkan 1.3), else a caution. */
-private fun vulkanVerdict(vulkan: VulkanProbeResult?): Pair<Boolean, String> {
-    val device = vulkan?.primaryDevice
-    if (vulkan == null) return true to "Checking Vulkan…"
-    if (device == null) return false to "No Vulkan device found. Games will need WineD3D"
-    val parts = device.apiGeneration.split('.')
-    val major = parts.getOrNull(0)?.toIntOrNull() ?: 0
-    val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
-    return if (major > 1 || (major == 1 && minor >= 3)) {
-        true to "Vulkan ${device.apiGeneration}: ready for DXVK 2.x and VKD3D-Proton"
-    } else {
-        // Adreno needs Turnip; RADV Xclipse is only for Samsung's Xclipse GPUs.
-        val driver = io.harbor.fable.nativebridge.GpuDetector.fromVulkan(device).let { id ->
-            if (id.kind == io.harbor.fable.nativebridge.GpuKind.UNKNOWN) io.harbor.fable.nativebridge.GpuDetector.detect() else id
-        }.recommendedFamily.displayName
-        false to "Vulkan ${device.apiGeneration}: a $driver driver unlocks DXVK 2.x"
-    }
-}
-
 /** The app mark, plain white on black. It settles into place once, without a halo. */
 @Composable
 private fun AppMark(size: androidx.compose.ui.unit.Dp = 120.dp) {
@@ -451,8 +297,6 @@ private fun DownloadStep(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(Spacing.xl))
-        Staggered(index = 3) { DeviceSummary() }
         Spacer(Modifier.height(Spacing.md))
         AnimatedVisibility(visible = message != null, enter = fadeIn(Motion.enter()), exit = fadeOut(Motion.exit())) {
             Column {

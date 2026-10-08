@@ -97,6 +97,70 @@ class TurnipReleaseProviderTest {
         assertEquals(DriverFamily.RADV_XCLIPSE, xclipse.recommendedFamily)
     }
 
+    @Test fun samsungKernelGpuNodeOnXclipseIsNotAdreno() {
+        // Exynos kernels expose /sys/kernel/gpu/gpu_model too; it used to be taken as proof of Adreno.
+        val xclipse = GpuDetector.classify(GpuDetector.SystemSignals(kernelGpuModel = "Xclipse 920"))
+        assertEquals(GpuKind.XCLIPSE, xclipse.kind)
+        assertEquals(DriverFamily.RADV_XCLIPSE, xclipse.recommendedFamily)
+        assertFalse(xclipse.offers(DriverFamily.TURNIP))
+        val mali = GpuDetector.classify(GpuDetector.SystemSignals(kernelGpuModel = "Mali-G78"))
+        assertEquals(GpuKind.OTHER, mali.kind)
+        assertFalse(mali.offers(DriverFamily.TURNIP))
+        // The same node on a Snapdragon Galaxy names the Adreno.
+        val snapdragon = GpuDetector.classify(GpuDetector.SystemSignals(kernelGpuModel = "Adreno740v2"))
+        assertEquals(GpuKind.ADRENO, snapdragon.kind)
+        assertEquals(7, snapdragon.adrenoGeneration)
+    }
+
+    @Test fun exynosSocWinsOverQualcommLookingBoardNames() {
+        val exynos = GpuDetector.classify(
+            GpuDetector.SystemSignals(egl = "mali", socManufacturer = "Samsung", socModel = "s5e9925", board = "s5e9925 sun"),
+        )
+        assertEquals(GpuKind.XCLIPSE, exynos.kind)
+        val oldExynos = GpuDetector.classify(GpuDetector.SystemSignals(socManufacturer = "Samsung", board = "exynos990 sun"))
+        assertEquals(GpuKind.OTHER, oldExynos.kind)
+        assertFalse(oldExynos.offers(DriverFamily.TURNIP))
+        val qualcomm = GpuDetector.classify(GpuDetector.SystemSignals(socManufacturer = "QTI", board = "kalama"))
+        assertEquals(GpuKind.ADRENO, qualcomm.kind)
+    }
+
+    @Test fun turnipIsOnlyOfferedAndRecommendedOnAdreno() {
+        val unknown = GpuDetector.classify(GpuDetector.SystemSignals())
+        assertEquals(GpuKind.UNKNOWN, unknown.kind)
+        assertEquals(DriverFamily.RADV_XCLIPSE, unknown.recommendedFamily)
+        assertFalse(unknown.offers(DriverFamily.TURNIP))
+        assertFalse(unknown.matches(DriverFamily.TURNIP))
+        assertTrue(unknown.offers(DriverFamily.RADV_XCLIPSE))
+        val adreno = GpuDetector.classify(GpuDetector.SystemSignals(kgslModel = "Adreno830v2"))
+        assertTrue(adreno.offers(DriverFamily.TURNIP))
+        assertTrue(adreno.offers(DriverFamily.RADV_XCLIPSE))
+        assertTrue(adreno.isAdreno8xx)
+    }
+
+    @Test fun driversScreenHidesTurnipOffAdreno() {
+        val radv = RadvRelease(
+            tag = "v1.5.0", title = "", mesaVersion = null, commit = null, publishedAt = 0,
+            channel = ReleaseChannel.LATEST, body = "", htmlUrl = null,
+            asset = RadvAsset("radv.zip", "https://example.invalid/radv.zip", 1, null),
+        )
+        val all = listOf(radv, turnip("v26.0.0-rc08", TurnipReleaseProvider.PRIMARY.slug, 1))
+        val xclipse = GpuDetector.fromVulkan(device("Samsung Xclipse 940", 0x144D, "Samsung Xclipse Driver"))
+        assertEquals(listOf(radv), DriverRepository.visibleReleases(all, xclipse))
+        val unknown = GpuDetector.classify(GpuDetector.SystemSignals())
+        assertEquals(listOf(radv), DriverRepository.visibleReleases(all, unknown))
+        val adreno = GpuDetector.fromVulkan(device("Adreno (TM) 740", 0x5143, "Qualcomm"))
+        assertEquals(all, DriverRepository.visibleReleases(all, adreno))
+    }
+
+    @Test fun vulkanVendorIdBeatsDriverStrings() {
+        // A Samsung-id device is Xclipse even if a string mentions Qualcomm somewhere.
+        val samsung = GpuDetector.fromVulkan(device("Xclipse 920", 0x144D, "Qualcomm-compatible"))
+        assertEquals(GpuKind.XCLIPSE, samsung.kind)
+        val arm = GpuDetector.fromVulkan(device("Mali-G715", 0x13B5, "Mali"))
+        assertEquals(GpuKind.OTHER, arm.kind)
+        assertFalse(arm.offers(DriverFamily.TURNIP))
+    }
+
     private fun turnip(tag: String, repo: String, published: Long) = RadvRelease(
         tag = tag, title = tag, mesaVersion = null, commit = null, publishedAt = published,
         channel = ReleaseChannel.VERSIONED, body = "", htmlUrl = null,

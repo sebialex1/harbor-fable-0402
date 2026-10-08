@@ -8,6 +8,9 @@ import io.harbor.fable.data.models.AssetType
 import io.harbor.fable.data.models.InstalledDriver
 import io.harbor.fable.data.models.RadvRelease
 import io.harbor.fable.data.models.ReleaseChannel
+import io.harbor.fable.data.models.VulkanDevice
+import io.harbor.fable.data.models.VulkanSource
+import io.harbor.fable.nativebridge.VulkanProbe
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -139,6 +142,15 @@ class SetupManager internal constructor(
     private val assets: AssetRepository,
     private val drivers: DriverRepository,
     private val downloads: DownloadManager,
+    /**
+     * The system Vulkan driver's primary device, or null when it can't be probed. Setup refines
+     * GPU detection with it before it picks the driver family: sysfs and system properties alone
+     * are not reliable enough (SELinux hides nodes, Samsung kernels expose a generic GPU node on
+     * Exynos too), and picking from them alone once put Turnip on an Xclipse phone.
+     */
+    private val systemVulkanDevice: suspend () -> VulkanDevice? = {
+        runCatching { VulkanProbe.probe(VulkanSource.SYSTEM, null).primaryDevice }.getOrNull()
+    },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -152,13 +164,14 @@ class SetupManager internal constructor(
 
     /** Live view of the recommended downloads, recomputed whenever the catalog or a download changes. */
     val state: StateFlow<SetupState> = combine(
-        assets.assets,
-        drivers.releases,
-        drivers.installed,
-        drivers.installing,
-        downloads.snapshot,
-    ) { entries, releases, installed, installing, snapshot ->
-        compute(entries, releases, installed, installing, snapshot)
+        combine(assets.assets, drivers.releases, drivers.installed, drivers.installing, downloads.snapshot) {
+                entries, releases, installed, installing, snapshot ->
+            Inputs(entries, releases, installed, installing, snapshot)
+        },
+        // The recommended driver family follows the GPU, which setup refines after it starts.
+        drivers.gpu,
+    ) { inputs, _ ->
+        compute(inputs.entries, inputs.releases, inputs.installed, inputs.installing, inputs.snapshot)
     }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), SetupState())
 
     /**
@@ -182,6 +195,9 @@ class SetupManager internal constructor(
             return SetupResult(emptyList(), emptyList(), emptyList(), emptyList(), catalogReachable = true, busy = true)
         }
         try {
+            // Identify the GPU from the system Vulkan driver first: the driver family (Turnip
+            // only on Adreno) must not be picked from sysfs guesses alone.
+            drivers.refineGpu(systemVulkanDevice())
             assets.refresh()
             drivers.refresh()
             val picks = pickRecommended(assets.assets.value, drivers.releases.value)
@@ -279,6 +295,15 @@ class SetupManager internal constructor(
         RecommendedKind.FEX -> assets.downloadedFiles(AssetType.FEX).isNotEmpty()
     }
 
+    /** Everything [state] is computed from, bundled because `combine` takes five flows at most. */
+    private class Inputs(
+        val entries: List<AssetEntry>,
+        val releases: List<RadvRelease>,
+        val installed: InstalledDriver?,
+        val installing: String?,
+        val snapshot: DownloadSnapshot,
+    )
+
     /**
      * [id] is an asset id, or a release tag when [isDriver]; [taskId] is the id download tasks
      * carry in [DownloadTask.assetId] (differs from [id] for driver releases).
@@ -305,7 +330,9 @@ class SetupManager internal constructor(
         entries.filter { it.type == AssetType.FEX && !it.name.endsWith(".wcp", ignoreCase = true) }
             .minByOrNull { box64Rank(it.name) }
             ?.let { picks[RecommendedKind.FEX] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
-        val family = drivers.recommendedFamily
+        // Turnip only on a positively identified Adreno; everything else gets RADV Xclipse.
+        val gpu = drivers.gpu.value
+        val family = gpu.recommendedFamily.takeIf(gpu::offers) ?: io.harbor.fable.data.models.DriverFamily.RADV_XCLIPSE
         releases.firstOrNull { it.family == family && it.channel == ReleaseChannel.LATEST }
             ?.let { picks[RecommendedKind.DRIVER] = Pick(it.tag, it.asset.sizeBytes, isDriver = true, taskId = it.id) }
         return picks

@@ -56,8 +56,11 @@ sealed interface DriverInstallResult {
  * installed (active) driver.
  *
  * Which family is *recommended* follows the GPU ([GpuDetector]): Turnip on Adreno, RADV Xclipse
- * otherwise. Both families stay listed and installable; [latest] (what setup installs and the
- * Drivers screen offers first) is the newest stable release of the [recommendedFamily].
+ * otherwise; [latest] (what setup installs and the Drivers screen offers first) is the newest
+ * stable release of the [recommendedFamily]. Turnip is only offered on a positively identified
+ * Adreno ([GpuIdentity.offers]): on Xclipse, Mali or an unidentified GPU it is neither listed
+ * ([visibleReleases]) nor installable, and a Turnip install left over from a misdetection is
+ * removed once the system Vulkan driver confirms a non-Adreno GPU ([refineGpu]).
  *
  * Releases are addressed by [RadvRelease.id] (`radv-xclipse/<tag>`, `turnip/<owner>/<repo>/<tag>`);
  * the public methods also accept a bare tag, resolved within the recommended family first.
@@ -171,10 +174,20 @@ class DriverRepository internal constructor(
      */
     fun refineGpu(device: VulkanDevice?) {
         val refined = runCatching { GpuDetector.refine(device) }.getOrNull() ?: return
-        if (refined == _gpu.value) return
-        val familyChanged = refined.recommendedFamily != _gpu.value.recommendedFamily
-        _gpu.value = refined
-        if (familyChanged) _releases.value = order(_releases.value)
+        if (refined != _gpu.value) {
+            val familyChanged = refined.recommendedFamily != _gpu.value.recommendedFamily
+            _gpu.value = refined
+            if (familyChanged) _releases.value = order(_releases.value)
+        }
+        // Turnip cannot drive anything but Adreno. A Turnip install on a GPU the system driver
+        // has now identified as something else (left by an earlier misdetection) only breaks
+        // Vulkan, so it goes; the Drivers screen and setup then offer RADV Xclipse.
+        val current = _installed.value
+        val vulkanConclusive = device != null && runCatching { GpuDetector.fromVulkan(device).isConclusive }.getOrDefault(false)
+        if (vulkanConclusive && current != null && !refined.offers(current.family)) {
+            Log.i(TAG, "Removing ${current.family.displayName} ${current.tag}: not usable on ${refined.kind.label} (${refined.evidence})")
+            scope.launch { uninstall() }
+        }
     }
 
     /** The most recent download task for [release], if any. */
@@ -262,6 +275,7 @@ class DriverRepository internal constructor(
      */
     suspend fun download(key: String): DownloadTask? {
         val release = release(key) ?: return null
+        if (!_gpu.value.offers(release.family)) return null
         if (downloadedZip(release) != null) return null
         val dest = zipFor(release)
         return withContext(Dispatchers.IO) {
@@ -295,6 +309,9 @@ class DriverRepository internal constructor(
      */
     suspend fun install(key: String): DriverInstallResult {
         val release = release(key) ?: return DriverInstallResult.Failed("Unknown release $key")
+        if (!_gpu.value.offers(release.family)) {
+            return DriverInstallResult.Failed("${release.family.displayName} is only for ${release.family.targetGpus}")
+        }
         val zip = downloadedZip(release) ?: return DriverInstallResult.Failed("Download ${release.label} first")
         if (!installMutex.tryLock()) return DriverInstallResult.Busy
         _installing.value = release.id
@@ -374,6 +391,7 @@ class DriverRepository internal constructor(
      */
     suspend fun downloadAndInstall(key: String): DownloadTask? {
         val release = release(key) ?: return null
+        if (!_gpu.value.offers(release.family)) return null
         if (_installed.value?.isFrom(release) == true) return null
         if (downloadedZip(release) != null) {
             scope.launch { install(release.id) }
@@ -472,6 +490,13 @@ class DriverRepository internal constructor(
 
     companion object {
         private const val TAG = "DriverRepository"
+
+        /**
+         * The releases the Drivers screen lists on [gpu]: everything on Adreno, everything but
+         * Turnip elsewhere (Xclipse, Mali, unidentified).
+         */
+        fun visibleReleases(releases: List<RadvRelease>, gpu: GpuIdentity): List<RadvRelease> =
+            releases.filter { gpu.offers(it.family) }
         private val VERSION_TRIPLET = Regex("""\d+\.\d+\.\d+""")
 
         @Volatile

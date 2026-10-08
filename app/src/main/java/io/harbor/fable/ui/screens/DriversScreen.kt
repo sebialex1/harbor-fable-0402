@@ -30,6 +30,7 @@ import io.harbor.fable.app.FableApp
 import io.harbor.fable.data.DownloadStatus
 import io.harbor.fable.data.DownloadTask
 import io.harbor.fable.data.DriverInstallResult
+import io.harbor.fable.data.DriverRepository
 import io.harbor.fable.data.models.DriverFamily
 import io.harbor.fable.data.models.InstalledDriver
 import io.harbor.fable.data.models.VulkanSource
@@ -58,7 +59,9 @@ import io.harbor.fable.ui.icons.FableIcons
  * recommended family's older builds, and the other family's builds.
  *
  * The recommendation follows the GPU ([DriverRepository.gpu]): Turnip on Qualcomm Adreno, RADV
- * Xclipse on Samsung Xclipse (and on anything not identified). Both families stay installable.
+ * Xclipse on Samsung Xclipse (and on anything not identified). The Turnip section only exists on
+ * Adreno ([DriverRepository.visibleReleases]): on Xclipse, Mali or an unidentified GPU Turnip is
+ * hidden and can't be installed, as it can't drive those GPUs.
  * A driver of the wrong family (RADV on an Adreno phone, which finds no device there and makes
  * Direct3D apps exit silently) is flagged, with a one-tap switch to the right one; installing a
  * mismatched driver by hand asks first. One driver is active at a time.
@@ -205,8 +208,10 @@ internal fun DriversContent(
     val expansion = rememberExpansionState()
     val appear = rememberEntrance()
     val family = gpu.recommendedFamily
-    val ownReleases = remember(releases, family) { releases.filter { it.family == family } }
-    val otherReleases = remember(releases, family) { releases.filter { it.family != family } }
+    // Turnip is hidden entirely unless this is an Adreno GPU.
+    val shown = remember(releases, gpu) { DriverRepository.visibleReleases(releases, gpu) }
+    val ownReleases = remember(shown, family) { shown.filter { it.family == family } }
+    val otherReleases = remember(shown, family) { shown.filter { it.family != family } }
     val latest = remember(ownReleases) { ownReleases.firstOrNull { it.channel == ReleaseChannel.LATEST } }
     // The installed driver is for another GPU line (RADV Xclipse on an Adreno phone).
     val wrongFamily = installed != null && !gpu.matches(installed.family)
@@ -298,7 +303,7 @@ internal fun DriversContent(
             }
         }
 
-        if (isRefreshing && releases.isEmpty()) {
+        if (isRefreshing && shown.isEmpty()) {
             item(key = "refreshing") {
                 LoadingCard(message = "Loading releases…", modifier = Modifier.animateItem().entrance(appear, 3))
             }
@@ -334,8 +339,9 @@ internal fun DriversContent(
             }
         }
 
-        // The other family stays available (an unidentified GPU, or a user who knows better),
-        // collapsed and labelled with the GPUs it is for.
+        // The other family stays available where it can be used (RADV Xclipse on an Adreno phone
+        // for a user who knows better), collapsed and labelled with the GPUs it is for. Turnip
+        // never shows up here on a non-Adreno GPU: [shown] has already dropped it.
         if (otherReleases.isNotEmpty()) {
             val other = otherReleases.first().family
             item(key = "other-family") {
@@ -367,7 +373,7 @@ internal fun DriversContent(
             }
         }
 
-        if (releases.isEmpty() && !isRefreshing && refreshError == null) {
+        if (shown.isEmpty() && !isRefreshing && refreshError == null) {
             item(key = "empty") {
                 EmptyState(
                     icon = FableIcons.Drivers,
