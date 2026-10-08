@@ -72,6 +72,12 @@ class ContainerRepository internal constructor(
     /** Live Wine processes per container id, so [stopContainer] can end them. */
     private val processes = ConcurrentHashMap<String, MutableSet<WineProcess>>()
 
+    /**
+     * How the current launch of each container ran Wine (binary, translator, environment,
+     * driver), so helper commands such as `tasklist` can join the same wineserver.
+     */
+    private val commandContexts = ConcurrentHashMap<String, WineCommandContext>()
+
     /** Serializes Wine extraction per container. */
     private val setupLocks = ConcurrentHashMap<String, Mutex>()
 
@@ -814,6 +820,7 @@ class ContainerRepository internal constructor(
             setStatus(container.id, ContainerStatus.READY)
         }
         log.section("Launch")
+        commandContexts[container.id] = WineCommandContext(dir, wineBinary, translator, environment, driver)
         val processLog = File(dir, WineRuntime.LAUNCH_LOG)
         val started: WineProcess = if (useNative) {
             launchNative(dir, program, arguments, environment, driver, translator, log, processLog)
@@ -1442,6 +1449,7 @@ class ContainerRepository internal constructor(
      */
     suspend fun stopContainer(containerId: String) = withContext(Dispatchers.IO) {
         _wineFailures.update { it - containerId }
+        commandContexts.remove(containerId)
         runningPids.remove(containerId)
         val tracked = processes.remove(containerId).orEmpty()
         tracked.forEach { process -> runCatching { process.destroy() } }
@@ -1483,6 +1491,105 @@ class ContainerRepository internal constructor(
                 Log.i(TAG, "${if (paused) "Paused" else "Resumed"} $count Wine process(es) of $containerId")
             }.onFailure { Log.w(TAG, "Couldn't ${if (paused) "pause" else "resume"} $containerId", it) }
         }
+    }
+
+    /**
+     * The Windows processes running in [containerId], for the display screen's task manager:
+     * `wine tasklist /FO CSV /NH` run with the environment of the container's current launch (so
+     * it talks to the same wineserver). When that yields nothing — no launch recorded, or a Wine
+     * without `tasklist` — the prefix's Wine processes are read from `/proc` instead. Never throws.
+     */
+    suspend fun listWindowsProcesses(containerId: String): List<WindowsProcess> = withContext(Dispatchers.IO) {
+        val fromWine = runCatching {
+            runWineCommand(containerId, "tasklist", listOf("/FO", "CSV", "/NH"), TASKLIST_LOG)
+                ?.let { WindowsTasks.parseTasklistCsv(it.output) }
+        }.onFailure { Log.w(TAG, "tasklist failed for $containerId", it) }.getOrNull().orEmpty()
+        fromWine.ifEmpty { runCatching { prefixWindowsProcesses(directory(containerId)) }.getOrDefault(emptyList()) }
+    }
+
+    /**
+     * Ends [process] in [containerId]: `wine taskkill /PID <pid> /F` for a process from
+     * `tasklist`; otherwise (or when taskkill fails) SIGKILL to the Linux process(es) running that
+     * image in the prefix. True when something was ended. Never throws.
+     */
+    suspend fun endWindowsProcess(containerId: String, process: WindowsProcess): Boolean = withContext(Dispatchers.IO) {
+        val windowsPid = process.windowsPid
+        if (windowsPid != null) {
+            val result = runCatching {
+                runWineCommand(containerId, "taskkill", listOf("/PID", windowsPid.toString(), "/F"), TASKKILL_LOG)
+            }.getOrNull()
+            if (result?.exitCode == 0) return@withContext true
+        }
+        val linuxPids = process.linuxPid?.let(::listOf)
+            ?: runCatching { prefixWindowsProcesses(directory(containerId)) }.getOrDefault(emptyList())
+                .filter { it.name.equals(process.name, ignoreCase = true) }
+                .mapNotNull { it.linuxPid }
+        var ended = false
+        linuxPids.forEach { pid ->
+            if (runCatching { android.os.Process.sendSignal(pid, OsConstants.SIGKILL) }.isSuccess) ended = true
+        }
+        if (ended) Log.i(TAG, "Ended ${process.name} in $containerId")
+        ended
+    }
+
+    /** Output and exit status of a helper Wine command. */
+    private data class WineCommandResult(val exitCode: Int?, val output: String)
+
+    /**
+     * Runs `wine <program> <args>` for [containerId] with its current launch's environment and
+     * waits for it (at most [timeoutMs]). Null when the container has no recorded launch or the
+     * command couldn't start. Output goes to [logName] in the container directory.
+     */
+    private suspend fun runWineCommand(
+        containerId: String,
+        program: String,
+        args: List<String>,
+        logName: String,
+        timeoutMs: Long = WINE_COMMAND_TIMEOUT_MS,
+    ): WineCommandResult? {
+        val context = commandContexts[containerId] ?: return null
+        // Quiet: the output is parsed, and Wine's debug channels would bury it.
+        val env = context.environment.filterNot { it.startsWith("WINEDEBUG=") } + "WINEDEBUG=-all"
+        val outcome = WineProcessLauncher.launch(
+            WineProcessLauncher.Request(
+                containerDir = context.dir,
+                wine = context.wine,
+                translatorName = context.translator.name,
+                translator = context.translator.executable,
+                program = program,
+                args = args,
+                env = env,
+                driverPath = context.driver,
+                processLogName = logName,
+            ),
+            LaunchLog.discard(),
+        )
+        val started = (outcome as? WineProcessLauncher.Outcome.Started)?.process ?: return null
+        val process = started.process ?: return null
+        val finished = runCatching { process.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(false)
+        if (!finished) {
+            started.destroy()
+            return null
+        }
+        val output = runCatching { File(context.dir, logName).readText() }.getOrDefault("")
+            .lineSequence().filterNot { it.startsWith("[fable]") }.joinToString("\n")
+        return WineCommandResult(runCatching { process.exitValue() }.getOrNull(), output)
+    }
+
+    /** The prefix's Windows programs from `/proc` (Wine host processes are left out). */
+    private fun prefixWindowsProcesses(prefix: File): List<WindowsProcess> {
+        val self = android.os.Process.myPid()
+        val marker = "WINEPREFIX=${prefix.absolutePath}"
+        return File("/proc").listFiles().orEmpty().mapNotNull { entry ->
+            val pid = entry.name.toIntOrNull() ?: return@mapNotNull null
+            if (pid == self) return@mapNotNull null
+            val environ = runCatching { File(entry, "environ").readBytes() }.getOrNull() ?: return@mapNotNull null
+            if (String(environ, Charsets.UTF_8).split('\u0000').none { it == marker }) return@mapNotNull null
+            val args = runCatching { String(File(entry, "cmdline").readBytes(), Charsets.UTF_8).split('\u0000') }
+                .getOrNull() ?: return@mapNotNull null
+            val name = WindowsTasks.imageNameFromCmdline(args) ?: return@mapNotNull null
+            WindowsProcess(name = name, linuxPid = pid)
+        }.sortedBy { it.name.lowercase() }
     }
 
     /**
@@ -1707,6 +1814,9 @@ class ContainerRepository internal constructor(
 
         /** Wine's default err output for wineboot, without the fixme noise. */
         private const val WINEBOOT_WINEDEBUG = "fixme-all"
+        private const val TASKLIST_LOG = "fable-tasklist.log"
+        private const val TASKKILL_LOG = "fable-taskkill.log"
+        private const val WINE_COMMAND_TIMEOUT_MS = 20_000L
 
         /**
          * Container environment switch for the launcher: `FABLE_LAUNCHER=native` selects the old
@@ -1841,6 +1951,15 @@ class ContainerRepository internal constructor(
  * `FEXInterpreter`, and [environment] holds translator-specific `KEY=VALUE` pairs.
  * [earlyExitHint] is appended to the error when the process dies straight away.
  */
+/** How a container's current launch runs Wine; see ContainerRepository.commandContexts. */
+private data class WineCommandContext(
+    val dir: File,
+    val wine: File,
+    val translator: ResolvedTranslator,
+    val environment: List<String>,
+    val driver: String?,
+)
+
 private data class ResolvedTranslator(
     val name: String,
     val executable: File,

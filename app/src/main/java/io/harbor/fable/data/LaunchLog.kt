@@ -81,6 +81,9 @@ class LaunchLog private constructor(private val file: File?) {
 
         fun logsDir(context: Context): File = File(context.applicationContext.filesDir, "logs")
 
+        /** A log that writes nothing, for short helper commands (the display's task manager). */
+        fun discard(): LaunchLog = LaunchLog(null)
+
         /** Starts a new log for a launch of [containerName] in [dir]; never throws. */
         fun begin(dir: File?, containerName: String, containerId: String): LaunchLog {
             val file = runCatching {

@@ -40,6 +40,8 @@ import io.harbor.fable.display.controls.StoredProfile
 import io.harbor.fable.display.controls.TouchpadController
 import io.harbor.fable.R
 import io.harbor.fable.data.ContainerRepository
+import io.harbor.fable.data.WindowsProcess
+import io.harbor.fable.data.WindowsTasks
 import io.harbor.fable.data.WineFailure
 import io.harbor.fable.data.models.HudPosition
 import io.harbor.fable.data.models.HudSettings
@@ -74,7 +76,8 @@ import kotlinx.coroutines.withContext
  * [createDrawer]) that slides in from the right edge over the X screen: on-screen controls
  * (Winlator-compatible control presets — buttons, d-pads, sticks, trackpads — that inject X
  * key and mouse events, see [createControlsOverlay]), the Android soft keyboard,
- * pausing / resuming Wine (SIGSTOP / SIGCONT on the prefix's processes) and Stop Wine, which is
+ * the control preset and the performance HUD, a mini task manager (`wine tasklist` /
+ * `taskkill`), pausing / resuming Wine (SIGSTOP / SIGCONT on the prefix's processes) and Stop Wine, which is
  * what Back used to do. A second Back closes the menu.
  *
  * A small performance HUD in the top-left corner shows the display's frame rate (frames the
@@ -100,6 +103,11 @@ class DisplayActivity : Activity() {
     private var controlProfiles: List<StoredProfile> = emptyList()
     private var selectedProfile: StoredProfile? = null
     private var controlsSubtitle: TextView? = null
+    private var controlsSwitch: Switch? = null
+    private var presetList: LinearLayout? = null
+    private var presetsLoading = false
+    private var taskList: LinearLayout? = null
+    private var tasksLoading = false
     private var winePaused = false
     private var pauseItem: TextView? = null
     private var pauseIcon: ImageView? = null
@@ -217,6 +225,9 @@ class DisplayActivity : Activity() {
         controlsOverlay?.releaseAll()
         controlsOverlay = null
         controlsSubtitle = null
+        controlsSwitch = null
+        presetList = null
+        taskList = null
         pauseItem = null
         pauseIcon = null
         // Only a real exit stops Wine; a recreate (config change not covered by the manifest)
@@ -262,6 +273,9 @@ class DisplayActivity : Activity() {
         scrim.animate().cancel()
         panel.animate().cancel()
         if (open) {
+            // Fresh lists each time: presets dropped into the import folders, programs started or ended.
+            reloadPresets()
+            refreshTasks()
             scrim.visibility = View.VISIBLE
             scrim.alpha = 0f
             scrim.animate().alpha(1f).setDuration(DRAWER_ANIMATION_MS).setInterpolator(DRAWER_EASE_OUT).start()
@@ -329,8 +343,11 @@ class DisplayActivity : Activity() {
     /**
      * The side menu: a light tap-to-close scrim over the whole screen with a floating glass panel
      * on the right — translucent so the game stays visible behind it, with a light-catching rim
-     * and no branding header. A compact close button sits at the top, then two short sections
-     * (Overlays, Wine) on glass cards, and a neutral glass Exit button pinned at the bottom.
+     * and no branding header. A compact close button sits at the top, then short sections on
+     * glass cards — Overlays (on-screen controls, performance HUD, keyboard), Control preset
+     * (every preset, tap to switch live; export), Wine (pause) and Tasks (the container's Windows
+     * processes with an End button each, refreshed whenever the menu opens) — and a neutral
+     * glass Exit button pinned at the bottom.
      * Hidden until Back opens it ([setDrawerOpen]).
      *
      * Touch handling is unchanged: while the menu is closed the scrim is GONE, so every touch
@@ -371,13 +388,35 @@ class DisplayActivity : Activity() {
             addView(menuCard(
                 menuSwitch("On-screen controls", R.drawable.ic_menu_gamepad, selectedProfile?.profile?.name ?: "Loading presets…", TONE_BLUE) {
                     setControlsShown(it)
-                }.also { controlsSubtitle = it.findViewById(ROW_SUBTITLE_ID) },
+                }.also {
+                    controlsSubtitle = it.findViewById(ROW_SUBTITLE_ID)
+                    controlsSwitch = it.findViewById(ROW_SWITCH_ID)
+                },
+                menuDivider(),
+                menuSwitch(
+                    "Performance HUD", R.drawable.ic_menu_hud, "FPS, resolution and CPU", TONE_TEAL,
+                    checked = hudSettings.enabled && !hudSettings.isEmpty,
+                ) { setHudShown(it) },
                 menuDivider(),
                 menuItem("Keyboard", R.drawable.ic_menu_keyboard, "Type into Wine", TONE_INDIGO) {
                     setDrawerOpen(false)
                     showKeyboard()
                 }.also { it.contentDescription = "Open Android's keyboard to type into Wine" },
             ))
+
+            // Control presets: one row per preset, tap to apply (see [renderPresets]).
+            addView(menuSectionLabel("Control preset"))
+            addView(menuCard(
+                LinearLayout(this@DisplayActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    presetList = this
+                },
+                menuDivider(),
+                menuItem("Export preset", R.drawable.ic_menu_gamepad, "Save as .icp to Download/Fable/profiles", TONE_SLATE) {
+                    exportSelectedPreset()
+                },
+            ))
+            addView(menuHint("Import: copy Winlator .icp files to Android/data/$packageName/files/profiles or Download/Winlator/profiles."))
 
             addView(menuSectionLabel("Wine"))
             addView(menuCard(
@@ -387,6 +426,16 @@ class DisplayActivity : Activity() {
                 }.also {
                     pauseItem = it.findViewById(ROW_TITLE_ID)
                     pauseIcon = it.findViewById(ROW_ICON_ID)
+                },
+            ))
+
+            // Mini task manager: the container's Windows processes, each with an End button.
+            addView(menuSectionLabel("Tasks"))
+            addView(menuCard(
+                menuItem("Refresh", R.drawable.ic_menu_refresh, "Running Windows programs", TONE_INDIGO) { refreshTasks() },
+                LinearLayout(this@DisplayActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    taskList = this
                 },
             ))
         }
@@ -583,8 +632,15 @@ class DisplayActivity : Activity() {
         }
     }
 
-    /** A menu row with a switch on the right; [onChange] gets the new state. */
-    private fun menuSwitch(label: String, iconRes: Int, subtitle: String?, tone: IntArray, onChange: (Boolean) -> Unit): View {
+    /** A menu row with a switch ([ROW_SWITCH_ID]) on the right, starting at [checked]; [onChange] gets the new state. */
+    private fun menuSwitch(
+        label: String,
+        iconRes: Int,
+        subtitle: String?,
+        tone: IntArray,
+        checked: Boolean = false,
+        onChange: (Boolean) -> Unit,
+    ): View {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
         val checkedState = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
@@ -592,7 +648,9 @@ class DisplayActivity : Activity() {
             // Fable's switch colours: blue track when on, a faint glass track when off.
             thumbTintList = ColorStateList(checkedState, intArrayOf(0xFFFFFFFF.toInt(), 0xFFD1D1D6.toInt()))
             trackTintList = ColorStateList(checkedState, intArrayOf(SWITCH_ON_TRACK.toInt(), SWITCH_OFF_TRACK.toInt()))
-            setOnCheckedChangeListener { _, checked -> onChange(checked) }
+            id = ROW_SWITCH_ID
+            isChecked = checked
+            setOnCheckedChangeListener { _, isOn -> onChange(isOn) }
         }
         return LinearLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -659,16 +717,240 @@ class DisplayActivity : Activity() {
                 if (aspect > 0f) SENSITIVITY / aspect else 0f
             }
         }
-        uiScope.launch {
-            val repository = ControlProfileRepository(applicationContext)
-            val loaded = withContext(Dispatchers.IO) { runCatching { repository.load() }.getOrDefault(emptyList()) }
-            controlProfiles = loaded
-            val chosen = repository.selected(loaded, containerId)
-            selectedProfile = chosen
-            overlay.setProfile(chosen?.profile)
-            controlsSubtitle?.text = chosen?.profile?.name ?: "No presets found"
-        }
+        controlsOverlay = overlay
+        reloadPresets()
         return overlay
+    }
+
+    private val profileRepository by lazy { ControlProfileRepository(applicationContext) }
+
+    /**
+     * Re-reads the presets (built-ins, saved, newly imported) off the main thread and shows the
+     * chosen one. The overlay only changes when the chosen preset's content did.
+     */
+    private fun reloadPresets() {
+        if (presetsLoading) return
+        presetsLoading = true
+        uiScope.launch {
+            val loaded = withContext(Dispatchers.IO) { runCatching { profileRepository.load() }.getOrDefault(emptyList()) }
+            presetsLoading = false
+            controlProfiles = loaded
+            val chosen = profileRepository.selected(loaded, containerId)
+            if (chosen?.profile != controlsOverlay?.currentProfile) controlsOverlay?.setProfile(chosen?.profile)
+            selectedProfile = chosen
+            controlsSubtitle?.text = chosen?.profile?.name ?: "No presets found"
+            renderPresets()
+        }
+    }
+
+    /** Switches the on-screen controls to [preset] right away and remembers it for this container. */
+    private fun applyPreset(preset: StoredProfile) {
+        selectedProfile = preset
+        controlsOverlay?.setProfile(preset.profile)
+        profileRepository.select(preset, containerId)
+        controlsSubtitle?.text = preset.profile.name
+        // Picking a preset means wanting to see it.
+        controlsSwitch?.let { if (!it.isChecked) it.isChecked = true }
+        renderPresets()
+    }
+
+    /** One row per preset in the side menu, the active one ticked. */
+    private fun renderPresets() {
+        val list = presetList ?: return
+        list.removeAllViews()
+        if (controlProfiles.isEmpty()) {
+            list.addView(menuInfoRow(if (presetsLoading) "Loading presets…" else "No presets found"))
+            return
+        }
+        controlProfiles.forEachIndexed { index, preset ->
+            if (index > 0) list.addView(menuDivider())
+            val active = preset.file == selectedProfile?.file
+            val elements = preset.profile.elements.count { it.isSupported }
+            val detail = buildString {
+                append(if (preset.builtin) "Built-in" else "Imported")
+                append(" · ").append(elements).append(if (elements == 1) " control" else " controls")
+            }
+            list.addView(menuTextRow(preset.profile.name, detail, trailing = if (active) "\u2713" else null) { applyPreset(preset) })
+        }
+    }
+
+    private fun exportSelectedPreset() {
+        val preset = selectedProfile ?: return
+        uiScope.launch {
+            val file = withContext(Dispatchers.IO) { profileRepository.export(preset) }
+            Toast.makeText(
+                this@DisplayActivity,
+                if (file != null) "Saved ${file.absolutePath}" else "Couldn't export ${preset.profile.name}",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    // ---- Performance HUD toggle --------------------------------------------------------------
+
+    /**
+     * Shows or hides the performance HUD for this session (the container's saved setting is
+     * unchanged). Turning it on when the container's HUD shows nothing turns every reading on.
+     */
+    private fun setHudShown(shown: Boolean) {
+        if (shown && hudSettings.isEmpty) hudSettings = hudSettings.copy(showFps = true, showResolution = true, showCpu = true)
+        hudSettings = hudSettings.copy(enabled = shown)
+        hudText?.visibility = if (shown) View.VISIBLE else View.GONE
+        if (shown) startHud() else stopHud()
+    }
+
+    // ---- Mini task manager -------------------------------------------------------------------
+
+    /**
+     * Lists the container's Windows processes ([ContainerRepository.listWindowsProcesses]:
+     * `wine tasklist`, or `/proc` as a fallback) into the side menu.
+     */
+    private fun refreshTasks() {
+        val list = taskList ?: return
+        val id = containerId ?: return
+        if (tasksLoading) return
+        list.removeAllViews()
+        if (winePaused) {
+            // A stopped wineserver can't answer tasklist.
+            list.addView(menuInfoRow("Resume Wine to list processes"))
+            return
+        }
+        list.addView(menuInfoRow("Loading…"))
+        tasksLoading = true
+        uiScope.launch {
+            val processes = runCatching { ContainerRepository.get(applicationContext).listWindowsProcesses(id) }.getOrDefault(emptyList())
+            tasksLoading = false
+            renderTasks(processes)
+        }
+    }
+
+    private fun renderTasks(processes: List<WindowsProcess>) {
+        val list = taskList ?: return
+        list.removeAllViews()
+        if (processes.isEmpty()) {
+            list.addView(menuInfoRow("No Windows processes found"))
+            return
+        }
+        processes.forEach { process ->
+            list.addView(menuDivider())
+            val system = process.name.lowercase() in WindowsTasks.SYSTEM_PROCESSES
+            val detail = buildList {
+                process.windowsPid?.let { add("PID $it") } ?: process.linuxPid?.let { add("pid $it") }
+                process.memory?.let { add(it) }
+                if (system) add("Wine")
+            }.joinToString(" · ")
+            list.addView(menuTextRow(process.name, detail, endAction = { confirmEndTask(process, system) }))
+        }
+    }
+
+    private fun confirmEndTask(process: WindowsProcess, system: Boolean) {
+        if (!system) {
+            endTask(process)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("End ${process.name}?")
+            .setMessage("It is part of Wine; ending it can close the desktop or stop the game.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("End") { _, _ -> endTask(process) }
+            .show()
+    }
+
+    private fun endTask(process: WindowsProcess) {
+        val id = containerId ?: return
+        uiScope.launch {
+            val ended = runCatching { ContainerRepository.get(applicationContext).endWindowsProcess(id, process) }.getOrDefault(false)
+            if (!ended) Toast.makeText(this@DisplayActivity, "Couldn't end ${process.name}", Toast.LENGTH_SHORT).show()
+            refreshTasks()
+        }
+    }
+
+    // ---- Side menu building blocks for the lists ---------------------------------------------
+
+    /** A dim one-line note inside a card ("Loading…", "No presets found"). */
+    private fun menuInfoRow(text: String): View {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        return TextView(this).apply {
+            setTextColor(DRAWER_TEXT_DIM.toInt())
+            textSize = 13f
+            typeface = fableFont(R.font.inter_regular)
+            setPadding(dp(14f), dp(12f), dp(14f), dp(12f))
+            this.text = text
+        }
+    }
+
+    /** Small explanatory text under a card. */
+    private fun menuHint(text: String): View {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        return TextView(this).apply {
+            setTextColor(DRAWER_TEXT_DIM.toInt())
+            textSize = 11f
+            typeface = fableFont(R.font.inter_regular)
+            setPadding(dp(12f), dp(6f), dp(12f), 0)
+            this.text = text
+        }
+    }
+
+    /**
+     * A text-only list row: title and detail, optionally a [trailing] mark (the active preset's
+     * tick) and an end button ([endAction], the task manager's End).
+     */
+    private fun menuTextRow(
+        title: String,
+        detail: String?,
+        trailing: String? = null,
+        endAction: (() -> Unit)? = null,
+        onClick: (() -> Unit)? = null,
+    ): View {
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+        return LinearLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(44f)
+            setPadding(dp(14f), dp(6f), dp(10f), dp(6f))
+            addView(LinearLayout(this@DisplayActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(this@DisplayActivity).apply {
+                    setTextColor(0xFFFFFFFF.toInt())
+                    textSize = 14f
+                    typeface = fableFont(R.font.inter_regular)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    text = title
+                })
+                if (!detail.isNullOrBlank()) addView(TextView(this@DisplayActivity).apply {
+                    setTextColor(DRAWER_TEXT_DIM.toInt())
+                    textSize = 11f
+                    typeface = fableFont(R.font.inter_regular)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    text = detail
+                })
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (trailing != null) addView(TextView(this@DisplayActivity).apply {
+                setTextColor(SWITCH_ON_TRACK.toInt())
+                textSize = 16f
+                typeface = fableFont(R.font.inter_medium)
+                text = trailing
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8f) })
+            if (endAction != null) addView(FrameLayout(this@DisplayActivity).apply {
+                background = glassPill(DRAWER_BUTTON_FILL, DRAWER_BUTTON_PRESSED, cornerDp = 14f)
+                contentDescription = "End $title"
+                isClickable = true
+                setOnClickListener { endAction() }
+                addView(ImageView(this@DisplayActivity).apply {
+                    setImageDrawable(menuIcon(R.drawable.ic_menu_end_task, DRAWER_TEXT_SOFT.toInt()))
+                }, FrameLayout.LayoutParams(dp(16f), dp(16f), Gravity.CENTER))
+            }, LinearLayout.LayoutParams(dp(28f), dp(28f)).apply { marginStart = dp(8f) })
+            if (onClick != null) {
+                background = menuRowBackground()
+                setOnClickListener { onClick() }
+            }
+        }
     }
 
     /** Centered "Starting Wine…" label, hidden once Wine maps a window (see [watchFirstWindow]). */
@@ -961,6 +1243,8 @@ class DisplayActivity : Activity() {
         private val TONE_TEAL = intArrayOf(0xFF14636A.toInt(), 0xFF072A2E.toInt())
         private val ROW_TITLE_ID = View.generateViewId()
         private val ROW_SUBTITLE_ID = View.generateViewId()
+        private val ROW_SWITCH_ID = View.generateViewId()
+        private val TONE_SLATE = intArrayOf(0xFF3A3F4A.toInt(), 0xFF16181D.toInt())
         private val ROW_ICON_ID = View.generateViewId()
 
         /** Opens the display for [containerId], which is stopped when the user leaves the screen. */
