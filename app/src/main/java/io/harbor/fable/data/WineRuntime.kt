@@ -416,6 +416,23 @@ internal class WineRuntime(
      * copy's imports and says what's missing). Plain paths (and Windows paths) are used as they
      * are.
      */
+    private val gameFolders by lazy { GameFolders(appContext) }
+
+    /**
+     * The .exe of a game added with its whole folder ([io.harbor.fable.data.models.ExeEntry.folder],
+     * a tree URI, and [folderExe] inside it): in place on shared storage when Fable can read and
+     * write the folder there, otherwise the folder copied into `drive_c/fable/<exeId>` (only
+     * what changed since the last launch). See [GameFolders].
+     */
+    suspend fun materializeGameFolder(containerDir: File, exeId: String, folder: String, folderExe: String): GameFolders.Report =
+        withContext(Dispatchers.IO) {
+            val tree = Uri.parse(folder)
+            gameFolders.inPlace(tree, folderExe)?.let { exe ->
+                return@withContext GameFolders.Report(exe = exe, inPlace = true)
+            }
+            gameFolders.sync(tree, File(containerDir, "drive_c/fable/$exeId"), folderExe)
+        }
+
     suspend fun materializeExecutable(containerDir: File, exeId: String, name: String, storedPath: String): String? =
         withContext(Dispatchers.IO) {
             if (!storedPath.startsWith("content://") && !storedPath.startsWith("file://")) {

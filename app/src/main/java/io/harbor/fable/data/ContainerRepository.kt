@@ -282,17 +282,23 @@ class ContainerRepository internal constructor(
         name: String,
         path: String,
         icon: String? = null,
+        /** Tree URI of the game's folder and the .exe's path inside it; see [ExeEntry.folder]. */
+        folder: String? = null,
+        folderExe: String? = null,
     ): ExeEntry {
         val trimmedName = name.trim()
         val trimmedPath = path.trim()
         require(trimmedName.isNotEmpty()) { "Executable name is required" }
         require(trimmedPath.isNotEmpty()) { "Executable path is required" }
+        val withFolder = !folder.isNullOrBlank() && !folderExe.isNullOrBlank()
         return addExe(
             ExeEntry(
                 containerId = containerId,
                 name = trimmedName,
                 path = trimmedPath,
                 icon = icon,
+                folder = folder?.trim()?.takeIf { withFolder },
+                folderExe = folderExe?.trim()?.trim('/')?.takeIf { withFolder },
             )
         )
     }
@@ -350,6 +356,15 @@ class ContainerRepository internal constructor(
                 )
             }
             persistLocked()
+            // The copy Fable made for it in the prefix (its .exe, or its whole game folder for an
+            // app added with "Choose game folder"), which can be gigabytes. The game's own files
+            // where the user keeps them are never touched.
+            if (!removed.isTool && removed.id.matches(SAFE_EXE_ID)) {
+                val copy = File(directory(removed.containerId), "drive_c/fable/${removed.id}")
+                if (copy.isDirectory && isUnder(containersRoot, copy) && !copy.deleteRecursively()) {
+                    Log.w(TAG, "Couldn't delete all of ${copy.absolutePath}")
+                }
+            }
             removed.icon?.let { icon ->
                 if (exesById.values.none { it.icon == icon }) {
                     val file = File(icon)
@@ -637,11 +652,28 @@ class ContainerRepository internal constructor(
             val root = downloadsDrive(dir, log) ?: "C:\\"
             arguments = listOf("/desktop=$DESKTOP_SHELL,$desktopSize", "/root,$root")
         } else {
-            val path = runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
-                ?: run {
-                    log.error("executable not readable: ${exe.path}")
-                    return LaunchResult.Failed("Can't open ${exe.name}. Add it again")
+            val path = if (exe.hasFolder) {
+                // Added with its whole folder: the files next to the .exe come along.
+                log.section("Game folder")
+                log.line("folder: ${exe.folder}, program: ${exe.folderExe}")
+                setStatus(container.id, ContainerStatus.CONFIGURING)
+                val report = try {
+                    runtime.materializeGameFolder(dir, exe.id, exe.folder!!, exe.folderExe!!)
+                } finally {
+                    withContext(NonCancellable) { setStatus(container.id, ContainerStatus.READY) }
                 }
+                report.describe().forEach { log.line(it) }
+                report.exe?.absolutePath ?: run {
+                    log.error("game folder unusable: ${report.error}")
+                    return LaunchResult.Failed(report.error ?: "Can't open ${exe.name}'s folder. Add it again")
+                }
+            } else {
+                runtime.materializeExecutable(dir, exe.id, exe.name, exe.path)
+                    ?: run {
+                        log.error("executable not readable: ${exe.path}")
+                        return LaunchResult.Failed("Can't open ${exe.name}. Add it again")
+                    }
+            }
             val programFile = File(path)
             log.line("program: $path (exists=${programFile.isFile}, size=${programFile.length()})")
             checkProgramFiles(runtime, exe, programFile, dir, log)?.let { return it }
@@ -1088,7 +1120,9 @@ class ContainerRepository internal constructor(
             return null
         }
         val folder = program.parentFile ?: return null
-        val copied = folder.absolutePath.startsWith(File(dir, "drive_c/fable/${exe.id}").absolutePath)
+        // Only the .exe was copied: a single picked file. A game added with its folder is copied
+        // whole into the same place, so a missing file there means the folder itself lacks it.
+        val copied = !exe.hasFolder && folder.absolutePath.startsWith(File(dir, "drive_c/fable/${exe.id}").absolutePath)
         val allFiles = runtime.hasAllFilesAccess()
         log.line(
             "program files check: ${program.name} is ${if (info.is64Bit) "64" else "32"}-bit (machine 0x${info.machine.toString(16)}), " +
@@ -1124,10 +1158,11 @@ class ContainerRepository internal constructor(
         val reason = when {
             copied && !allFiles ->
                 "${exe.name} needs $what from its game folder, but Fable could only copy ${program.name}. " +
-                    "Allow Fable \"All files access\" so games run from their own folder, then launch again"
+                    "Allow Fable \"All files access\" so games run from their own folder, or remove the app and " +
+                    "add it again with \"Choose game folder\""
             copied ->
-                "${exe.name} needs $what from its game folder. Fable couldn't open that folder: put the game " +
-                    "in Download (or another folder on internal storage) and add its .exe again"
+                "${exe.name} needs $what from its game folder. Fable couldn't open that folder: remove the app " +
+                    "and add it again with \"Choose game folder\" (or put the game in Download and add its .exe again)"
             else -> "${exe.name} needs $what, which isn't in ${folder.absolutePath}. Is the game folder complete?"
         }
         return LaunchResult.Failed(reason, needsAllFilesAccess = copied && !allFiles)
@@ -1656,6 +1691,9 @@ class ContainerRepository internal constructor(
         private const val DESKTOP_NOGUI = "nogui"
         private const val DESKTOP_SHELL = "shell"
 
+        /** Exe ids Fable generates (UUIDs); anything else never names a directory to delete. */
+        private val SAFE_EXE_ID = Regex("""[A-Za-z0-9-]{8,64}""")
+
         /** The prefix's 64-bit system directory, where DXVK's DLLs go. */
         private const val SYSTEM32_DIR = "drive_c/windows/system32"
         private const val SYSWOW64_DIR = "drive_c/windows/syswow64"
@@ -2004,6 +2042,8 @@ class FileContainerStore(private val file: File) : ContainerDao {
         if (lastPlayed == null) put("lastPlayed", JSONObject.NULL) else put("lastPlayed", lastPlayed)
         put("playCount", playCount)
         putNullable("toolId", toolId)
+        putNullable("folder", folder)
+        putNullable("folderExe", folderExe)
     }
 
     private fun JSONObject.toExe(): ExeEntry = ExeEntry(
@@ -2015,6 +2055,8 @@ class FileContainerStore(private val file: File) : ContainerDao {
         lastPlayed = longOrNull("lastPlayed"),
         playCount = optInt("playCount", 0),
         toolId = stringOrNull("toolId"),
+        folder = stringOrNull("folder"),
+        folderExe = stringOrNull("folderExe"),
     )
 
     companion object {

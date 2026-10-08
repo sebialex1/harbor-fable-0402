@@ -106,6 +106,19 @@ data class ExeEntry(
      * become the container's primary app and aren't listed on the Home screen.
      */
     val toolId: String? = null,
+    /**
+     * The game's whole folder, when it was added with "Choose game folder": a Storage Access
+     * Framework tree URI Fable holds a persisted read grant for. [path] is then the document URI
+     * of the .exe inside it and [folderExe] that .exe's path relative to the folder
+     * (`ULTRAKILL.exe`, `bin/Game.exe`). A game is more than its .exe (a Unity game's .exe
+     * imports `UnityPlayer.dll` and reads `<Name>_Data/` next to it), and a single picked file
+     * gives Fable no way to reach the rest. Null for apps added as a single file.
+     */
+    val folder: String? = null,
+    val folderExe: String? = null,
 ) {
     val isTool: Boolean get() = toolId != null
+
+    /** Added with its whole folder ([folder] / [folderExe] are both set). */
+    val hasFolder: Boolean get() = !folder.isNullOrBlank() && !folderExe.isNullOrBlank()
 }
