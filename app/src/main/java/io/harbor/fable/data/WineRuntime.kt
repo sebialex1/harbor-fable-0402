@@ -732,7 +732,11 @@ internal class WineRuntime(
             return state != 'Z' && state != 'X'
         }
 
-        /** Last line of the launch log that is not launcher bookkeeping, shortened for a snackbar. */
+        /**
+         * Last line of the launch log that is not launcher bookkeeping, shortened for a snackbar.
+         * With +module/+seh on, the tail is loader trace and DLL-detach noise (also from
+         * explorer.exe shutting down after the game ended): the last real message is preferred.
+         */
         fun lastLogLine(containerDir: File): String? {
             val log = File(containerDir, LAUNCH_LOG)
             if (!log.isFile) return null
@@ -743,10 +747,13 @@ internal class WineRuntime(
                     String(input.readBytes(), Charsets.UTF_8)
                 }
             }.getOrNull() ?: return null
-            return text.lineSequence()
+            val lines = text.lineSequence()
                 .map { it.trim() }
-                .lastOrNull { it.isNotEmpty() && !it.startsWith("[fable]") }
+                .filter { it.isNotEmpty() && !it.startsWith("[fable]") }
+                .toList()
+            return lines.lastOrNull { !it.contains(":trace:") && !it.contains("MODULE_InitDLL") && !it.contains("LdrShutdown") }
                 ?.take(160)
+                ?: lines.lastOrNull()?.take(160)
         }
 
         /** True when the launcher recorded a clean exit (code 0) in the launch log. */
