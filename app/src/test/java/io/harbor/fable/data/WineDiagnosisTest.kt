@@ -33,4 +33,39 @@ class WineDiagnosisTest {
         assertFalse(diagnosis.programFailed)
         assertTrue(diagnosis.isEmpty)
     }
+
+    @Test fun vkd3dProtonErrorsAreRecognized() {
+        val output = """
+            0210:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\d3d12.dll" at 000000027A8F0000: native
+            0210:trace:loaddll:build_module Loaded L"C:\\windows\\system32\\dxgi.dll" at 0000000284600000: native
+            0210:err:vkd3d_init_device_caps: Push descriptors are not supported by this implementation. This is required for correct operation.
+            0210:err:d3d12:some_wine_function wine's own channel
+        """.trimIndent()
+        val diagnosis = WineDiagnosis.analyze(output)
+        assertEquals(1, diagnosis.vkd3dErrors.size)
+        assertTrue(diagnosis.vkd3dErrors.single().startsWith("vkd3d_init_device_caps: Push descriptors"))
+        assertTrue(diagnosis.usedD3d12)
+        assertEquals("native", diagnosis.graphicsDlls["d3d12.dll"])
+        assertEquals("native", diagnosis.graphicsDlls["dxgi.dll"])
+        assertFalse(diagnosis.dxrEnabled)
+        assertTrue(diagnosis.summary()!!.contains("VKD3D-Proton (Direct3D 12) error"))
+    }
+
+    @Test fun dxrAndFeatureLevelOverrideAreNoted() {
+        val output = "0210:info:d3d12_device_determine_ray_tracing_tier: DXR support enabled.\n" +
+            "0210:warn:d3d12_device_caps_override: Overriding feature level: 0xc100.\n"
+        val diagnosis = WineDiagnosis.analyze(output)
+        assertTrue(diagnosis.dxrEnabled)
+        assertTrue(diagnosis.featureLevelOverridden)
+        assertTrue(diagnosis.vkd3dErrors.isEmpty())
+    }
+
+    @Test fun moduleTraceOfTheUserLogIsNotAFailure() {
+        // The tail of the RTX benchmark log: UE4's crash handler walking modules, nothing vkd3d printed.
+        val output = "0210:trace:module:LdrGetDllHandleEx L\"C:\\\\windows\\\\system32\\\\d3d12.dll\" -> 000000027A8F0000\n" +
+            "015c:warn:file:NtCreateFile L\"\\\\??\\\\Z:\\\\RTX_bench\\\\Saved\\\\Crashes\\\\UE4CC-Windows-41A9_0000\" not found (c0000035)\n"
+        val diagnosis = WineDiagnosis.analyze(output)
+        assertTrue(diagnosis.vkd3dErrors.isEmpty())
+        assertFalse(diagnosis.usedD3d12)
+    }
 }

@@ -13,10 +13,12 @@ import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.data.models.HudPosition
 import io.harbor.fable.data.models.HudSettings
+import io.harbor.fable.data.models.VulkanSource
 import io.harbor.fable.display.DisplayServer
 import io.harbor.fable.display.NativeLibResolver
 import io.harbor.fable.display.X11ClientLibs
 import io.harbor.fable.nativebridge.NativeLoader
+import io.harbor.fable.nativebridge.VulkanProbe
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -592,6 +595,8 @@ class ContainerRepository internal constructor(
         val direct3d = installDxWrappers(runtime, configured, dir, log)
         direct3d.describe().forEach { log.line(it) }
         checkDxvk(direct3d, configured, exe, dir, log)?.let { return it }
+        val d3d12Support = checkVkd3d(runtime, direct3d, configured, log)
+        if (d3d12Support != null) d3d12Supports[container.id] = d3d12Support else d3d12Supports.remove(container.id)
         val dxvkInstalled = direct3d.installed[DxWrappers.Kind.DXVK] != null
         val dxvkConf = if (dxvkInstalled) DxWrappers.ensureDxvkConf(dir) else null
         dxvkConf?.let { log.line("dxvk.conf: ${it.absolutePath}") }
@@ -765,10 +770,10 @@ class ContainerRepository internal constructor(
                 // A Windows path: DXVK opens it through Wine's file APIs.
                 add("DXVK_CONFIG_FILE=${toWindowsPath(dxvkConf.absolutePath, dir)}")
             }
-            if (direct3d.installed[DxWrappers.Kind.VKD3D] != null) {
-                // Winlator's default VKD3D feature level.
-                add("VKD3D_FEATURE_LEVEL=12_1")
-            }
+            // No VKD3D_FEATURE_LEVEL: in VKD3D-Proton it forces that level's capabilities on
+            // (12_1 = ROVs, conservative rasterization, tiled resources tier 2, …) whatever the
+            // driver supports, so Direct3D 12 games used features Turnip / RADV don't have.
+            // VKD3D-Proton picks the level from the driver itself (see Vkd3dSetup).
             if (screen != null) {
                 add("DISPLAY=${screen.display}")
                 add("FABLE_VULKAN_SOCKET=${File(screen.socketPath).parent}/V0")
@@ -1112,6 +1117,56 @@ class ContainerRepository internal constructor(
     }
 
     /**
+     * After [installDxWrappers], when VKD3D-Proton is installed: logs whether Direct3D 12 can
+     * work in this container — the DXVK DXGI it depends on ([Vkd3dSetup.pairingProblems]), a
+     * container `VKD3D_FEATURE_LEVEL` that fakes capabilities, and what the active Vulkan driver
+     * offers VKD3D-Proton (Vulkan 1.3, required extensions, ray tracing). Only logs: the
+     * launched program may not use D3D12 at all. Returns the driver assessment for the exit
+     * diagnosis, or null when VKD3D-Proton isn't installed.
+     */
+    private suspend fun checkVkd3d(
+        runtime: WineRuntime,
+        direct3d: DxWrappers.Report,
+        container: Container,
+        log: LaunchLog,
+    ): Vkd3dSetup.DriverSupport? {
+        val vkd3d = direct3d.installed[DxWrappers.Kind.VKD3D] ?: return null
+        log.section("Direct3D 12 (VKD3D-Proton)")
+        val dxvk = direct3d.installed[DxWrappers.Kind.DXVK]
+        log.line("VKD3D-Proton: $vkd3d (${direct3d.nativeDlls[DxWrappers.Kind.VKD3D].orEmpty().joinToString()}), DXGI from: ${dxvk ?: "Wine (no DXVK)"}")
+        val problems = Vkd3dSetup.pairingProblems(dxvk, vkd3d)
+        if (problems.isEmpty()) log.line("DXGI pairing: ok (DXVK's dxgi.dll serves VKD3D-Proton's swap chains)")
+        problems.forEach { problem ->
+            log.error(problem)
+            Log.w(TAG, "${container.name}: $problem")
+        }
+        Vkd3dSetup.featureLevelWarning(container.envVars[Vkd3dSetup.FEATURE_LEVEL_ENV])?.let { log.line("WARNING $it") }
+            ?: log.line("${Vkd3dSetup.FEATURE_LEVEL_ENV}: not set (VKD3D-Proton reports the driver's real feature level)")
+        val driverPath = runtime.activeDriverLibrary()
+        val source = if (driverPath != null) VulkanSource.INSTALLED_DRIVER else VulkanSource.SYSTEM
+        val probe = runCatching {
+            withTimeoutOrNull(VULKAN_PROBE_TIMEOUT_MS) { VulkanProbe.probe(source, driverPath) }
+        }.getOrNull()
+        val device = probe?.takeIf { it.ok }?.primaryDevice
+        val support = if (device == null) {
+            log.line("Vulkan probe of ${source.label}: ${probe?.error ?: "no result"}; D3D12 driver requirements not checked")
+            Vkd3dSetup.DriverSupport.UNKNOWN
+        } else {
+            Vkd3dSetup.assess(device.name, device.apiVersion, device.extensions.map { it.name })
+        }
+        support.describe().forEach { line ->
+            if (line.startsWith("ERROR ")) log.error(line.removePrefix("ERROR ")) else log.line(line)
+        }
+        if (support.rayTracing == Vkd3dSetup.RayTracing.UNSUPPORTED) {
+            log.line(
+                "Ray tracing titles (DXR) can't use it on this driver; VKD3D-Proton reports raytracing tier " +
+                    "NOT_SUPPORTED and Fable doesn't fake it",
+            )
+        }
+        return support
+    }
+
+    /**
      * Before Wine starts: does the program have what it needs next to it? Reads its PE imports
      * and looks for each DLL the way Wine's loader would (the program's folder, then
      * system32/syswow64 and Wine's own PE directory). A Unity game (ULTRAKILL) imports
@@ -1219,7 +1274,10 @@ class ContainerRepository internal constructor(
     private fun checkDirect3dEnvironment(direct3d: DxWrappers.Report, environment: List<String>, log: LaunchLog) {
         val wanted = buildList {
             if (direct3d.installed[DxWrappers.Kind.DXVK] != null) addAll(listOf("d3d11", "dxgi"))
-            if (direct3d.installed[DxWrappers.Kind.VKD3D] != null) add("d3d12")
+            if (direct3d.installed[DxWrappers.Kind.VKD3D] != null) {
+                add("d3d12")
+                if ("d3d12core.dll" in direct3d.nativeDlls[DxWrappers.Kind.VKD3D].orEmpty()) add("d3d12core")
+            }
         }
         if (wanted.isEmpty()) return
         val overrides = environment.lastOrNull { it.startsWith("$DLL_OVERRIDES_ENV=") }?.substringAfter('=')
@@ -1723,7 +1781,9 @@ class ContainerRepository internal constructor(
             } else {
                 WineRuntime.lastLogLine(dir)
             }
-        val reason = listOfNotNull(detail, status?.let { "($it)" }).joinToString(" ").ifBlank { "no output" }
+        val d3d12Hint = d3d12ExitHint(diagnosis, d3d12Supports[containerId])
+        d3d12Hint?.let { log.line(it) }
+        val reason = listOfNotNull(detail, d3d12Hint, status?.let { "($it)" }).joinToString(" ").ifBlank { "no output" }
         log.error(
             "$label ${if (duringStartup) "failed during startup" else "stopped"} after ${uptimeMs}ms: $reason",
         )
@@ -1740,6 +1800,27 @@ class ContainerRepository internal constructor(
         )
         _wineFailures.update { it + (containerId to failure) }
         Log.w(TAG, "Wine for $containerId ended: $reason")
+    }
+
+    /**
+     * What to add to an exit message when the program went down the Direct3D 12 path: VKD3D-
+     * Proton not loaded at all, the driver missing what VKD3D-Proton requires, or no ray tracing
+     * on this driver (for DXR titles that's unsupported functionality, not a setup fault).
+     */
+    private fun d3d12ExitHint(diagnosis: WineDiagnosis.Diagnosis, support: Vkd3dSetup.DriverSupport?): String? {
+        if (!diagnosis.usedD3d12) return null
+        if (diagnosis.graphicsDlls["d3d12.dll"] == "builtin") {
+            return "— it used Wine's builtin d3d12, not VKD3D-Proton (download VKD3D-Proton in Assets)"
+        }
+        if (support == null || diagnosis.vkd3dErrors.isNotEmpty()) return null
+        if (!support.canRunD3d12) {
+            return "— this Vulkan driver lacks what VKD3D-Proton needs: ${(support.missingRequired + if (!support.apiOk) listOf("Vulkan 1.3") else emptyList()).joinToString()}"
+        }
+        if (support.rayTracing == Vkd3dSetup.RayTracing.UNSUPPORTED && !diagnosis.dxrEnabled) {
+            return "— it ran Direct3D 12; this Vulkan driver has no ray tracing (DXR not supported), so ray tracing " +
+                "titles can't run here"
+        }
+        return null
     }
 
     /** Writes [diagnosis] (and the native libraries that weren't found) into [log]. */
@@ -1761,6 +1842,9 @@ class ContainerRepository internal constructor(
             }
         }
     }
+
+    /** The last launch's [checkVkd3d] result per container, for the exit diagnosis. */
+    private val d3d12Supports = ConcurrentHashMap<String, Vkd3dSetup.DriverSupport>()
 
     private fun elapsedMs(sinceNanos: Long): Long = (System.nanoTime() - sinceNanos) / 1_000_000L
 
@@ -1826,6 +1910,7 @@ class ContainerRepository internal constructor(
 
         /** Wine's DLL load-order variable; Fable's and the container's values are merged. */
         private const val DLL_OVERRIDES_ENV = "WINEDLLOVERRIDES"
+        private const val VULKAN_PROBE_TIMEOUT_MS = 8_000L
 
         /**
          * Virtual desktop names passed to `wine explorer /desktop=<name>,WxH`, as Winlator's

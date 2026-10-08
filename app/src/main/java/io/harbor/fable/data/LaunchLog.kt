@@ -124,10 +124,11 @@ class LaunchLog private constructor(private val file: File?) {
          * Lines worth reading in a Wine process log: errors/warnings/fixmes of any channel,
          * exceptions (`seh`), process start/exit (`process`), each loaded DLL (`loaddll`),
          * Wine's own `wine:` messages, DXVK (`info:`/`warn:`/`err:` without a thread prefix),
-         * the Vulkan shim and Fable's exit line. `+module` traces are skipped.
+         * the Vulkan shim and Fable's exit line. `:info:` is VKD3D-Proton's ("DXR support enabled.");
+         * Wine has no such class. `+module` traces are skipped.
          */
         private val HIGHLIGHT = Regex(
-            """(:(err|warn|fixme):|:trace:(seh|process|loaddll):|^wine:|^\s*(err|warn|info):\s|\[vulkan_shim]|\[fable]|\[BOX64] Error|CANNOT LINK|not found)""",
+            """(:(err|warn|fixme|info):|:trace:(seh|process|loaddll):|^wine:|^\s*(err|warn|info):\s|\[vulkan_shim]|\[fable]|\[BOX64] Error|CANNOT LINK|not found)""",
         )
 
         /** [HIGHLIGHT] lines of [source] (whole file, streamed), or null when it doesn't exist. */

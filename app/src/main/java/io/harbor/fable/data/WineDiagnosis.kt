@@ -53,6 +53,29 @@ internal object WineDiagnosis {
     )
     private const val MAX_GRAPHICS_ERRORS = 5
 
+    /**
+     * VKD3D-Proton's own messages: `%04x:<level>:<function>: <message>` with a C function name
+     * (`0210:err:vkd3d_init_device_caps: Push descriptors are not supported …`). Wine's d3d12
+     * channel (`err:d3d12:func …`) has a colon, not a space, after the channel and isn't matched.
+     */
+    private val VKD3D_ERROR = Regex("""[0-9a-fA-F]{4}:err:(\w*(?:vkd3d|d3d12|dxgi_vk)\w*): (.+)""")
+    private const val MAX_VKD3D_ERRORS = 5
+    private const val VKD3D_DXR_ENABLED = "DXR support enabled"
+    private const val VKD3D_FEATURE_LEVEL_OVERRIDE = "Overriding feature level"
+
+    /**
+     * `trace:loaddll:build_module Loaded L"C:\\windows\\system32\\d3d12.dll" at 000000027A8F0000: native`
+     * for the graphics API DLLs: which API the program really used and whether Wine loaded
+     * DXVK / VKD3D-Proton (native) or its own (builtin).
+     */
+    private val GRAPHICS_DLL_LOADED = Regex(
+        """:loaddll:.*Loaded L?"[^"]*?([A-Za-z0-9_\-]+\.dll)" at [0-9A-Fa-f]+: (native|builtin)""",
+    )
+    val GRAPHICS_DLLS = setOf(
+        "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll",
+        "dxgi.dll", "ddraw.dll", "opengl32.dll", "vulkan-1.dll",
+    )
+
     data class Diagnosis(
         /** Native libraries `dlopen` couldn't find (e.g. `libfreetype.so`). */
         val missingLibraries: List<String> = emptyList(),
@@ -85,11 +108,22 @@ internal object WineDiagnosis {
         val failedImports: List<String> = emptyList(),
         /** The first few crash lines: unhandled exceptions, `err:seh`, access violations. */
         val crashes: List<String> = emptyList(),
+        /** VKD3D-Proton's error messages (`function: message`), first few. */
+        val vkd3dErrors: List<String> = emptyList(),
+        /** VKD3D-Proton printed "DXR support enabled." (the device can report D3D12 ray tracing). */
+        val dxrEnabled: Boolean = false,
+        /** VKD3D-Proton printed "Overriding feature level" (VKD3D_FEATURE_LEVEL forced capabilities). */
+        val featureLevelOverridden: Boolean = false,
+        /** Graphics API DLLs Wine loaded, lower case name to "native" / "builtin", in load order. */
+        val graphicsDlls: Map<String, String> = emptyMap(),
     ) {
+        /** The program loaded d3d12.dll: it went down the Direct3D 12 path. */
+        val usedD3d12: Boolean get() = "d3d12.dll" in graphicsDlls
+
         val isEmpty: Boolean
             get() = missingLibraries.isEmpty() && nativeInitFailures.isEmpty() && failedDlls.isEmpty() &&
                 missingSymbols.isEmpty() && !freeTypeMissing && !freeTypeTooOld && graphicsErrors.isEmpty() &&
-                missingImports.isEmpty() && failedImports.isEmpty() && crashes.isEmpty()
+                missingImports.isEmpty() && failedImports.isEmpty() && crashes.isEmpty() && vkd3dErrors.isEmpty()
 
         /** Findings that mean the program itself couldn't start, even when Wine exited with 0. */
         val programFailed: Boolean
@@ -114,6 +148,8 @@ internal object WineDiagnosis {
                     add("couldn't load the DLLs ${failedImports.first()} imports")
                 }
                 if (crashes.isNotEmpty()) add("crashed: ${crashes.first().take(120)}")
+                if (vkd3dErrors.isNotEmpty()) add("VKD3D-Proton (Direct3D 12) error: ${vkd3dErrors.first().take(160)}")
+                if (featureLevelOverridden) add("VKD3D_FEATURE_LEVEL forced Direct3D 12 capabilities the driver may not have")
                 when {
                     openGlUnavailable -> add("Direct3D fell back to WineD3D, which needs OpenGL (download DXVK in Assets)")
                     graphicsErrors.isNotEmpty() -> add("graphics error: ${graphicsErrors.first().take(120)}")
@@ -143,6 +179,18 @@ internal object WineDiagnosis {
             if (openGlUnavailable) {
                 add("WineD3D has no OpenGL here; games need DXVK (and VKD3D-Proton for D3D12), see the Direct3D section")
             }
+            vkd3dErrors.forEach { add("VKD3D-Proton: $it") }
+            if (graphicsDlls.isNotEmpty()) {
+                add("graphics DLLs loaded: ${graphicsDlls.entries.joinToString { "${it.key} (${it.value})" }}")
+            }
+            if (usedD3d12) {
+                add(
+                    "Direct3D 12: d3d12.dll loaded ${graphicsDlls["d3d12.dll"]}" +
+                        (if (graphicsDlls["d3d12.dll"] == "builtin") " — Wine's own d3d12, not VKD3D-Proton" else "") +
+                        "; DXR ${if (dxrEnabled) "enabled by VKD3D-Proton" else "not reported by VKD3D-Proton"}",
+                )
+            }
+            if (featureLevelOverridden) add("VKD3D-Proton overrode the feature level (VKD3D_FEATURE_LEVEL): reported caps aren't the driver's")
             if (isEmpty && !lscpuMissing) add("no known failure pattern in the process output")
         }
     }
@@ -174,8 +222,23 @@ internal object WineDiagnosis {
         var noOpenGl = false
         val importFailures = LinkedHashSet<String>()
         val crashes = LinkedHashSet<String>()
+        val vkd3d = LinkedHashSet<String>()
+        var dxr = false
+        var flOverride = false
+        val graphicsDlls = LinkedHashMap<String, String>()
         for (raw in output) {
             val line = raw.trimEnd('\r')
+            if (vkd3d.size < MAX_VKD3D_ERRORS) {
+                VKD3D_ERROR.find(line)?.let { vkd3d += "${it.groupValues[1]}: ${it.groupValues[2].trim()}".take(240) }
+            }
+            if (line.contains(VKD3D_DXR_ENABLED)) dxr = true
+            if (line.contains(VKD3D_FEATURE_LEVEL_OVERRIDE)) flOverride = true
+            if (line.contains(":loaddll:")) {
+                GRAPHICS_DLL_LOADED.find(line)?.let {
+                    val name = it.groupValues[1].lowercase()
+                    if (name in GRAPHICS_DLLS && name !in graphicsDlls) graphicsDlls[name] = it.groupValues[2]
+                }
+            }
             if (graphics.size < MAX_GRAPHICS_ERRORS) {
                 GRAPHICS_ERROR.find(line)?.let { graphics += it.value.trim().take(200) }
             }
@@ -211,6 +274,10 @@ internal object WineDiagnosis {
             openGlUnavailable = noOpenGl,
             failedImports = importFailures.toList(),
             crashes = crashes.toList(),
+            vkd3dErrors = vkd3d.toList(),
+            dxrEnabled = dxr,
+            featureLevelOverridden = flOverride,
+            graphicsDlls = graphicsDlls,
         )
     }
 }
