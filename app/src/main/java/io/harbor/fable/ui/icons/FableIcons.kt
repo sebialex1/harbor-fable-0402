@@ -324,14 +324,18 @@ object FableIcons {
         )
     }
 
-    val Trash: ImageVector by lazy {
-        phosphor(
-            "Trash",
-            listOf(
-                "M216,48H168V40a16,16,0,0,0-16-16H104A16,16,0,0,0,88,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM104,40h48v8H104Zm88,168H64V64H192ZM112,104v64a8,8,0,0,0,16,0V104a8,8,0,0,0-16,0Zm48,0v64a8,8,0,0,0,16,0V104a8,8,0,0,0-16,0Z",
-            ),
-        )
-    }
+    /**
+     * Remove / delete: Phosphor `trash` (Regular), verbatim. The earlier hand-edited copy had its
+     * two bars shifted right of the bin's centre (x 112–128 and 160–176 in a 64–192 body, so the
+     * right bar nearly touched the wall) and a squashed handle, which is what made it look off.
+     */
+    val Trash: ImageVector by lazy { phosphor("Trash", listOf(TRASH_PATH)) }
+
+    /** Path data of [Trash], on Phosphor's 256-unit grid (checked for symmetry in a unit test). */
+    internal const val TRASH_PATH =
+        "M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192" +
+            "a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192Z" +
+            "M112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z"
 }
 
 /** A 24 dp icon on Phosphor's 256-unit grid, filled with black so `Icon`'s tint recolours it. */

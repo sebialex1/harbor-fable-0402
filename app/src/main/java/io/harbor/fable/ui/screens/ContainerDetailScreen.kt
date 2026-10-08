@@ -94,7 +94,6 @@ import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
 import io.harbor.fable.ui.components.*
-import io.harbor.fable.ui.theme.ControlHeight
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableBg
 import io.harbor.fable.ui.theme.FableError
@@ -338,12 +337,16 @@ internal fun ContainerDetailContent(
                                     // The only way to take an app off a container; a
                                     // confirmation follows (the files themselves stay).
                                     trailing = {
+                                        // A plain glyph on the row (no grey disc behind it), in the
+                                        // destructive colour; see TrashButtonSize. Phosphor's glyph
+                                        // spans x 32–224 / y 16–224 of 256, so nothing clips.
                                         FableIconButton(
                                             icon = FableIcons.Trash,
                                             contentDescription = "Remove ${exe.name}",
-                                            tint = FableTextDim,
+                                            tint = FableError,
+                                            containerColor = Color.Transparent,
                                             bordered = false,
-                                            size = ControlHeight.Compact,
+                                            size = TrashButtonSize,
                                             onClick = { onRemoveExe(exe) },
                                         )
                                     },
@@ -913,6 +916,13 @@ private val BlurSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 private const val TOOL_COLUMNS = 2
 private val LaunchIconSize = 44.dp
 private val PlayButtonSize = 40.dp
+
+/**
+ * Remove-app button on app rows: a 36 dp target with a 19 dp glyph (FableIconButton draws it at
+ * 52 %). With the row's 11 dp vertical padding the row grows to 58 dp, 6 dp over the 30 dp icon
+ * rows, instead of the 32 dp disc whose 17 dp glyph read as a smudge.
+ */
+private val TrashButtonSize = 36.dp
 private val ToolTileHeight = 88.dp
 private val ToolGap = 6.dp
 private val ToolOuterRadius = 20.dp
