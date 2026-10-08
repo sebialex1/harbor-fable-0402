@@ -17,7 +17,10 @@ import kotlin.math.min
  * [ControlInput]: Fable's take on Winlator's input-controls overlay.
  *
  * Every finger is tracked on its own: the element a finger lands on owns it until it lifts, so
- * a d-pad, a stick and buttons can all be held at once. Element behaviour:
+ * a d-pad, a stick and buttons can all be held at once, and a finger that lands on no element
+ * goes to the [touchpad] — which never sees control fingers, so steering the cursor while
+ * holding a button works and a button press is never mistaken for a two-finger right click.
+ * Element behaviour:
  *
  * - **Button**: holds its bindings while pressed; a toggle button latches on one tap and lets
  *   go on the next.
@@ -81,6 +84,29 @@ class InputControlsView(context: Context, private val input: ControlInput) : Vie
         var rangeCarry = 0f
     }
 
+    /**
+     * Receives every finger that doesn't land on a control element (all of them while the
+     * controls are hidden). Null lets a first finger that misses fall through to the view below.
+     */
+    var touchpad: TouchpadController? = null
+
+    /**
+     * Whether the elements are drawn and touchable. Hidden controls let go of everything; the
+     * view itself stays up so the trackpad keeps working.
+     */
+    var controlsShown: Boolean = true
+        set(value) {
+            if (field == value) return
+            field = value
+            if (!value) {
+                pointerOwners.keys.toList().forEach { id ->
+                    pointerOwners.remove(id)?.let { element -> states[element]?.let { cancel(element, it) } }
+                }
+                releaseAll()
+            }
+            invalidate()
+        }
+
     /** The profile being shown, or null for none. */
     val currentProfile: ControlProfile? get() = profile
 
@@ -113,11 +139,15 @@ class InputControlsView(context: Context, private val input: ControlInput) : Vie
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
-        if (visibility != VISIBLE) releaseAll()
+        if (visibility != VISIBLE) {
+            releaseAll()
+            touchpad?.cancel()
+        }
     }
 
     override fun onDetachedFromWindow() {
         releaseAll()
+        touchpad?.cancel()
         super.onDetachedFromWindow()
     }
 
@@ -131,29 +161,49 @@ class InputControlsView(context: Context, private val input: ControlInput) : Vie
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        val pad = touchpad
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val index = event.actionIndex
-                val element = elementAt(event.getX(index), event.getY(index))
-                if (element == null) {
-                    // Nothing here: the first finger falls through to the X screen underneath.
-                    return event.actionMasked != MotionEvent.ACTION_DOWN
+                val id = event.getPointerId(index)
+                val x = event.getX(index)
+                val y = event.getY(index)
+                // A finger belongs to whatever it lands on for its whole life: a control element,
+                // else the trackpad. Neither sees the other's fingers.
+                val element = if (controlsShown) elementAt(x, y) else null
+                if (element != null && pointerDown(element, id, x, y)) return true
+                if (pad != null) {
+                    pad.pointerDown(id, x, y, event.eventTime)
+                } else if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    // No trackpad attached: let the first finger fall through.
+                    return false
                 }
-                pointerDown(element, event.getPointerId(index), event.getX(index), event.getY(index))
             }
             MotionEvent.ACTION_MOVE -> {
                 for (i in 0 until event.pointerCount) {
-                    val element = pointerOwners[event.getPointerId(i)] ?: continue
-                    pointerMove(element, event.getX(i), event.getY(i))
+                    val id = event.getPointerId(i)
+                    val element = pointerOwners[id]
+                    if (element != null) {
+                        pointerMove(element, event.getX(i), event.getY(i))
+                    } else {
+                        pad?.pointerMove(id, event.getX(i), event.getY(i))
+                    }
                 }
             }
             MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_UP -> {
                 val index = event.actionIndex
-                pointerOwners.remove(event.getPointerId(index))?.let { pointerUp(it, event.getX(index), event.getY(index)) }
+                val id = event.getPointerId(index)
+                val element = pointerOwners.remove(id)
+                if (element != null) {
+                    pointerUp(element, event.getX(index), event.getY(index))
+                } else {
+                    pad?.pointerUp(id, event.getX(index), event.getY(index), event.eventTime)
+                }
             }
             MotionEvent.ACTION_CANCEL -> {
                 pointerOwners.values.toList().forEach { element -> states[element]?.let { cancel(element, it) } }
                 pointerOwners.clear()
+                pad?.cancel()
             }
         }
         return true
@@ -351,7 +401,7 @@ class InputControlsView(context: Context, private val input: ControlInput) : Vie
         super.onDraw(canvas)
         val w = width.toFloat()
         val h = height.toFloat()
-        if (w <= 0f || h <= 0f) return
+        if (w <= 0f || h <= 0f || !controlsShown) return
         for (element in elements) {
             val state = states[element] ?: continue
             val box = element.boxIn(w, h)

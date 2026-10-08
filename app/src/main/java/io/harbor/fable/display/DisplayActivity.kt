@@ -1,6 +1,5 @@
 package io.harbor.fable.display
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
@@ -19,7 +18,6 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -39,6 +37,7 @@ import io.harbor.fable.display.controls.ControlProfileRepository
 import io.harbor.fable.display.controls.InputControlsView
 import io.harbor.fable.display.controls.InputTarget
 import io.harbor.fable.display.controls.StoredProfile
+import io.harbor.fable.display.controls.TouchpadController
 import io.harbor.fable.R
 import io.harbor.fable.data.ContainerRepository
 import io.harbor.fable.data.WineFailure
@@ -57,17 +56,17 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.hypot
 
 /**
  * Shows the X server's screen (Wine's virtual desktop) full screen, like Winlator's
  * `XServerDisplayActivity`: an [XServerView] (GLSurfaceView + Winlator's GLRenderer) attached to
  * the running [DisplayServer].
  *
- * Input is deliberately minimal (Winlator's TouchpadView / input-controls overlay are not
- * vendored): the screen works like a laptop trackpad — dragging a finger moves the cursor
- * relatively, a quick tap is a left click, a second finger is a right click, and hardware keyboard events go through Winlator's
- * `Keyboard.onKeyEvent`. The activity finishing (for any reason) stops the container: its Wine
+ * Touch input goes through one full-screen [InputControlsView]: the screen works like a laptop
+ * trackpad — dragging a finger moves the cursor relatively, a quick tap is a left click, a second
+ * trackpad finger is a right click — and, when shown, the on-screen controls take the fingers
+ * that land on them (see [createControlsOverlay]). Hardware keyboard events go through
+ * Winlator's `Keyboard.onKeyEvent`. The activity finishing (for any reason) stops the container: its Wine
  * processes and the X server.
  *
  * Back doesn't finish the activity any more — a game that catches Escape on a phone's back
@@ -90,7 +89,6 @@ import kotlin.math.hypot
 class DisplayActivity : Activity() {
     @Volatile private var view: XServerView? = null
     @Volatile private var server: XServer? = null
-    private var leftDown = false
     private var containerId: String? = null
 
     // Side menu (Back opens it) and the overlays it toggles.
@@ -106,16 +104,6 @@ class DisplayActivity : Activity() {
     private var pauseItem: TextView? = null
     private var pauseIcon: ImageView? = null
 
-    // Trackpad state (screen pixels).
-    private var activePointerId = MotionEvent.INVALID_POINTER_ID
-    private var lastX = 0f
-    private var lastY = 0f
-    private var downX = 0f
-    private var downY = 0f
-    private var downTime = 0L
-    private var carryX = 0f
-    private var carryY = 0f
-    private var tapCandidate = false
     private val touchSlopPx by lazy { TOUCH_SLOP_DP * resources.displayMetrics.density }
 
     // Startup status and failure reporting.
@@ -143,7 +131,6 @@ class DisplayActivity : Activity() {
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         containerId = intent.getStringExtra(EXTRA_CONTAINER_ID)
@@ -164,7 +151,6 @@ class DisplayActivity : Activity() {
             return
         }
         xServer.renderer = created.renderer
-        created.setOnTouchListener { _, event -> onTouch(xServer, created, event) }
         hudSettings = containerId?.let { id ->
             runCatching { ContainerRepository.get(applicationContext).containers.value.firstOrNull { it.id == id }?.hud }.getOrNull()
         } ?: HudSettings()
@@ -305,7 +291,7 @@ class DisplayActivity : Activity() {
     private fun dpPx(v: Float): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun setControlsShown(shown: Boolean) {
-        controlsOverlay?.visibility = if (shown) View.VISIBLE else View.GONE
+        controlsOverlay?.controlsShown = shown
     }
 
     /**
@@ -648,8 +634,12 @@ class DisplayActivity : Activity() {
      * The on-screen controls: an [InputControlsView] showing the chosen control preset (a
      * Winlator-format profile, see [ControlProfileRepository]). Fable's own pad — a d-pad for
      * the arrow keys and Enter / Escape / Space / Shift face buttons — is the default preset.
-     * Touches that miss every element fall through to the trackpad underneath. Hidden until
-     * the side menu turns it on; presets load off the main thread.
+     *
+     * The view covers the whole X screen and owns all touch input: each finger goes to the
+     * control element it lands on, or else to the [TouchpadController] (cursor moves, tap =
+     * left click, second trackpad finger = right click). Fingers on controls never reach the
+     * trackpad and vice versa, so buttons and the mouse work at the same time. The controls
+     * are hidden until the side menu turns them on; presets load off the main thread.
      */
     private fun createControlsOverlay(xServer: XServer): InputControlsView {
         val target = object : InputTarget {
@@ -661,7 +651,13 @@ class DisplayActivity : Activity() {
         }
         val overlay = InputControlsView(this, ControlInput(target)).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            visibility = View.GONE
+            // Always up: it routes every finger, to a control or to the trackpad.
+            controlsShown = false
+            touchpad = TouchpadController(target, touchSlopPx, TAP_TIMEOUT_MS) {
+                // Screen pixels -> X server pixels.
+                val aspect = view?.renderer?.viewTransformation?.aspect ?: 0f
+                if (aspect > 0f) SENSITIVITY / aspect else 0f
+            }
         }
         uiScope.launch {
             val repository = ControlProfileRepository(applicationContext)
@@ -673,99 +669,6 @@ class DisplayActivity : Activity() {
             controlsSubtitle?.text = chosen?.profile?.name ?: "No presets found"
         }
         return overlay
-    }
-
-    private fun onTouch(xServer: XServer, view: XServerView, event: MotionEvent): Boolean {
-        val t = view.renderer.viewTransformation
-        if (t.aspect <= 0f) return true
-        runCatching {
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    // Trackpad: remember where the finger landed; the cursor stays put.
-                    activePointerId = event.getPointerId(0)
-                    lastX = event.x
-                    lastY = event.y
-                    downX = event.x
-                    downY = event.y
-                    downTime = event.eventTime
-                    carryX = 0f
-                    carryY = 0f
-                    tapCandidate = true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val index = event.findPointerIndex(activePointerId)
-                    if (event.pointerCount == 1 && index >= 0) {
-                        val px = event.getX(index)
-                        val py = event.getY(index)
-                        if (tapCandidate && hypot(px - downX, py - downY) > touchSlopPx) tapCandidate = false
-                        // Screen pixels -> X server pixels, keeping sub-pixel remainders so slow
-                        // drags still move the cursor.
-                        carryX += (px - lastX) / t.aspect * SENSITIVITY
-                        carryY += (py - lastY) / t.aspect * SENSITIVITY
-                        lastX = px
-                        lastY = py
-                        val dx = carryX.toInt()
-                        val dy = carryY.toInt()
-                        if (dx != 0 || dy != 0) {
-                            carryX -= dx
-                            carryY -= dy
-                            xServer.injectPointerMoveDelta(dx, dy)
-                        }
-                    }
-                }
-                MotionEvent.ACTION_POINTER_DOWN -> {
-                    tapCandidate = false
-                    if (leftDown) {
-                        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT)
-                        leftDown = false
-                    }
-                    xServer.injectPointerButtonPress(Pointer.Button.BUTTON_RIGHT)
-                    xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT)
-                }
-                MotionEvent.ACTION_POINTER_UP -> {
-                    // Keep tracking whichever finger remains without a jump.
-                    val upIndex = event.actionIndex
-                    if (event.getPointerId(upIndex) == activePointerId) {
-                        val newIndex = if (upIndex == 0) 1 else 0
-                        activePointerId = event.getPointerId(newIndex)
-                        lastX = event.getX(newIndex)
-                        lastY = event.getY(newIndex)
-                    } else {
-                        val index = event.findPointerIndex(activePointerId)
-                        if (index >= 0) {
-                            lastX = event.getX(index)
-                            lastY = event.getY(index)
-                        }
-                    }
-                }
-                MotionEvent.ACTION_UP -> {
-                    val isTap = tapCandidate &&
-                        event.eventTime - downTime < TAP_TIMEOUT_MS &&
-                        hypot(event.x - downX, event.y - downY) <= touchSlopPx
-                    if (leftDown) {
-                        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT)
-                        leftDown = false
-                    }
-                    if (isTap) {
-                        xServer.injectPointerButtonPress(Pointer.Button.BUTTON_LEFT)
-                        leftDown = true
-                        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT)
-                        leftDown = false
-                    }
-                    tapCandidate = false
-                    activePointerId = MotionEvent.INVALID_POINTER_ID
-                }
-                MotionEvent.ACTION_CANCEL -> {
-                    if (leftDown) {
-                        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT)
-                        leftDown = false
-                    }
-                    tapCandidate = false
-                    activePointerId = MotionEvent.INVALID_POINTER_ID
-                }
-            }
-        }
-        return true
     }
 
     /** Centered "Starting Wine…" label, hidden once Wine maps a window (see [watchFirstWindow]). */
