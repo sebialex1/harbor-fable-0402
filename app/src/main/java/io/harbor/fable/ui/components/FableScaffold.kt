@@ -102,8 +102,9 @@ import kotlin.math.abs
  * The bar is glass: at rest it is the black canvas itself, and as content scrolls beneath it a
  * translucent [glassSurface] fades in (with a hairline under it), so rows stay faintly visible
  * through the chrome. The back button and the action buttons are frosted glass discs
- * ([LocalGlassControls]). Messages from [FableUi.showMessage] are not drawn here: [FableScreen]
- * shows them at the bottom of the screen ([TopBarNotice]), clear of the bar and its actions.
+ * ([LocalGlassControls]). Messages from [FableUi.showMessage] are not drawn here, nor by
+ * [FableScreen]: one app-level [NoticeHost] (placed by `FableRoot` above the NavHost) shows them
+ * at the bottom of the screen, clear of the bar and its actions.
  *
  * [drawGlass] is false when the caller ([FableScreen]) draws one glass layer behind the bar and
  * a pinned header together.
@@ -233,12 +234,18 @@ private fun GlassChrome(
 }
 
 /**
- * The screen's message line: [FableUi.notice] rises in at the bottom of the screen (the caller
+ * The app's message line: [FableUi.notice] rises in at the bottom of the screen (the caller
  * positions it above the tab bar / navigation bar) as a small dark pill with plain text, so it
  * stays readable over the list and never overlaps the top bar. Tap to dismiss.
+ *
+ * Exactly one of these exists, in `FableRoot`, above the NavHost. It used to be drawn inside
+ * every [FableScreen], which meant each navigation composed a fresh copy that travelled with the
+ * screen transition, so a message visibly respawned and slid in again on every screen change.
+ * The [AnimatedContent] is keyed on [FableNotice.id], so it animates only when the message itself
+ * changes; the first composition shows the current message without an enter animation.
  */
 @Composable
-fun TopBarNotice(modifier: Modifier = Modifier) {
+fun NoticeHost(modifier: Modifier = Modifier) {
     val ui = LocalFableUi.current
     AnimatedContent(
         targetState = ui.notice,
@@ -504,13 +511,8 @@ fun FableScreen(
                 }
             }
 
-            // Messages sit at the bottom, above the floating tab bar on tab screens (pushed
-            // screens have no tab bar) and the navigation bar, so they never cover the top bar.
-            TopBarNotice(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = navigationBottom + (if (largeTitle) LocalTabBarClearance.current else 0.dp) + Spacing.sm),
-            )
+            // Messages are not drawn per screen: the app-level NoticeHost in FableRoot shows them
+            // above the tab bar, so they don't respawn with every navigation.
         }
     }
 }

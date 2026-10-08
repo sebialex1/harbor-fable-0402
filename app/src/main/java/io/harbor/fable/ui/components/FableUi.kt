@@ -26,23 +26,32 @@ data class FableNotice(
 )
 
 /**
- * App-level UI services provided by `FableRoot`.
+ * App-level UI services, one per process (held by `FableApp`, provided by `FableRoot`).
  *
  * [scope] outlives individual screens, so work started from a screen that is about to be
  * popped (deleting a container, refreshing after a settings change) is not cancelled, and
  * messages stay on screen across navigation.
  *
- * Messages are no longer Material snackbars: [notice] is read by `FableTopBar`, which fades the
- * text in from the bar itself in [io.harbor.fable.ui.theme.FableBlue], with no card behind it.
- * The user can drag it up (or tap it) to dismiss.
+ * [notice] is drawn by a single `NoticeHost` that `FableRoot` places above the NavHost (and above
+ * the setup screen), never by the screens themselves. A per-screen host was recreated by every
+ * navigation, so the same message slid in again on each screen change; with one host the pill
+ * animates in once per message ([FableNotice.id]) and simply stays while the screens change
+ * beneath it. Because this object lives as long as the process, an Activity recreation does not
+ * replay it either. Tap to dismiss.
  */
 @Stable
 class FableUi(
     val scope: CoroutineScope,
 ) {
-    /** The message the top bar is showing, or null. */
+    /** The message the notice host is showing, or null. */
     var notice: FableNotice? by mutableStateOf(null)
         private set
+
+    /**
+     * True while the floating tab bar is on screen, so the notice host can sit above it. Set by
+     * the main shell; the host animates between the two resting heights instead of re-entering.
+     */
+    var tabBarVisible: Boolean by mutableStateOf(false)
 
     private var nextId = 0L
     private var timeout: Job? = null
@@ -54,15 +63,28 @@ class FableUi(
      */
     fun showMessage(message: String, long: Boolean = false, indefinite: Boolean = false) {
         scope.launch {
+            val current = notice
+            if (current != null && current.message == message) {
+                // The same text again (a screen re-running its LaunchedEffect after navigation,
+                // say) keeps the pill that is already up instead of sliding a new one in; only
+                // its timeout is renewed.
+                timeout?.cancel()
+                val kept = if (indefinite && !current.indefinite) current.copy(indefinite = true) else current
+                notice = kept
+                if (!kept.indefinite) scheduleTimeout(kept, long)
+                return@launch
+            }
             timeout?.cancel()
             val shown = FableNotice(id = ++nextId, message = message, indefinite = indefinite)
             notice = shown
-            if (!indefinite) {
-                timeout = scope.launch {
-                    delay(if (long) LONG_MS else SHORT_MS)
-                    if (notice?.id == shown.id) notice = null
-                }
-            }
+            if (!indefinite) scheduleTimeout(shown, long)
+        }
+    }
+
+    private fun scheduleTimeout(shown: FableNotice, long: Boolean) {
+        timeout = scope.launch {
+            delay(if (long) LONG_MS else SHORT_MS)
+            if (notice?.id == shown.id) notice = null
         }
     }
 

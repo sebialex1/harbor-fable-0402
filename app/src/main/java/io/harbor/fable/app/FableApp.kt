@@ -10,6 +10,12 @@ import io.harbor.fable.data.DriverRepository
 import io.harbor.fable.data.GitHubReleaseFetcher
 import io.harbor.fable.data.SettingsRepository
 import io.harbor.fable.data.SetupManager
+import io.harbor.fable.ui.components.FableUi
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * Application entry point. Wires the data layer singletons and exposes them
@@ -45,6 +51,23 @@ class FableApp : Application() {
     /** App-wide settings, including the defaults used for new containers. */
     val settingsRepository: SettingsRepository
         get() = SettingsRepository.get(this)
+
+    /**
+     * The app-wide UI services (message line, long-lived UI scope). One per process, so a message
+     * survives navigation and Activity recreation and is never shown (or animated in) twice.
+     *
+     * Work launched from screens (container launches above all) must never take the app down: an
+     * exception that escapes the scope is logged to filesDir/logs and shown as a message.
+     */
+    val fableUi: FableUi by lazy {
+        val holder = arrayOfNulls<FableUi>(1)
+        val guard = CoroutineExceptionHandler { _, error ->
+            Log.e("FableUi", "Uncaught error in UI scope", error)
+            LaunchLog.crash(this, Thread.currentThread(), error)
+            holder[0]?.showMessage("Something failed: ${error.javaClass.simpleName}. Log saved", long = true)
+        }
+        FableUi(scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + guard)).also { holder[0] = it }
+    }
 
     override fun onCreate() {
         super.onCreate()

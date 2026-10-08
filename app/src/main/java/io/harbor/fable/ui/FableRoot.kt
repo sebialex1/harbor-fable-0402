@@ -1,6 +1,5 @@
 package io.harbor.fable.ui
 
-import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
@@ -41,13 +40,18 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.harbor.fable.app.FableApp
-import io.harbor.fable.data.LaunchLog
 import io.harbor.fable.ui.components.TabBarTab
 import io.harbor.fable.ui.components.FableUi
 import io.harbor.fable.ui.components.FableTabBar
 import io.harbor.fable.ui.components.SurfaceLevel
 import io.harbor.fable.ui.components.LocalTabBarClearance
 import io.harbor.fable.ui.components.LocalFableUi
+import io.harbor.fable.ui.components.NoticeHost
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import io.harbor.fable.ui.screens.*
 import io.harbor.fable.ui.theme.ControlRadius
 import io.harbor.fable.ui.theme.TabBarMetrics
@@ -60,10 +64,6 @@ import io.harbor.fable.ui.theme.FableTextDim
 import io.harbor.fable.ui.theme.Motion
 import io.harbor.fable.ui.theme.ScreenPadding
 import io.harbor.fable.ui.theme.Spacing
-import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import io.harbor.fable.ui.icons.FableIcons
 
 private object Routes {
@@ -157,20 +157,9 @@ private fun NavHostController.navigateToTab(route: String) {
 @Composable
 fun FableRoot() {
     val context = LocalContext.current
-    val fableUi = remember {
-        // Work launched from screens (container launches above all) must never take the app
-        // down: an exception that escapes is logged to filesDir/logs and shown as a message.
-        val holder = arrayOfNulls<FableUi>(1)
-        val guard = CoroutineExceptionHandler { _, error ->
-            Log.e("FableUi", "Uncaught error in UI scope", error)
-            LaunchLog.crash(context, Thread.currentThread(), error)
-            holder[0]?.showMessage("Something failed: ${error.javaClass.simpleName}. Log saved", long = true)
-        }
-        FableUi(
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + guard),
-        ).also { holder[0] = it }
-    }
     val app = remember(context) { FableApp.from(context) }
+    // Process-wide, not per composition: the notice it holds must outlive every screen.
+    val fableUi = app.fableUi
     val settings by app.settingsRepository.settings.collectAsStateWithLifecycle()
 
     // An install that predates the setup screen but already has containers is not a first run.
@@ -215,13 +204,30 @@ fun FableRoot() {
                     SetupScreen(onFinished = { app.settingsRepository.markSetupComplete() })
                 }
             }
+
+            // The one message host for the whole app. It sits above the NavHost and the setup
+            // screen, so navigating never recreates it: a message slides in once and stays put
+            // while screens change beneath it. It rests above the floating tab bar when the tab
+            // bar is up, and glides (rather than re-entering) when that changes.
+            val tabClearance by animateDpAsState(
+                targetValue = if (settings.setupComplete && fableUi.tabBarVisible) TabBarMetrics.Clearance else 0.dp,
+                animationSpec = Motion.inPlace(),
+                label = "noticeClearance",
+            )
+            NoticeHost(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                    .navigationBarsPadding()
+                    .padding(bottom = tabClearance + Spacing.sm),
+            )
         }
     }
 }
 
 /**
- * Tabs, tab bar and sheets: the app once setup is out of the way. Messages are shown by each
- * screen's top bar (see `FableTopBar`), not by a snackbar host here.
+ * Tabs, tab bar and sheets: the app once setup is out of the way. Messages are shown by the
+ * app-level `NoticeHost` in [FableRoot], not by the screens or a snackbar host here.
  */
 @Composable
 private fun MainShell() {
@@ -255,6 +261,11 @@ private fun MainShell() {
     }
 
     val activeTab = tabIndex(currentRoute)
+
+    // Tell the app-level notice host where the tab bar is, so messages sit above it.
+    val fableUi = LocalFableUi.current
+    SideEffect { fableUi.tabBarVisible = isTopLevel }
+    DisposableEffect(Unit) { onDispose { fableUi.tabBarVisible = false } }
 
     Box(
         Modifier
