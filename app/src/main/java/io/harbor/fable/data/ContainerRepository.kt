@@ -642,6 +642,7 @@ class ContainerRepository internal constructor(
                 }
             val programFile = File(path)
             log.line("program: $path (exists=${programFile.isFile}, size=${programFile.length()})")
+            checkProgramFiles(runtime, exe, programFile, dir, log)?.let { return it }
             val windowsPath = toWindowsPath(path, dir)
             val windowsDir = windowsPath.substringBeforeLast('\\', missingDelimiterValue = "C:\\")
             arguments = listOf("/desktop=$DESKTOP_NOGUI,$desktopSize", "start", "/d", windowsDir, windowsPath)
@@ -1061,6 +1062,70 @@ class ContainerRepository internal constructor(
             Log.w(TAG, "${container.name}: DXVK $dxvk is recorded as installed but its DLLs aren't all in place")
         }
         return null
+    }
+
+    /**
+     * Before Wine starts: does the program have what it needs next to it? Reads its PE imports
+     * and looks for each DLL the way Wine's loader would (the program's folder, then
+     * system32/syswow64 and Wine's own PE directory). A Unity game (ULTRAKILL) imports
+     * `UnityPlayer.dll` from its folder and reads `<Name>_Data/`; when only its .exe could be
+     * copied into the container (the file picker grants access to that one file), Wine stops in
+     * the loader, explorer.exe exits 0 and all the user sees is a black desktop for a few
+     * seconds. Fails the launch with what's missing, asking for all-files access when that is
+     * what would let the game run from its own folder. Also logs the VC++ runtime DLLs Unity /
+     * IL2CPP games use (Wine's builtins, copied into system32 by [WinePrefix]).
+     */
+    private fun checkProgramFiles(runtime: WineRuntime, exe: ExeEntry, program: File, dir: File, log: LaunchLog): LaunchResult? {
+        if (exe.isTool || !program.isFile) return null
+        val info = PeImports.read(program)
+        if (info == null) {
+            log.line("program files check: ${program.name} isn't a PE image Fable can read; skipped")
+            return null
+        }
+        val folder = program.parentFile ?: return null
+        val copied = folder.absolutePath.startsWith(File(dir, "drive_c/fable/${exe.id}").absolutePath)
+        val allFiles = runtime.hasAllFilesAccess()
+        log.line(
+            "program files check: ${program.name} is ${if (info.is64Bit) "64" else "32"}-bit (machine 0x${info.machine.toString(16)}), " +
+                (if (copied) "copied alone into ${folder.absolutePath}" else "runs in place from ${folder.absolutePath}") +
+                ", all-files access ${if (allFiles) "granted" else "NOT granted"}",
+        )
+        log.line("imports: ${info.imports.joinToString().ifEmpty { "(none)" }}")
+        if (info.delayImports.isNotEmpty()) log.line("delay-load imports: ${info.delayImports.joinToString()}")
+
+        val systemDir = File(dir, if (info.is64Bit) SYSTEM32_DIR else SYSWOW64_DIR)
+        val wineArch = if (info.is64Bit) "x86_64-windows" else "i386-windows"
+        val searchDirs = listOf(folder, systemDir) +
+            listOf("lib/wine/$wineArch", "lib64/wine/$wineArch").map { File(dir, it) }
+        val available = searchDirs.flatMap { it.list()?.toList().orEmpty() }.map { it.lowercase() }.toSet()
+        val missing = info.imports.filter { name ->
+            val lower = name.lowercase()
+            !lower.startsWith("api-ms-") && !lower.startsWith("ext-ms-") && lower !in available
+        }
+        val runtimes = VC_RUNTIME_DLLS.map { name -> "$name=${if (File(systemDir, name).isFile) "yes" else "NO"}" }
+        log.line("VC++ runtime in ${systemDir.name} (Wine builtins): ${runtimes.joinToString()}")
+
+        val folderNames = folder.list()?.toSet().orEmpty()
+        val usesUnity = info.imports.any { it.equals(UNITY_PLAYER_DLL, ignoreCase = true) }
+        val dataDir = program.nameWithoutExtension + "_Data"
+        val unityDataMissing = usesUnity && folderNames.none { it.equals(dataDir, ignoreCase = true) }
+        if (usesUnity) log.line("Unity game: $dataDir ${if (unityDataMissing) "is NOT next to the .exe" else "found"}")
+        if (missing.isEmpty() && !unityDataMissing) {
+            log.line("program files check: every imported DLL was found")
+            return null
+        }
+        val what = (missing + if (unityDataMissing) listOf("$dataDir\\") else emptyList()).joinToString()
+        log.error("program files check: ${program.name} needs $what, which isn't next to it or in ${systemDir.name}; Wine would stop in the loader")
+        val reason = when {
+            copied && !allFiles ->
+                "${exe.name} needs $what from its game folder, but Fable could only copy ${program.name}. " +
+                    "Allow Fable \"All files access\" so games run from their own folder, then launch again"
+            copied ->
+                "${exe.name} needs $what from its game folder. Fable couldn't open that folder: put the game " +
+                    "in Download (or another folder on internal storage) and add its .exe again"
+            else -> "${exe.name} needs $what, which isn't in ${folder.absolutePath}. Is the game folder complete?"
+        }
+        return LaunchResult.Failed(reason, needsAllFilesAccess = copied && !allFiles)
     }
 
     /**
@@ -1570,6 +1635,11 @@ class ContainerRepository internal constructor(
 
         /** The prefix's 64-bit system directory, where DXVK's DLLs go. */
         private const val SYSTEM32_DIR = "drive_c/windows/system32"
+        private const val SYSWOW64_DIR = "drive_c/windows/syswow64"
+
+        /** The MSVC runtime Unity / IL2CPP games link against; Wine ships builtins of all of them. */
+        private val VC_RUNTIME_DLLS = listOf("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "ucrtbase.dll")
+        private const val UNITY_PLAYER_DLL = "UnityPlayer.dll"
 
         /** What a Direct3D 11 game (ULTRAKILL) loads first; both must be DXVK's for it to render. */
         private val DXVK_REQUIRED_DLLS = listOf("d3d11.dll", "dxgi.dll")
@@ -1734,7 +1804,15 @@ sealed interface LaunchResult {
     data class Unavailable(val reason: String, override val logPath: String? = null) : LaunchResult
 
     /** The launch couldn't happen: a missing Box64/FEX/Wine download, a bad request, or a crash on start. */
-    data class Failed(val reason: String, override val logPath: String? = null) : LaunchResult
+    data class Failed(
+        val reason: String,
+        override val logPath: String? = null,
+        /**
+         * The game's files are next to its .exe on shared storage, which Fable can only reach
+         * with Android's "All files access"; the UI opens that setting.
+         */
+        val needsAllFilesAccess: Boolean = false,
+    ) : LaunchResult
 }
 
 /**

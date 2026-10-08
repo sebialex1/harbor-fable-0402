@@ -125,9 +125,30 @@ internal fun HomeContent(
     }
 }
 
-/** Brings up Wine's screen once a launch has started. */
+/**
+ * Brings up Wine's screen once a launch has started. When a game couldn't start because its
+ * folder on shared storage is out of reach (only the .exe could be copied), opens Android's
+ * "All files access" setting for Fable instead, so the next launch runs the game in place.
+ */
 internal fun LaunchResult.openDisplay(context: android.content.Context, containerId: String) {
-    if (this is LaunchResult.Started) runCatching { io.harbor.fable.display.DisplayActivity.open(context, containerId) }
+    when {
+        this is LaunchResult.Started -> runCatching { io.harbor.fable.display.DisplayActivity.open(context, containerId) }
+        this is LaunchResult.Failed && needsAllFilesAccess -> openAllFilesAccessSettings(context)
+    }
+}
+
+/** Android 11+'s per-app "All files access" screen (the app list when that isn't available). */
+internal fun openAllFilesAccessSettings(context: android.content.Context) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return
+    val perApp = android.content.Intent(
+        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+        android.net.Uri.parse("package:${context.packageName}"),
+    )
+    val list = android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+    for (intent in listOf(perApp, list)) {
+        if (context !is android.app.Activity) intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (runCatching { context.startActivity(intent) }.isSuccess) return
+    }
 }
 
 /** Human-readable text for a launch outcome, shown in the snackbar. */

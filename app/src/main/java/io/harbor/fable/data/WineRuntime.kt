@@ -3,6 +3,10 @@ package io.harbor.fable.data
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
 import io.harbor.fable.data.models.AssetType
@@ -401,8 +405,16 @@ internal class WineRuntime(
 
     /**
      * A path Wine can open for [storedPath]. Apps are picked through the system file picker, so
-     * they are stored as `content://` URIs that a child process cannot read; those are copied
-     * into the container's C: drive. Plain paths (and Windows paths) are used as they are.
+     * they are stored as `content://` URIs that a child process cannot read.
+     *
+     * A game is never just its .exe: a Unity game's `ULTRAKILL.exe` imports `UnityPlayer.dll`
+     * and reads `ULTRAKILL_Data/` from its own folder. So when the URI names a real file on
+     * shared storage (`/storage/emulated/0/Download/ULTRAKILL/ULTRAKILL.exe`) that this app can
+     * read together with its folder (all-files access, as Winlator has), the program runs in
+     * place, through Wine's `Z:` drive. Only when it can't is the .exe copied into the
+     * container's C: drive, which is enough for single-file programs (the launch checks the
+     * copy's imports and says what's missing). Plain paths (and Windows paths) are used as they
+     * are.
      */
     suspend fun materializeExecutable(containerDir: File, exeId: String, name: String, storedPath: String): String? =
         withContext(Dispatchers.IO) {
@@ -415,6 +427,10 @@ internal class WineRuntime(
                 }
             }
             val uri = Uri.parse(storedPath)
+            documentFile(uri)?.let { inPlace ->
+                Log.i(TAG, "$name runs in place: ${inPlace.absolutePath}")
+                return@withContext inPlace.absolutePath
+            }
             val fileName = sanitizeFileName(queryDisplayName(uri) ?: "$name.exe")
             val dest = File(containerDir, "drive_c/fable/$exeId/$fileName")
             val remoteSize = querySize(uri)
@@ -476,11 +492,73 @@ internal class WineRuntime(
             ?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else -1L }
     }.getOrNull() ?: -1L
 
+    /**
+     * True when this app may read every file on shared storage (Android 11+ "All files access",
+     * `MANAGE_EXTERNAL_STORAGE`; before Android 11 the storage permission). Wine runs in this
+     * app's process tree, so it can then open a game's folder where it is.
+     */
+    fun hasAllFilesAccess(): Boolean = runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            appContext.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+    }.getOrDefault(false)
+
+    /**
+     * The file on shared storage a picked document [uri] stands for, when this app can read it
+     * and list its folder (so the files next to a game's .exe are reachable too); null otherwise.
+     * Understands the external-storage and Downloads document providers and providers that
+     * report `_data`.
+     */
+    fun documentFile(uri: Uri): File? = runCatching {
+        if (uri.scheme == "file") return@runCatching uri.path?.let(::File)
+        val candidates = buildList {
+            if (DocumentsContract.isDocumentUri(appContext, uri)) {
+                val docId = DocumentsContract.getDocumentId(uri)
+                when (uri.authority) {
+                    EXTERNAL_STORAGE_DOCUMENTS -> {
+                        val volume = docId.substringBefore(':')
+                        val relative = docId.substringAfter(':', "")
+                        val root = if (volume.equals("primary", ignoreCase = true)) {
+                            Environment.getExternalStorageDirectory()
+                        } else {
+                            File("/storage/$volume")
+                        }
+                        add(File(root, relative))
+                    }
+                    DOWNLOADS_DOCUMENTS -> when {
+                        docId.startsWith("raw:") -> add(File(docId.removePrefix("raw:")))
+                        docId.startsWith("msf:") && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                            val id = docId.removePrefix("msf:")
+                            queryData(MediaStore.Downloads.EXTERNAL_CONTENT_URI, "${MediaStore.MediaColumns._ID}=?", arrayOf(id))
+                                ?.let { add(File(it)) }
+                        }
+                    }
+                }
+            }
+            queryData(uri, null, null)?.let { add(File(it)) }
+        }
+        candidates.firstOrNull { file ->
+            file.isFile && file.canRead() && file.parentFile?.list() != null
+        }
+    }.getOrNull()
+
+    /** The (deprecated, still widely reported) `_data` column for [uri], or null. */
+    @Suppress("DEPRECATION")
+    private fun queryData(uri: Uri, selection: String?, args: Array<String>?): String? = runCatching {
+        appContext.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), selection, args, null)
+            ?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null }
+    }.getOrNull()?.takeIf { it.startsWith("/") }
+
     private fun looksLikeWindowsPath(path: String): Boolean =
         (path.length >= 2 && path[0].isLetter() && path[1] == ':') || path.contains('\\')
 
     companion object {
         private const val TAG = "WineRuntime"
+        private const val EXTERNAL_STORAGE_DOCUMENTS = "com.android.externalstorage.documents"
+        private const val DOWNLOADS_DOCUMENTS = "com.android.providers.downloads.documents"
         private const val WINE_MARKER = ".fable-wine.json"
         private const val COMPLETE_MARKER = ".fable-complete"
         private val WINE_BINARIES = listOf("bin/wine", "bin/wine64")
