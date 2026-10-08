@@ -1,6 +1,7 @@
 package io.harbor.fable.display
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
@@ -44,6 +45,11 @@ import io.harbor.fable.display.controls.StoredProfile
 import io.harbor.fable.display.controls.TouchpadController
 import io.harbor.fable.R
 import io.harbor.fable.data.ContainerRepository
+import io.harbor.fable.data.DriverRepository
+import io.harbor.fable.data.WineRuntime
+import io.harbor.fable.data.models.VulkanSource
+import io.harbor.fable.nativebridge.VulkanProbe
+import java.io.File
 import io.harbor.fable.data.WindowsProcess
 import io.harbor.fable.data.WindowsTasks
 import io.harbor.fable.data.WineFailure
@@ -132,8 +138,17 @@ class DisplayActivity : Activity() {
     private var hudHandler: Handler? = null
     private var hudLastSampleMs = 0L
     /** This container's overlay settings (container screen → Settings → Performance Overlay). */
-    private var hudSettings = HudSettings()
+    @Volatile private var hudSettings = HudSettings()
     private val cpuSampler = CpuSampler()
+    private var cpuSamples = 0
+    private val gpuSensors = GpuSensors()
+    private val apiDetector = GraphicsApiDetector()
+    private var processLogTail: LogTail? = null
+    /** What the container is set up for (DXVK / VKD3D-Proton), shown until the real API is seen. */
+    private var configuredApi: String? = null
+    /** The Vulkan driver's name, looked up once per HUD start; null when unknown. */
+    @Volatile private var hudDriver: String? = null
+    @Volatile private var lastHudSample = HudSample()
     private val hudUpdate = object : Runnable {
         override fun run() {
             val text = runCatching { buildHudText() }.getOrNull()
@@ -162,9 +177,14 @@ class DisplayActivity : Activity() {
             return
         }
         xServer.renderer = created.renderer
-        hudSettings = containerId?.let { id ->
-            runCatching { ContainerRepository.get(applicationContext).containers.value.firstOrNull { it.id == id }?.hud }.getOrNull()
-        } ?: HudSettings()
+        val record = containerId?.let { id ->
+            runCatching { ContainerRepository.get(applicationContext).containers.value.firstOrNull { it.id == id } }.getOrNull()
+        }
+        hudSettings = record?.hud ?: HudSettings()
+        configuredApi = record?.let { HudReadout.configuredApi(it.dxvkVersion, it.vkd3dVersion) }
+        processLogTail = containerId?.let { id ->
+            runCatching { LogTail(File(ContainerRepository.get(applicationContext).directory(id), WineRuntime.LAUNCH_LOG)) }.getOrNull()
+        }
         val hud = createHud(xServer)
         val status = createStatusText()
         val controls = createControlsOverlay(xServer)
@@ -805,7 +825,7 @@ class DisplayActivity : Activity() {
      * unchanged). Turning it on when the container's HUD shows nothing turns every reading on.
      */
     private fun setHudShown(shown: Boolean) {
-        if (shown && hudSettings.isEmpty) hudSettings = hudSettings.copy(showFps = true, showResolution = true, showCpu = true)
+        if (shown && hudSettings.isEmpty) hudSettings = hudSettings.allReadings()
         hudSettings = hudSettings.copy(enabled = shown)
         hudText?.visibility = if (shown) View.VISIBLE else View.GONE
         if (shown) startHud() else stopHud()
@@ -1144,13 +1164,8 @@ class DisplayActivity : Activity() {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             visibility = if (hudSettings.enabled && !hudSettings.isEmpty) View.VISIBLE else View.GONE
             alpha = 0f
-            text = hudLines(
-                listOfNotNull(
-                    ("FPS" to "--").takeIf { hudSettings.showFps },
-                    ("RES" to xServer.screenInfo.toString()).takeIf { hudSettings.showResolution },
-                    ("CPU" to "--").takeIf { hudSettings.showCpu },
-                ),
-            )
+            lastHudSample = HudSample(configuredApi = configuredApi, resolution = xServer.screenInfo.toString(), cpuWarmedUp = false)
+            text = hudText(lastHudSample)
             // Its width follows the text (FPS 9 → 120): keep it on its anchor as it changes.
             addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
                 if (r - l != or - ol || b - t != ob - ot) placeHud()
@@ -1223,8 +1238,23 @@ class DisplayActivity : Activity() {
         return (event.getX(index) + offsetX) to (event.getY(index) + offsetY)
     }
 
-    /** A tap on the HUD. Nothing yet beyond not reaching the touchpad. */
-    private fun onHudTapped() = Unit
+    /**
+     * A tap on the HUD switches its layout (stacked ↔ side by side), right away with the last
+     * readings, and remembers it for the container.
+     */
+    private fun onHudTapped() {
+        val layout = hudSettings.layout.next()
+        hudSettings = hudSettings.copy(layout = layout)
+        hudText?.text = hudText(lastHudSample)
+        val id = containerId ?: return
+        uiScope.launch {
+            runCatching {
+                val repository = ContainerRepository.get(applicationContext)
+                val current = repository.containers.value.firstOrNull { it.id == id } ?: return@runCatching
+                repository.update(current.copy(hud = current.hud.copy(layout = layout)))
+            }.onFailure { Log.w(TAG, "Couldn't save the HUD layout", it) }
+        }
+    }
 
     /** Snaps the HUD to [anchor] and stores it on the container (only the position fields). */
     private fun saveHudAnchor(anchor: HudAnchor) {
@@ -1240,11 +1270,14 @@ class DisplayActivity : Activity() {
         }
     }
 
-    /** "FPS 60" lines: labels dim, values bright. */
-    private fun hudLines(lines: List<Pair<String, String>>): CharSequence {
+    /** [sample] as the HUD shows it in the current layout: labels dim, values bright. */
+    private fun hudText(sample: HudSample): CharSequence {
+        val settings = hudSettings
+        val lines = HudReadout.lines(settings, sample)
+        val separator = HudReadout.separator(settings.layout)
         val out = SpannableStringBuilder()
         lines.forEachIndexed { i, (label, value) ->
-            if (i > 0) out.append('\n')
+            if (i > 0) out.append(separator)
             val start = out.length
             out.append(label)
             out.setSpan(ForegroundColorSpan(HUD_LABEL.toInt()), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -1262,8 +1295,26 @@ class DisplayActivity : Activity() {
         // Drop frames counted while paused so the first reading is accurate.
         view?.renderer?.takeFrameCount()
         hudLastSampleMs = SystemClock.elapsedRealtime()
-        hudHandler = Handler(thread.looper).also { it.postDelayed(hudUpdate, HUD_INTERVAL_MS) }
+        hudHandler = Handler(thread.looper).also { handler ->
+            if (hudSettings.showDriver && hudDriver == null) handler.post { hudDriver = lookUpDriver() }
+            handler.postDelayed(hudUpdate, HUD_INTERVAL_MS)
+        }
     }
+
+    /**
+     * The Vulkan driver's name: from the last Vulkan probe of it when there is one (the driver's
+     * own name and version, e.g. "turnip Mesa 25.1.0"), else the installed package's name, else
+     * the system driver. Never loads a driver itself (the game has one open).
+     */
+    private fun lookUpDriver(): String? = runCatching {
+        val drivers = DriverRepository.get(applicationContext)
+        val installed = drivers.installed.value
+        val path = drivers.activeLibraryPath()
+        val source = if (path != null) VulkanSource.INSTALLED_DRIVER else VulkanSource.SYSTEM
+        val device = VulkanProbe.cached(source, path)?.primaryDevice
+        val probed = device?.let { listOfNotNull(it.driverName, it.driverInfo).joinToString(" ").ifBlank { null } }
+        probed ?: installed?.let { "${it.family.displayName} ${it.tag}" } ?: if (path == null) "System Vulkan" else null
+    }.getOrNull()
 
     private fun stopHud() {
         hudHandler?.removeCallbacks(hudUpdate)
@@ -1272,28 +1323,46 @@ class DisplayActivity : Activity() {
         hudThread = null
     }
 
-    /** Runs on the HUD thread. */
+    /** Runs on the HUD thread: one second's readings, for what [hudSettings] shows. */
     private fun buildHudText(): CharSequence {
+        val settings = hudSettings
         val now = SystemClock.elapsedRealtime()
         val elapsedMs = (now - hudLastSampleMs).coerceAtLeast(1L)
         hudLastSampleMs = now
         val frames = view?.renderer?.takeFrameCount() ?: 0
-        val fps = Math.round(frames * 1000f / elapsedMs)
-        val res = server?.screenInfo?.toString() ?: DisplayServer.resolution ?: "?"
-        val cpu = if (hudSettings.showCpu) {
-            cpuSampler.sample()?.let { usage ->
-                ("CPU" to "${usage.percent}%${if (usage.systemWide) "" else " app"}")
-            } ?: ("CPU" to "--")
+        val cpu = if (settings.showCpu) cpuSampler.sample().also { cpuSamples++ } else null
+        if (settings.showApi && !apiDetector.isFinal) {
+            processLogTail?.readNewLines()?.forEach { apiDetector.feed(it) }
+        }
+        if (settings.showDriver && hudDriver == null) hudDriver = lookUpDriver()
+        val memory = if (settings.showRam) {
+            runCatching {
+                val info = ActivityManager.MemoryInfo()
+                (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(info)
+                info.takeIf { it.totalMem > 0 }
+            }.getOrNull()
         } else {
             null
         }
-        return hudLines(
-            listOfNotNull(
-                ("FPS" to fps.toString()).takeIf { hudSettings.showFps },
-                ("RES" to res).takeIf { hudSettings.showResolution },
-                cpu,
-            ),
+        val sample = HudSample(
+            fps = Math.round(frames * 1000f / elapsedMs),
+            // Average over the second; no frame drawn means no frame time to report.
+            frameTimeMs = if (frames > 0) elapsedMs.toFloat() / frames else null,
+            detectedApi = apiDetector.label,
+            configuredApi = configuredApi,
+            driver = hudDriver,
+            gpuBusyPercent = if (settings.showGpuUsage) gpuSensors.busyPercent() else null,
+            gpuTempC = if (settings.showGpuTemp) gpuSensors.temperatureC() else null,
+            cpuPercent = cpu?.percent,
+            cpuAppOnly = cpu?.systemWide == false,
+            // The sampler needs two reads before it can report anything.
+            cpuWarmedUp = cpuSamples >= 2,
+            ramUsedBytes = memory?.let { it.totalMem - it.availMem },
+            ramTotalBytes = memory?.totalMem,
+            resolution = server?.screenInfo?.toString() ?: DisplayServer.resolution,
         )
+        lastHudSample = sample
+        return hudText(sample)
     }
 
     @Suppress("DEPRECATION")

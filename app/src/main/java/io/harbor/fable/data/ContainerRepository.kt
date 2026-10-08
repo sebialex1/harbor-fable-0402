@@ -11,6 +11,7 @@ import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
+import io.harbor.fable.data.models.HudLayout
 import io.harbor.fable.data.models.HudPosition
 import io.harbor.fable.data.models.HudSettings
 import io.harbor.fable.data.models.VulkanSource
@@ -2233,6 +2234,13 @@ class FileContainerStore(private val file: File) : ContainerDao {
                 put("resolution", hud.showResolution)
                 put("cpu", hud.showCpu)
                 put("position", hud.position.name)
+                put("frameTime", hud.showFrameTime)
+                put("api", hud.showApi)
+                put("driver", hud.showDriver)
+                put("gpu", hud.showGpuUsage)
+                put("gpuTemp", hud.showGpuTemp)
+                put("ram", hud.showRam)
+                put("layout", hud.layout.name)
                 if (hud.customX != null && hud.customY != null) {
                     put("x", hud.customX.toDouble())
                     put("y", hud.customY.toDouble())
@@ -2273,6 +2281,13 @@ class FileContainerStore(private val file: File) : ContainerDao {
                 showResolution = hud.optBoolean("resolution", true),
                 showCpu = hud.optBoolean("cpu", true),
                 position = HudPosition.fromName(hud.optString("position", "")),
+                showFrameTime = hud.optBoolean("frameTime", HudSettings().showFrameTime),
+                showApi = hud.optBoolean("api", HudSettings().showApi),
+                showDriver = hud.optBoolean("driver", HudSettings().showDriver),
+                showGpuUsage = hud.optBoolean("gpu", HudSettings().showGpuUsage),
+                showGpuTemp = hud.optBoolean("gpuTemp", HudSettings().showGpuTemp),
+                showRam = hud.optBoolean("ram", HudSettings().showRam),
+                layout = HudLayout.fromName(hud.optString("layout", "")),
                 customX = hud.optDouble("x").takeIf { hud.has("y") && !it.isNaN() }?.toFloat()?.coerceIn(0f, 1f),
                 customY = hud.optDouble("y").takeIf { hud.has("x") && !it.isNaN() }?.toFloat()?.coerceIn(0f, 1f),
             )

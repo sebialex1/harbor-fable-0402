@@ -3,14 +3,11 @@ package io.harbor.fable.ui.screens
 import androidx.compose.animation.core.animateDpAsState
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.ui.BiasAlignment
-import androidx.compose.ui.text.font.FontFamily
+import io.harbor.fable.data.models.HudLayout
 import io.harbor.fable.data.models.HudPosition
 import io.harbor.fable.data.models.HudSettings
 import io.harbor.fable.ui.theme.RowPaddingHorizontal
@@ -488,7 +485,6 @@ internal fun ContainerDetailContent(
                 item(key = "overlay") {
                     PerformanceOverlaySection(
                         hud = container.hud,
-                        resolution = container.screenResolution,
                         expanded = expansion.isExpanded(OVERLAY_KEY, default = false),
                         onToggle = { expansion.toggle(OVERLAY_KEY, default = false) },
                         onChange = onHudChange,
@@ -1236,14 +1232,13 @@ private fun toolCaption(exe: ExeEntry): String = when (exe.toolId) {
 }
 
 /**
- * Performance overlay settings: a live preview (a little game frame with the HUD chip in its
- * corner, showing exactly the lines that are on), a master switch, one switch per line and the
- * corner. The chip glides between corners and grows or shrinks as lines are toggled.
+ * Performance overlay settings, per container: a master switch, one switch per reading (grouped
+ * Performance / Graphics / System), the layout and the corner. No preview: the overlay itself is
+ * the preview, and it can be dragged and tapped on the display screen.
  */
 @Composable
 private fun PerformanceOverlaySection(
     hud: HudSettings,
-    resolution: String,
     expanded: Boolean,
     onToggle: () -> Unit,
     onChange: (HudSettings) -> Unit,
@@ -1257,11 +1252,9 @@ private fun PerformanceOverlaySection(
         leading = null,
         badge = { Pill(text = if (!hud.enabled || hud.isEmpty) "Off" else hudSummary(hud)) },
     ) {
-        HudPreview(hud = hud, resolution = resolution)
-        CardDivider()
         ToggleRow(
             title = "Show Overlay",
-            subtitle = "On the display screen while the container runs",
+            subtitle = "On the display screen while the container runs. Drag it to move it, tap it to switch layout",
             checked = hud.enabled,
             onCheckedChange = { onChange(hud.copy(enabled = it)) },
         )
@@ -1271,26 +1264,44 @@ private fun PerformanceOverlaySection(
             exit = shrinkVertically(Motion.morph()) + fadeOut(Motion.exit()),
         ) {
             Column {
-                CardDivider()
-                ToggleRow(
-                    title = "Frame Rate",
-                    subtitle = "Frames the display drew each second",
-                    checked = hud.showFps,
-                    onCheckedChange = { onChange(hud.copy(showFps = it)) },
+                HudToggleGroup(
+                    label = "Performance",
+                    toggles = listOf(
+                        HudToggle("Frame Rate", "Frames the display drew each second", hud.showFps) { hud.copy(showFps = it) },
+                        HudToggle("Frame Time", "Average time per frame, in milliseconds", hud.showFrameTime) { hud.copy(showFrameTime = it) },
+                    ),
+                    onChange = onChange,
+                )
+                HudToggleGroup(
+                    label = "Graphics",
+                    toggles = listOf(
+                        HudToggle(
+                            "Graphics API",
+                            "What the game loaded (D3D11 · DXVK, D3D12 · VKD3D-Proton…); the container's setup until it's seen",
+                            hud.showApi,
+                        ) { hud.copy(showApi = it) },
+                        HudToggle("Driver", "The Vulkan driver the container runs on", hud.showDriver) { hud.copy(showDriver = it) },
+                        HudToggle("GPU Usage", "Shows unavailable where Android doesn't expose it", hud.showGpuUsage) { hud.copy(showGpuUsage = it) },
+                        HudToggle("GPU Temperature", "From the GPU's thermal sensor, when the device lets apps read it", hud.showGpuTemp) { hud.copy(showGpuTemp = it) },
+                        HudToggle("Resolution", "The X screen size", hud.showResolution) { hud.copy(showResolution = it) },
+                    ),
+                    onChange = onChange,
+                )
+                HudToggleGroup(
+                    label = "System",
+                    toggles = listOf(
+                        HudToggle("CPU Usage", "System-wide when Android allows it, otherwise Fable's and Wine's own", hud.showCpu) { hud.copy(showCpu = it) },
+                        HudToggle("Memory", "Device RAM in use / total", hud.showRam) { hud.copy(showRam = it) },
+                    ),
+                    onChange = onChange,
                 )
                 CardDivider()
-                ToggleRow(
-                    title = "Resolution",
-                    subtitle = "The X screen size",
-                    checked = hud.showResolution,
-                    onCheckedChange = { onChange(hud.copy(showResolution = it)) },
-                )
-                CardDivider()
-                ToggleRow(
-                    title = "CPU Usage",
-                    subtitle = "System-wide when Android allows it, otherwise Fable's own",
-                    checked = hud.showCpu,
-                    onCheckedChange = { onChange(hud.copy(showCpu = it)) },
+                OptionSelector(
+                    label = "Layout",
+                    options = HudLayout.entries.map { SelectOption(it, it.label) },
+                    selected = hud.layout,
+                    hint = "Tapping the overlay switches between these too",
+                    onSelect = { onChange(hud.copy(layout = it)) },
                 )
                 CardDivider()
                 OptionSelector(
@@ -1310,66 +1321,49 @@ private fun PerformanceOverlaySection(
     }
 }
 
-/** A miniature display: a dim game-frame gradient with the HUD chip as it will look. */
+/** One reading's switch in the overlay settings; [apply] gives the settings with it set. */
+private class HudToggle(
+    val title: String,
+    val subtitle: String,
+    val checked: Boolean,
+    val apply: (Boolean) -> HudSettings,
+)
+
+/** A small caption ("GRAPHICS") over a run of reading switches. */
 @Composable
-private fun HudPreview(hud: HudSettings, resolution: String) {
-    val (hTarget, vTarget) = when (hud.position) {
-        HudPosition.TOP_START -> -1f to -1f
-        HudPosition.TOP_END -> 1f to -1f
-        HudPosition.BOTTOM_START -> -1f to 1f
-        HudPosition.BOTTOM_END -> 1f to 1f
-    }
-    val h by animateFloatAsState(hTarget, Motion.settle(), label = "hudPreviewX")
-    val v by animateFloatAsState(vTarget, Motion.settle(), label = "hudPreviewY")
-    val visible = hud.enabled && !hud.isEmpty
-    val chipAlpha by animateFloatAsState(if (visible) 1f else 0f, Motion.inPlace(), label = "hudPreviewAlpha")
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(RowPaddingHorizontal)
-            .aspectRatio(16f / 9f)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF1B2735), Color(0xFF090A0F), Color(0xFF2A1B3D))))
-            .border(0.5.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp))
-            .padding(Spacing.sm),
-    ) {
-        // A faint horizon so the frame reads as a scene, not a grey box.
-        Box(
-            Modifier
-                .align(Alignment.Center)
-                .fillMaxWidth(0.7f)
-                .height(1.dp)
-                .background(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x40FFFFFF), Color.Transparent))),
+private fun HudToggleGroup(label: String, toggles: List<HudToggle>, onChange: (HudSettings) -> Unit) {
+    CardDivider()
+    Text(
+        text = label.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = FableTextDim,
+        modifier = Modifier.padding(start = RowPaddingHorizontal, end = RowPaddingHorizontal, top = Spacing.md, bottom = Spacing.xs),
+    )
+    toggles.forEachIndexed { index, toggle ->
+        if (index > 0) CardDivider()
+        ToggleRow(
+            title = toggle.title,
+            subtitle = toggle.subtitle,
+            checked = toggle.checked,
+            onCheckedChange = { onChange(toggle.apply(it)) },
         )
-        Column(
-            Modifier
-                .align(BiasAlignment(h, v))
-                .graphicsLayer { alpha = chipAlpha }
-                .glassSurface(shape = RoundedCornerShape(8.dp), fill = Color(0x99000000), blurRadius = 0)
-                .animateContentSize(Motion.morph())
-                .padding(horizontal = 8.dp, vertical = 5.dp),
-        ) {
-            val lines = buildList {
-                if (hud.showFps) add("FPS: 60")
-                if (hud.showResolution) add(resolution)
-                if (hud.showCpu) add("CPU: 34%")
-            }
-            lines.forEach { line ->
-                Text(
-                    text = line,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
-                    color = Color(0xCCFFFFFF),
-                    maxLines = 1,
-                )
-            }
-        }
     }
 }
 
-/** "FPS · CPU" for the collapsed badge. */
-private fun hudSummary(hud: HudSettings): String = listOfNotNull(
-    "FPS".takeIf { hud.showFps },
-    "Res".takeIf { hud.showResolution },
-    "CPU".takeIf { hud.showCpu },
-).joinToString(" · ")
+/** "FPS · CPU · +3" for the collapsed badge: the first two readings, then how many more. */
+private fun hudSummary(hud: HudSettings): String {
+    val names = listOfNotNull(
+        "FPS".takeIf { hud.showFps },
+        "Frame time".takeIf { hud.showFrameTime },
+        "API".takeIf { hud.showApi },
+        "Driver".takeIf { hud.showDriver },
+        "GPU".takeIf { hud.showGpuUsage },
+        "GPU temp".takeIf { hud.showGpuTemp },
+        "CPU".takeIf { hud.showCpu },
+        "RAM".takeIf { hud.showRam },
+        "Res".takeIf { hud.showResolution },
+    )
+    val shown = names.take(2).joinToString(" · ")
+    return if (names.size > 2) "$shown · +${names.size - 2}" else shown
+}
 

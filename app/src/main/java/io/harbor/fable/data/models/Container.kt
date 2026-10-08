@@ -99,10 +99,30 @@ enum class HudPosition(val label: String) {
     }
 }
 
+/** How the performance overlay arranges its readings; tapping the overlay cycles them. */
+enum class HudLayout(val label: String) {
+    /** One reading per line, top to bottom. */
+    STACKED("Stacked"),
+
+    /** Every reading on one line, side by side. */
+    ROW("Side by side"),
+    ;
+
+    /** The layout a tap on the overlay switches to. */
+    fun next(): HudLayout = entries[(ordinal + 1) % entries.size]
+
+    companion object {
+        fun fromName(name: String?): HudLayout = entries.firstOrNull { it.name == name } ?: STACKED
+    }
+}
+
 /**
- * Performance overlay (HUD) customisation, per container: whether it shows at all, which lines
- * it carries — frame rate, X screen resolution, CPU usage — and which corner it sits in. The
- * defaults match the HUD before it was configurable (everything on, top left).
+ * Performance overlay (HUD) customisation, per container: whether it shows at all, which
+ * readings it carries, how they are laid out and where it sits. Readings: frame rate, frame
+ * time, the graphics API the game uses (detected from Wine's DLL loads, else what the container
+ * is set up for), the Vulkan driver, GPU usage and temperature (read from the kernel where
+ * Android lets an app; "unavailable" otherwise), CPU usage, memory and the X screen resolution.
+ * Records from before a reading existed get its default here.
  */
 data class HudSettings(
     val enabled: Boolean = true,
@@ -117,12 +137,34 @@ data class HudSettings(
      */
     val customX: Float? = null,
     val customY: Float? = null,
+    /** Average time per frame over the last second, in ms. */
+    val showFrameTime: Boolean = true,
+    /** Direct3D version and translation layer in use (D3D11 · DXVK, D3D12 · VKD3D-Proton, …). */
+    val showApi: Boolean = true,
+    /** The Vulkan driver the container runs on (Turnip, RADV, the system driver). */
+    val showDriver: Boolean = false,
+    val showGpuUsage: Boolean = true,
+    val showGpuTemp: Boolean = false,
+    /** Device memory in use / total. */
+    val showRam: Boolean = true,
+    val layout: HudLayout = HudLayout.STACKED,
 ) {
     /** True when the overlay sits where it was dragged rather than in a corner. */
     val isCustomPosition: Boolean get() = customX != null && customY != null
 
     /** True when the overlay would have nothing to show. */
-    val isEmpty: Boolean get() = !showFps && !showResolution && !showCpu
+    val isEmpty: Boolean get() = readingCount == 0
+
+    /** How many readings are switched on. */
+    val readingCount: Int
+        get() = listOf(showFps, showFrameTime, showApi, showDriver, showGpuUsage, showGpuTemp, showCpu, showRam, showResolution)
+            .count { it }
+
+    /** Every reading on (the side menu's HUD switch uses this when everything was off). */
+    fun allReadings(): HudSettings = copy(
+        showFps = true, showFrameTime = true, showApi = true, showDriver = true, showGpuUsage = true,
+        showGpuTemp = true, showCpu = true, showRam = true, showResolution = true,
+    )
 }
 
 data class ExeEntry(
