@@ -1,0 +1,71 @@
+{
+ "id": 2,
+ "name": "Minimal",
+ "cursorSpeed": 1,
+ "elements": [
+  {
+   "type": "BUTTON",
+   "shape": "RECT",
+   "bindings": [
+    "KEY_ESC",
+    "NONE",
+    "NONE",
+    "NONE"
+   ],
+   "scale": 1,
+   "x": 0.06,
+   "y": 0.089,
+   "toggleSwitch": false,
+   "text": "",
+   "iconId": 0
+  },
+  {
+   "type": "BUTTON",
+   "shape": "RECT",
+   "bindings": [
+    "KEY_ENTER",
+    "NONE",
+    "NONE",
+    "NONE"
+   ],
+   "scale": 1,
+   "x": 0.157,
+   "y": 0.089,
+   "toggleSwitch": false,
+   "text": "",
+   "iconId": 0
+  },
+  {
+   "type": "BUTTON",
+   "shape": "RECT",
+   "bindings": [
+    "KEY_TAB",
+    "NONE",
+    "NONE",
+    "NONE"
+   ],
+   "scale": 1,
+   "x": 0.254,
+   "y": 0.089,
+   "toggleSwitch": false,
+   "text": "",
+   "iconId": 0
+  },
+  {
+   "type": "BUTTON",
+   "shape": "CIRCLE",
+   "bindings": [
+    "MOUSE_RIGHT_BUTTON",
+    "NONE",
+    "NONE",
+    "NONE"
+   ],
+   "scale": 1,
+   "x": 0.931,
+   "y": 0.867,
+   "toggleSwitch": false,
+   "text": "",
+   "iconId": 0
+  }
+ ]
+}

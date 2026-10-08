@@ -34,6 +34,11 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.winlator.widget.XServerView
+import io.harbor.fable.display.controls.ControlInput
+import io.harbor.fable.display.controls.ControlProfileRepository
+import io.harbor.fable.display.controls.InputControlsView
+import io.harbor.fable.display.controls.InputTarget
+import io.harbor.fable.display.controls.StoredProfile
 import io.harbor.fable.R
 import io.harbor.fable.data.ContainerRepository
 import io.harbor.fable.data.WineFailure
@@ -51,6 +56,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.hypot
 
 /**
@@ -67,7 +73,8 @@ import kotlin.math.hypot
  * Back doesn't finish the activity any more — a game that catches Escape on a phone's back
  * gesture would otherwise be killed by every accidental swipe. It opens a side menu (see
  * [createDrawer]) that slides in from the right edge over the X screen: on-screen controls
- * (a d-pad and four action buttons that inject X key events), the Android soft keyboard,
+ * (Winlator-compatible control presets — buttons, d-pads, sticks, trackpads — that inject X
+ * key and mouse events, see [createControlsOverlay]), the Android soft keyboard,
  * pausing / resuming Wine (SIGSTOP / SIGCONT on the prefix's processes) and Stop Wine, which is
  * what Back used to do. A second Back closes the menu.
  *
@@ -91,7 +98,10 @@ class DisplayActivity : Activity() {
     private var drawer: View? = null
     private var drawerPanel: View? = null
     private var drawerOpen = false
-    private var controlsOverlay: View? = null
+    private var controlsOverlay: InputControlsView? = null
+    private var controlProfiles: List<StoredProfile> = emptyList()
+    private var selectedProfile: StoredProfile? = null
+    private var controlsSubtitle: TextView? = null
     private var winePaused = false
     private var pauseItem: TextView? = null
     private var pauseIcon: ImageView? = null
@@ -218,7 +228,9 @@ class DisplayActivity : Activity() {
         root = null
         drawer = null
         drawerPanel = null
+        controlsOverlay?.releaseAll()
         controlsOverlay = null
+        controlsSubtitle = null
         pauseItem = null
         pauseIcon = null
         // Only a real exit stops Wine; a recreate (config change not covered by the manifest)
@@ -371,7 +383,9 @@ class DisplayActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             addView(menuSectionLabel("Overlays", first = true))
             addView(menuCard(
-                menuSwitch("On-screen controls", R.drawable.ic_menu_gamepad, "D-pad and action keys", TONE_BLUE) { setControlsShown(it) },
+                menuSwitch("On-screen controls", R.drawable.ic_menu_gamepad, selectedProfile?.profile?.name ?: "Loading presets…", TONE_BLUE) {
+                    setControlsShown(it)
+                }.also { controlsSubtitle = it.findViewById(ROW_SUBTITLE_ID) },
                 menuDivider(),
                 menuItem("Keyboard", R.drawable.ic_menu_keyboard, "Type into Wine", TONE_INDIGO) {
                     setDrawerOpen(false)
@@ -554,6 +568,7 @@ class DisplayActivity : Activity() {
                     typeface = fableFont(R.font.inter_regular)
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
+                    id = ROW_SUBTITLE_ID
                     text = subtitle
                 })
             }
@@ -630,80 +645,34 @@ class DisplayActivity : Activity() {
     // ---- On-screen controls ------------------------------------------------------------------
 
     /**
-     * A translucent d-pad (bottom left) and four action buttons (bottom right) that inject X key
-     * presses while held — arrows and Enter / Escape / Space / Shift, what most games bind by
-     * default — so a keyboard-driven game is playable without a controller. The overlay itself
-     * is not clickable: touches between the buttons fall through to the trackpad underneath.
-     * Hidden until the side menu turns it on.
+     * The on-screen controls: an [InputControlsView] showing the chosen control preset (a
+     * Winlator-format profile, see [ControlProfileRepository]). Fable's own pad — a d-pad for
+     * the arrow keys and Enter / Escape / Space / Shift face buttons — is the default preset.
+     * Touches that miss every element fall through to the trackpad underneath. Hidden until
+     * the side menu turns it on; presets load off the main thread.
      */
-    @SuppressLint("ClickableViewAccessibility")
-    private fun createControlsOverlay(xServer: XServer): View {
-        val density = resources.displayMetrics.density
-        fun dp(v: Float) = (v * density).toInt()
-        val size = dp(PAD_BUTTON_DP)
-        val gap = dp(4f)
-
-        fun padButton(label: String, keycode: XKeycode): View = TextView(this).apply {
-            setTextColor(0xFFFFFFFF.toInt())
-            // Two-line labels ("A" over the key it sends) need the smaller size to fit the circle.
-            textSize = if ('\n' in label) 11f else 18f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            text = label
-            background = GradientDrawable().apply {
-                setColor(PAD_BUTTON_COLOR.toInt())
-                setStroke(dp(1.5f), PAD_BUTTON_STROKE.toInt())
-                cornerRadius = size / 2f
-            }
-            isClickable = true
-            setOnTouchListener { v, event ->
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        v.alpha = 0.6f
-                        runCatching { xServer.injectKeyPress(keycode) }
-                    }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        v.alpha = 1f
-                        runCatching { xServer.injectKeyRelease(keycode) }
-                    }
-                }
-                true
-            }
+    private fun createControlsOverlay(xServer: XServer): InputControlsView {
+        val target = object : InputTarget {
+            override fun keyDown(key: XKeycode) { runCatching { xServer.injectKeyPress(key) } }
+            override fun keyUp(key: XKeycode) { runCatching { xServer.injectKeyRelease(key) } }
+            override fun buttonDown(button: Pointer.Button) { runCatching { xServer.injectPointerButtonPress(button) } }
+            override fun buttonUp(button: Pointer.Button) { runCatching { xServer.injectPointerButtonRelease(button) } }
+            override fun moveBy(dx: Int, dy: Int) { runCatching { xServer.injectPointerMoveDelta(dx, dy) } }
         }
-
-        // Places a button in a 3x3 grid (corners stay empty): up / left / right / down.
-        fun cell(col: Int, row: Int, button: View) = button.also {
-            it.layoutParams = FrameLayout.LayoutParams(size, size).apply {
-                leftMargin = col * (size + gap)
-                topMargin = row * (size + gap)
-            }
-        }
-        val dpad = FrameLayout(this).apply {
-            addView(cell(1, 0, padButton("\u25B2", XKeycode.KEY_UP)))
-            addView(cell(0, 1, padButton("\u25C0", XKeycode.KEY_LEFT)))
-            addView(cell(2, 1, padButton("\u25B6", XKeycode.KEY_RIGHT)))
-            addView(cell(1, 2, padButton("\u25BC", XKeycode.KEY_DOWN)))
-        }
-        // Diamond, like a controller's face buttons: Y top, X left, B right, A bottom.
-        val actions = FrameLayout(this).apply {
-            addView(cell(1, 0, padButton("Y\nShift", XKeycode.KEY_SHIFT_L)))
-            addView(cell(0, 1, padButton("X\nSpace", XKeycode.KEY_SPACE)))
-            addView(cell(2, 1, padButton("B\nEsc", XKeycode.KEY_ESC)))
-            addView(cell(1, 2, padButton("A\nEnter", XKeycode.KEY_ENTER)))
-        }
-        val clusterSize = 3 * size + 2 * gap
-        return FrameLayout(this).apply {
+        val overlay = InputControlsView(this, ControlInput(target)).apply {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             visibility = View.GONE
-            isClickable = false
-            isFocusable = false
-            addView(dpad, FrameLayout.LayoutParams(clusterSize, clusterSize, Gravity.BOTTOM or Gravity.START).apply {
-                setMargins(dp(24f), 0, 0, dp(24f))
-            })
-            addView(actions, FrameLayout.LayoutParams(clusterSize, clusterSize, Gravity.BOTTOM or Gravity.END).apply {
-                setMargins(0, 0, dp(24f), dp(24f))
-            })
         }
+        uiScope.launch {
+            val repository = ControlProfileRepository(applicationContext)
+            val loaded = withContext(Dispatchers.IO) { runCatching { repository.load() }.getOrDefault(emptyList()) }
+            controlProfiles = loaded
+            val chosen = repository.selected(loaded, containerId)
+            selectedProfile = chosen
+            overlay.setProfile(chosen?.profile)
+            controlsSubtitle?.text = chosen?.profile?.name ?: "No presets found"
+        }
+        return overlay
     }
 
     private fun onTouch(xServer: XServer, view: XServerView, event: MotionEvent): Boolean {
@@ -1088,12 +1057,8 @@ class DisplayActivity : Activity() {
         private val TONE_INDIGO = intArrayOf(0xFF3B3A8C.toInt(), 0xFF17163D.toInt())
         private val TONE_TEAL = intArrayOf(0xFF14636A.toInt(), 0xFF072A2E.toInt())
         private val ROW_TITLE_ID = View.generateViewId()
+        private val ROW_SUBTITLE_ID = View.generateViewId()
         private val ROW_ICON_ID = View.generateViewId()
-
-        // On-screen controls.
-        private const val PAD_BUTTON_DP = 52f
-        private const val PAD_BUTTON_COLOR = 0x66000000L
-        private const val PAD_BUTTON_STROKE = 0x99FFFFFFL
 
         /** Opens the display for [containerId], which is stopped when the user leaves the screen. */
         fun open(context: Context, containerId: String) {

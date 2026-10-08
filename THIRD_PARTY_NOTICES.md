@@ -159,6 +159,12 @@ from the epoll JNI callbacks drop the client instead of killing the app; `GLRend
 `Texture.invalidate()` and `DrawableManager.invalidateTextures()` so the server outlives the
 display screen; `UnixSocketConfig` no longer depends on Winlator's `FileUtils`; CRLF -> LF.
 
+The built-in control presets `app/src/main/assets/inputcontrols/profiles/controls-4.icp` ("RTS")
+and `controls-5.icp` ("Virtual Gamepad") are Winlator's `controls-1.icp` / `controls-3.icp` from
+the same MIT commit, with only their `id` changed. Fable reads and writes Winlator's control
+profile format (`*.icp`) with its own code (`io.harbor.fable.display.controls`); no Winlator
+input-controls code is vendored.
+
 ```
 MIT License
 
