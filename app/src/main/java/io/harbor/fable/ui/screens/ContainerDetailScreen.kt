@@ -21,6 +21,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
@@ -93,9 +95,11 @@ import io.harbor.fable.data.models.Container
 import io.harbor.fable.data.models.ContainerDefaults
 import io.harbor.fable.data.models.ContainerStatus
 import io.harbor.fable.data.models.ExeEntry
+import io.harbor.fable.data.models.ToolVisibility
 import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableAccent
 import io.harbor.fable.ui.theme.FableBg
+import io.harbor.fable.ui.theme.ControlHeight
 import io.harbor.fable.ui.theme.FableError
 import io.harbor.fable.ui.theme.FableOnAccent
 import io.harbor.fable.ui.theme.FableText
@@ -184,6 +188,17 @@ fun ContainerDetailScreen(
         onHudChange = { hud ->
             container?.let { fableUi.scope.launch { repository.update(it.copy(hud = hud)) } }
         },
+        onToolHiddenChange = { tool, hide ->
+            val toolId = tool.toolId
+            if (container != null && toolId != null) {
+                fableUi.scope.launch {
+                    // Re-read so two quick taps don't overwrite each other's change.
+                    val current = repository.containers.value.firstOrNull { it.id == container.id } ?: container
+                    repository.update(current.copy(hiddenTools = ToolVisibility.toggle(current.hiddenTools, toolId, hide)))
+                    if (hide) fableUi.showMessage("${tool.name} hidden. Find it under Hidden tools")
+                }
+            }
+        },
         onAddExe = { showAddExe = true },
         onDelete = { showDeleteConfirm = true },
     )
@@ -262,8 +277,14 @@ internal fun ContainerDetailContent(
     onDelete: () -> Unit,
     unavailableTools: Set<String> = emptySet(),
     onHudChange: (HudSettings) -> Unit = {},
+    onToolHiddenChange: (tool: ExeEntry, hide: Boolean) -> Unit = { _, _ -> },
 ) {
     val appear = rememberEntrance()
+    // Tools edit mode (a hide badge on every tile) and the Hidden tools group's open state.
+    var editingTools by rememberSaveable { mutableStateOf(false) }
+    var hiddenToolsOpen by rememberSaveable { mutableStateOf(false) }
+    val visibleToolCount = exes.count { it.isTool && it.toolId !in container?.hiddenTools.orEmpty() }
+    LaunchedEffect(visibleToolCount) { if (visibleToolCount == 0) editingTools = false }
     var tab by rememberSaveable { mutableStateOf(ContainerTab.Apps) }
     val appsListState = rememberLazyListState()
     val settingsListState = rememberLazyListState()
@@ -357,16 +378,51 @@ internal fun ContainerDetailContent(
                 }
 
                 // Built-in checks every container gets (ContainerTools), in ContainerTools order:
-                // GPU Info first, then the Direct3D tests.
+                // GPU Info first, then the Direct3D tests. Tools the user hid (long-press a tile,
+                // or Edit) leave the grid for the collapsed "Hidden tools" group, which also
+                // brings them back; the choice is stored per container (Container.hiddenTools).
                 val tools = exes.filter { it.isTool }.sortedBy { exe ->
                     ContainerTools.all.indexOfFirst { it.id == exe.toolId }.let { if (it < 0) Int.MAX_VALUE else it }
                 }
+                val toolSplit = ToolVisibility.of(tools, container.hiddenTools)
                 if (tools.isNotEmpty()) {
-                    item(key = "tools-label") { SectionLabel("Tools", Modifier.animateItem().entrance(appear, 2)) }
+                    item(key = "tools-label") {
+                        SectionLabel(
+                            "Tools",
+                            Modifier.animateItem().entrance(appear, 2),
+                            trailing = if (toolSplit.visible.isNotEmpty()) {
+                                {
+                                    SectionAction(
+                                        text = if (editingTools) "Done" else "Edit",
+                                        onClick = { editingTools = !editingTools },
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
+                if (toolSplit.visible.isNotEmpty()) {
                     item(key = "tools") {
                         ToolTiles(
-                            tools = tools,
+                            tools = toolSplit.visible,
                             unavailable = unavailableTools,
+                            editing = editingTools,
+                            onLaunch = onLaunchTool,
+                            onHide = { onToolHiddenChange(it, true) },
+                            onLongPress = { editingTools = true },
+                            modifier = Modifier.animateItem().entrance(appear, 2),
+                        )
+                    }
+                }
+                if (toolSplit.hidden.isNotEmpty()) {
+                    item(key = "hidden-tools") {
+                        HiddenTools(
+                            tools = toolSplit.hidden,
+                            expanded = hiddenToolsOpen,
+                            onToggle = { hiddenToolsOpen = !hiddenToolsOpen },
+                            onShow = { onToolHiddenChange(it, false) },
                             onLaunch = onLaunchTool,
                             modifier = Modifier.animateItem().entrance(appear, 2),
                         )
@@ -719,6 +775,9 @@ private fun ToolTiles(
     unavailable: Set<String>,
     onLaunch: (ExeEntry) -> Unit,
     modifier: Modifier = Modifier,
+    editing: Boolean = false,
+    onHide: (ExeEntry) -> Unit = {},
+    onLongPress: () -> Unit = {},
 ) {
     val rows = tools.chunked(TOOL_COLUMNS)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(ToolGap)) {
@@ -732,7 +791,10 @@ private fun ToolTiles(
                         exe = exe,
                         available = exe.id !in unavailable,
                         shape = clusterShape(rowIndex, colIndex, rows.size, TOOL_COLUMNS),
-                        onClick = { onLaunch(exe) },
+                        // In edit mode a tap hides the tile instead of launching it.
+                        onClick = { if (editing) onHide(exe) else onLaunch(exe) },
+                        onLongClick = onLongPress,
+                        editing = editing,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -740,7 +802,14 @@ private fun ToolTiles(
                 repeat(TOOL_COLUMNS - rowTools.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        if (tools.any { it.toolId == ContainerTools.D3D12_TEST.id }) {
+        if (editing) {
+            Text(
+                text = "Tap a tool to hide it from this page. Hidden tools stay installed under Hidden tools.",
+                style = MaterialTheme.typography.bodySmall,
+                color = FableTextDim,
+                modifier = Modifier.padding(top = Spacing.xs, start = Spacing.xs, end = Spacing.xs),
+            )
+        } else if (tools.any { it.toolId == ContainerTools.D3D12_TEST.id }) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -764,6 +833,7 @@ private fun ToolTiles(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ToolTile(
     exe: ExeEntry,
@@ -771,6 +841,8 @@ private fun ToolTile(
     shape: Shape,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    editing: Boolean = false,
 ) {
     val look = toolLook(exe.toolId)
     val tone = look.tone
@@ -790,10 +862,31 @@ private fun ToolTile(
                 alpha = if (available) 1f else 0.55f
             }
             .gradientTile(shape = shape, start = tone.start, end = tone.end)
-            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick),
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = if (editing) "Hide ${exe.name}" else "Open ${exe.name}",
+                onLongClickLabel = "Hide tools",
+                onLongClick = onLongClick,
+                onClick = onClick,
+            ),
     ) {
         ToolGraphic(look = look, modifier = Modifier.align(Alignment.BottomEnd))
-        if (exe.toolId == ContainerTools.D3D12_TEST.id) {
+        if (editing) {
+            // Hide badge: what a tap does in edit mode.
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(Spacing.sm)
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x59000000)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(FableIcons.EyeSlash, contentDescription = null, tint = FableText, modifier = Modifier.size(15.dp))
+            }
+        } else if (exe.toolId == ContainerTools.D3D12_TEST.id) {
             Text(
                 text = "No DX12",
                 style = MaterialTheme.typography.labelSmall,
@@ -836,6 +929,80 @@ private fun ToolTile(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * The tools hidden from the grid, as one collapsed row ("Hidden tools · 2") that opens into a
+ * compact list: each tool can be opened from here or shown again (back into the grid), and
+ * "Show all" restores every one.
+ */
+@Composable
+private fun HiddenTools(
+    tools: List<ExeEntry>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onShow: (ExeEntry) -> Unit,
+    onLaunch: (ExeEntry) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, Motion.inPlace(), label = "hiddenToolsChevron")
+    FableCard(modifier.padding(top = Spacing.xs)) {
+        ListRow(
+            title = "Hidden tools",
+            subtitle = tools.joinToString { toolLabel(it) },
+            icon = FableIcons.EyeSlash,
+            iconTint = FableTextDim,
+            titleColor = FableTextDim,
+            showChevron = false,
+            onClick = onToggle,
+            trailing = {
+                Pill(text = tools.size.toString())
+                Spacer(Modifier.size(Spacing.sm))
+                Icon(
+                    FableIcons.ExpandMore,
+                    contentDescription = if (expanded) "Collapse hidden tools" else "Expand hidden tools",
+                    tint = FableTextDim,
+                    modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation },
+                )
+            },
+        )
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            Column {
+                tools.forEach { tool ->
+                    CardDivider(afterIcon = true)
+                    ListRow(
+                        title = toolLabel(tool),
+                        icon = toolLook(tool.toolId).icon,
+                        iconTint = toolLook(tool.toolId).tone.glyph,
+                        showChevron = false,
+                        onClick = { onLaunch(tool) },
+                        trailing = {
+                            FableIconButton(
+                                icon = FableIcons.Eye,
+                                contentDescription = "Show ${tool.name} on the Apps page",
+                                tint = FableText,
+                                size = ControlHeight.Compact,
+                                onClick = { onShow(tool) },
+                            )
+                        },
+                    )
+                }
+                if (tools.size > 1) {
+                    CardDivider(afterIcon = true)
+                    ListRow(
+                        title = "Show all",
+                        icon = FableIcons.Eye,
+                        showChevron = false,
+                        onClick = { tools.forEach(onShow) },
+                    )
+                }
             }
         }
     }

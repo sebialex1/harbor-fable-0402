@@ -2235,6 +2235,7 @@ class FileContainerStore(private val file: File) : ContainerDao {
                 put("position", hud.position.name)
             },
         )
+        put("hiddenTools", JSONArray().apply { hiddenTools.sorted().forEach { put(it) } })
     }
 
     private fun JSONObject.toContainer(): Container = Container(
@@ -2270,6 +2271,9 @@ class FileContainerStore(private val file: File) : ContainerDao {
                 position = HudPosition.fromName(hud.optString("position", "")),
             )
         } ?: HudSettings(),
+        hiddenTools = optJSONArray("hiddenTools")?.let { array ->
+            (0 until array.length()).mapNotNull { array.optString(it).ifBlank { null } }.toSet()
+        } ?: emptySet(),
     )
 
     private fun ExeEntry.toJson(): JSONObject = JSONObject().apply {

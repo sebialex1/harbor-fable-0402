@@ -61,7 +61,30 @@ data class Container(
     val box64: Box64Settings = Box64Settings(),
     /** What the display screen's performance overlay shows for this container. */
     val hud: HudSettings = HudSettings(),
+    /**
+     * Built-in tools ([ExeEntry.toolId]: `gpu-info`, `d3d11-test`, …) the user hid from this
+     * container's Apps page. They stay installed and launchable from the "Hidden tools" group.
+     */
+    val hiddenTools: Set<String> = emptySet(),
 )
+
+/**
+ * Which of a container's built-in tools show on its Apps page: [visible] in the tile grid,
+ * [hidden] in the collapsed "Hidden tools" group (in the same order), from
+ * [Container.hiddenTools]. Tool ids that no longer exist are ignored.
+ */
+data class ToolVisibility(val visible: List<ExeEntry>, val hidden: List<ExeEntry>) {
+    companion object {
+        fun of(tools: List<ExeEntry>, hiddenIds: Set<String>): ToolVisibility {
+            val (hidden, visible) = tools.partition { it.toolId != null && it.toolId in hiddenIds }
+            return ToolVisibility(visible = visible, hidden = hidden)
+        }
+
+        /** [hiddenIds] with [toolId] hidden ([hide]) or shown again. */
+        fun toggle(hiddenIds: Set<String>, toolId: String, hide: Boolean): Set<String> =
+            if (hide) hiddenIds + toolId else hiddenIds - toolId
+    }
+}
 
 /** Corner of the display screen the performance overlay sits in. */
 enum class HudPosition(val label: String) {
