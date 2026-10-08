@@ -686,10 +686,11 @@ class ContainerRepository internal constructor(
         // 5. Start the process.
         val environment = buildList {
             // Diagnostics: WINEDEBUG=-all hid why Wine stopped (it only printed "could not load
-            // kernel32.dll, status c0000135"). +loaddll names every DLL Wine maps and from where,
-            // +module traces the loader's search (system32, WINEDLLDIR*, load order), and every
-            // other channel keeps Wine's default err/fixme output. A container can still set its
-            // own WINEDEBUG (e.g. -all) through its environment variables, which come last.
+            // kernel32.dll, status c0000135"). err/warn/fixme for every channel, +loaddll (every
+            // DLL Wine maps and from where), +module (the loader's search), +seh (exceptions) and
+            // +process (which programs start and how they end); see DIAGNOSTIC_WINEDEBUG. A
+            // container can still set its own WINEDEBUG (e.g. -all) through its environment
+            // variables, which come last.
             add("WINEDEBUG=$DIAGNOSTIC_WINEDEBUG")
             // Box64 reports native dlopen()/dlsym() failures instead of failing silently.
             add("BOX64_DLSYM_ERROR=1")
@@ -817,6 +818,7 @@ class ContainerRepository internal constructor(
             log.error("process $pid exited within ${EARLY_EXIT_WINDOW_MS}ms${earlyExit?.let { " (exit status $it)" }.orEmpty()}")
             // Give the reaper a moment to append the exit line before the tail is copied.
             delay(REAPER_GRACE_MS)
+            log.attachHighlights(processLog, "Process output highlights (${processLog.name}: err/warn/seh/process/loaddll, whole file)")
             log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
             setStatus(container.id, ContainerStatus.READY)
             // Name what broke (missing libfreetype.so, kernel32.dll c0000135, …) rather than only
@@ -1401,6 +1403,9 @@ class ContainerRepository internal constructor(
             // The reaper thread appends "[fable] exit code N" / "killed by signal N"; give it a beat.
             delay(PROCESS_POLL_MS)
             log.section("Process $pid ended")
+            // The +module trace fills the tail with explorer.exe's own shutdown; the digest pulls
+            // the err/warn/seh/process/loaddll lines out of the whole output first.
+            log.attachHighlights(processLog, "Process output highlights (${processLog.name}: err/warn/seh/process/loaddll, whole file)")
             log.attachTail(processLog, "Process output (${processLog.name}, includes exit code)")
             // stopContainer() drops the container's process set before ending them: an exit it
             // caused (the user left the display) is not a failure.
@@ -1439,13 +1444,18 @@ class ContainerRepository internal constructor(
         val code = started.exitCodeOrNull()
         val dir = processLog.parentFile ?: return
         val clean = if (started.process != null) code == 0 else WineRuntime.exitedCleanly(dir)
+        val diagnosis = WineDiagnosis.analyze(processLog)
         if (clean) {
             log.line("process ${started.pid} exited cleanly after ${uptimeMs}ms")
-            return
+            // explorer.exe /desktop exits with 0 once the program it started is gone, also when
+            // that program never got going (a missing UnityPlayer.dll ends the game in the loader
+            // and leaves a black desktop that closes): only Wine's err lines tell.
+            logDiagnosis(log, diagnosis, screen)
+            if (!diagnosis.programFailed) return
+        } else {
+            logDiagnosis(log, diagnosis, screen)
         }
         val duringStartup = uptimeMs < STARTUP_FAILURE_WINDOW_MS
-        val diagnosis = WineDiagnosis.analyze(processLog)
-        logDiagnosis(log, diagnosis, screen)
         val status = code?.let { if (it > 128) "killed by signal ${it - 128}" else "exit code $it" }
         val detail = diagnosis.summary() ?: WineRuntime.lastLogLine(dir)
         val reason = listOfNotNull(detail, status?.let { "($it)" }).joinToString(" ").ifBlank { "no output" }
@@ -1675,12 +1685,22 @@ private data class ResolvedTranslator(
 )
 
 /**
- * Wine's debug channels for every launch while the start-up failures are being diagnosed:
- * `+loaddll` logs each DLL Wine loads (builtin or native, and its path), `+module` the loader's
- * search for it. Channels not named here keep Wine's default `err`/`fixme` messages, which
- * `-all` used to silence.
+ * Wine's debug channels for every launch while the start-up failures are being diagnosed.
+ *
+ * - `err+all,warn+all,fixme+all`: every channel's error, warning and fixme messages. Wine's
+ *   default when WINEDEBUG names channels is err+fixme only (warn is off), and `-all` used to
+ *   silence everything; spelling the classes out keeps them on whatever the Wine build's default.
+ *   This is where a game that quits on its own says why (`err:module:import_dll Library
+ *   UnityPlayer.dll ... not found`, `err:seh:...`).
+ * - `+loaddll`: each DLL Wine loads (builtin or native, and its path).
+ * - `+module`: the loader's search for it (system32, WINEDLLPATH, load order).
+ * - `+seh`: exceptions raised/dispatched (a game crashing in its own init).
+ * - `+process`: process creation and exit (which program actually started, with which command
+ *   line, and its exit status), since explorer.exe's own exit code 0 is all Fable sees otherwise.
+ *
+ * Class-wide settings go first: Wine applies the items left to right.
  */
-internal const val DIAGNOSTIC_WINEDEBUG = "+loaddll,+module"
+internal const val DIAGNOSTIC_WINEDEBUG = "err+all,warn+all,fixme+all,+loaddll,+module,+seh,+process"
 
 // The Box64 variables a container launches with come from its Box64Settings: Winlator's base
 // variables (GuestProgramLauncherComponent.addBox64EnvVars: BOX64_NOBANNER, BOX64_X11GLX,

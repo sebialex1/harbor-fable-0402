@@ -42,6 +42,24 @@ class LaunchLog private constructor(private val file: File?) {
         append(text ?: "(no output file at ${source.absolutePath})")
     }
 
+    /**
+     * Appends the lines of [source] that say what happened, read from the whole file rather than
+     * its tail: with `+module` on, the last [TAIL_BYTES] are explorer.exe's own loader trace and
+     * the game's `err:` lines scroll out of [attachTail]'s window. Keeps the first and last
+     * [HIGHLIGHT_LINES] / 2 matches when there are more.
+     */
+    fun attachHighlights(source: File, title: String) {
+        section(title)
+        val lines = highlights(source)
+        append(
+            when {
+                lines == null -> "(no output file at ${source.absolutePath})"
+                lines.isEmpty() -> "(no err/warn/seh/process/loaddll lines)"
+                else -> lines.joinToString("\n")
+            },
+        )
+    }
+
     private fun append(text: String) {
         val target = file ?: return
         synchronized(lock) {
@@ -55,8 +73,9 @@ class LaunchLog private constructor(private val file: File?) {
         private const val KEEP = 20
 
         /**
-         * How much of the Wine process output a launch log copies. With WINEDEBUG=+loaddll,+module
-         * the loader trace leading up to a failure is tens of kilobytes.
+         * How much of the Wine process output a launch log copies. With WINEDEBUG's +loaddll,+module
+         * the loader trace leading up to a failure is tens of kilobytes ([attachHighlights] has the
+         * err/warn/seh/process lines from the whole file).
          */
         const val TAIL_BYTES = 96 * 1024
 
@@ -92,6 +111,49 @@ class LaunchLog private constructor(private val file: File?) {
         fun latest(context: Context): File? = runCatching {
             logsDir(context).listFiles { f -> f.isFile && f.name.endsWith(".log") }
                 ?.maxByOrNull { it.lastModified() }
+        }.getOrNull()
+
+        /** How many lines [attachHighlights] copies at most. */
+        const val HIGHLIGHT_LINES = 1200
+        private const val HIGHLIGHT_LINE_CHARS = 400
+
+        /**
+         * Lines worth reading in a Wine process log: errors/warnings/fixmes of any channel,
+         * exceptions (`seh`), process start/exit (`process`), each loaded DLL (`loaddll`),
+         * Wine's own `wine:` messages, DXVK (`info:`/`warn:`/`err:` without a thread prefix),
+         * the Vulkan shim and Fable's exit line. `+module` traces are skipped.
+         */
+        private val HIGHLIGHT = Regex(
+            """(:(err|warn|fixme):|:trace:(seh|process|loaddll):|^wine:|^\s*(err|warn|info):\s|\[vulkan_shim]|\[fable]|\[BOX64] Error|CANNOT LINK|not found)""",
+        )
+
+        /** [HIGHLIGHT] lines of [source] (whole file, streamed), or null when it doesn't exist. */
+        fun highlights(source: File, max: Int = HIGHLIGHT_LINES): List<String>? = runCatching {
+            if (!source.isFile) return null
+            val head = ArrayList<String>()
+            val tail = ArrayDeque<String>()
+            var dropped = 0
+            source.bufferedReader(Charsets.UTF_8).useLines { seq ->
+                for (raw in seq) {
+                    val line = raw.trimEnd('\r')
+                    if (line.contains(":trace:module:") || !HIGHLIGHT.containsMatchIn(line)) continue
+                    val kept = if (line.length > HIGHLIGHT_LINE_CHARS) line.take(HIGHLIGHT_LINE_CHARS) + " …" else line
+                    if (head.size < max / 2) {
+                        head += kept
+                    } else {
+                        tail.addLast(kept)
+                        if (tail.size > max / 2) {
+                            tail.removeFirst()
+                            dropped++
+                        }
+                    }
+                }
+            }
+            buildList {
+                addAll(head)
+                if (dropped > 0) add("… $dropped more lines …")
+                addAll(tail)
+            }
         }.getOrNull()
 
         fun tail(source: File, maxBytes: Int): String? = runCatching {

@@ -28,6 +28,8 @@ internal object WineDiagnosis {
     private val NATIVE_INIT_FAILED = Regex("""Error initializing native (\S+)""")
     private val NEEDED_LIB_FAILED = Regex("""Error loading needed lib (\S+)""")
     private val DLL_NOT_LOADED = Regex("""could not load ([\w.\-]+\.dll), status ([0-9a-fA-Fx]+)""")
+    /** `err:module:import_dll Library UnityPlayer.dll (which is needed by L"C:\\...\\Game.exe") not found`. */
+    private val IMPORT_NOT_FOUND = Regex("""Library ([\w.\-]+) \(which is needed by L?"([^"]+)"\) not found""")
     private val SYMBOL_NOT_FOUND = Regex("""cannot locate symbol "([^"]+)" referenced by "([^"]+)"""")
     private const val FREETYPE_MISSING = "Wine cannot find the FreeType font library"
     private const val FREETYPE_TOO_OLD = "Wine cannot find certain functions that it needs inside the FreeType font library"
@@ -46,6 +48,12 @@ internal object WineDiagnosis {
         val nativeInitFailures: List<String> = emptyList(),
         /** Windows DLLs Wine couldn't load, with the NTSTATUS: `kernel32.dll (c0000135)`. */
         val failedDlls: List<String> = emptyList(),
+        /**
+         * DLLs a program imports that Wine found nowhere (`UnityPlayer.dll (needed by
+         * ULTRAKILL.exe)`): the program can't start. Typically a game whose .exe was copied
+         * into the container without the files next to it.
+         */
+        val missingImports: List<String> = emptyList(),
         /** `symbol (referenced by lib)` the dynamic linker couldn't resolve. */
         val missingSymbols: List<String> = emptyList(),
         /** Wine printed "Wine cannot find the FreeType font library". */
@@ -64,7 +72,11 @@ internal object WineDiagnosis {
     ) {
         val isEmpty: Boolean
             get() = missingLibraries.isEmpty() && nativeInitFailures.isEmpty() && failedDlls.isEmpty() &&
-                missingSymbols.isEmpty() && !freeTypeMissing && !freeTypeTooOld && graphicsErrors.isEmpty()
+                missingSymbols.isEmpty() && !freeTypeMissing && !freeTypeTooOld && graphicsErrors.isEmpty() &&
+                missingImports.isEmpty()
+
+        /** Findings that mean the program itself couldn't start, even when Wine exited with 0. */
+        val programFailed: Boolean get() = missingImports.isNotEmpty() || failedDlls.isNotEmpty()
 
         /** Short user-facing explanation, or null when nothing was recognized. */
         fun summary(): String? {
@@ -77,6 +89,9 @@ internal object WineDiagnosis {
                 if (freeTypeTooOld) add("incompatible FreeType (Wine needs a newer libfreetype.so.6 than Android's libft2.so)")
                 if (nativeInitFailures.isNotEmpty()) add("couldn't initialize ${nativeInitFailures.joinToString()}")
                 if (missingSymbols.isNotEmpty()) add("unresolved symbol ${missingSymbols.first()}")
+                if (missingImports.isNotEmpty()) {
+                    add("missing ${missingImports.joinToString()} (the game's files must be next to its .exe)")
+                }
                 if (failedDlls.isNotEmpty()) add("Wine couldn't load ${failedDlls.joinToString()}")
                 when {
                     openGlUnavailable -> add("Direct3D fell back to WineD3D, which needs OpenGL (download DXVK in Assets)")
@@ -93,6 +108,7 @@ internal object WineDiagnosis {
             missingSymbols.forEach { add("unresolved symbol: $it") }
             if (freeTypeMissing) add("Wine cannot find FreeType (libfreetype.so); see the Native libraries section")
             if (freeTypeTooOld) add("Wine loaded a FreeType without the functions it needs (Android's libft2.so?); see the Native libraries section")
+            missingImports.forEach { add("program import not found: $it") }
             failedDlls.forEach { add("Wine couldn't load $it") }
             if (failedDlls.any { it.startsWith("kernel32.dll", ignoreCase = true) && it.contains("c0000135", ignoreCase = true) }) {
                 // STATUS_DLL_NOT_FOUND for the first DLL a process loads: outside wineboot's
@@ -108,21 +124,32 @@ internal object WineDiagnosis {
         }
     }
 
-    /** Analyzes the last [maxBytes] of [processLog]; an absent file gives an empty [Diagnosis]. */
-    fun analyze(processLog: File, maxBytes: Int = TAIL_BYTES): Diagnosis =
-        LaunchLog.tail(processLog, maxBytes)?.let(::analyze) ?: Diagnosis()
+    /**
+     * Analyzes [processLog] (the whole file, streamed: with +module the tail is explorer.exe's
+     * loader trace and the game's errors are further up); an absent file gives an empty
+     * [Diagnosis].
+     */
+    fun analyze(processLog: File): Diagnosis = runCatching {
+        if (!processLog.isFile) return Diagnosis()
+        processLog.bufferedReader(Charsets.UTF_8).useLines { lines ->
+            analyze(lines.filterNot { it.contains(":trace:module:") })
+        }
+    }.getOrElse { LaunchLog.tail(processLog, TAIL_BYTES)?.let(::analyze) ?: Diagnosis() }
 
-    fun analyze(output: String): Diagnosis {
+    fun analyze(output: String): Diagnosis = analyze(output.lineSequence())
+
+    private fun analyze(output: Sequence<String>): Diagnosis {
         val missing = LinkedHashSet<String>()
         val initFailures = LinkedHashSet<String>()
         val dlls = LinkedHashSet<String>()
         val symbols = LinkedHashSet<String>()
+        val imports = LinkedHashSet<String>()
         var freeType = false
         var freeTypeOld = false
         var lscpu = false
         val graphics = LinkedHashSet<String>()
         var noOpenGl = false
-        for (line in output.lineSequence()) {
+        for (line in output) {
             if (graphics.size < MAX_GRAPHICS_ERRORS) {
                 GRAPHICS_ERROR.find(line)?.let { graphics += it.value.trim().take(200) }
             }
@@ -131,6 +158,10 @@ internal object WineDiagnosis {
             NATIVE_INIT_FAILED.find(line)?.let { initFailures += it.groupValues[1] }
             NEEDED_LIB_FAILED.find(line)?.let { missing += it.groupValues[1].trimEnd('.', ',') }
             DLL_NOT_LOADED.find(line)?.let { dlls += "${it.groupValues[1]} (${it.groupValues[2]})" }
+            IMPORT_NOT_FOUND.find(line)?.let {
+                val needer = it.groupValues[2].replace("\\\\", "\\").substringAfterLast('\\')
+                imports += "${it.groupValues[1]} (needed by $needer)"
+            }
             SYMBOL_NOT_FOUND.find(line)?.let { symbols += "${it.groupValues[1]} (referenced by ${it.groupValues[2]})" }
             if (line.contains(FREETYPE_MISSING)) freeType = true
             if (line.contains(FREETYPE_TOO_OLD)) freeTypeOld = true
@@ -141,6 +172,7 @@ internal object WineDiagnosis {
             nativeInitFailures = (initFailures - missing).toList(),
             failedDlls = dlls.toList(),
             missingSymbols = symbols.toList(),
+            missingImports = imports.toList(),
             freeTypeMissing = freeType,
             freeTypeTooOld = freeTypeOld,
             lscpuMissing = lscpu,
