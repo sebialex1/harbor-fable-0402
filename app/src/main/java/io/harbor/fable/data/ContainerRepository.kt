@@ -1134,13 +1134,35 @@ class ContainerRepository internal constructor(
 
         val systemDir = File(dir, if (info.is64Bit) SYSTEM32_DIR else SYSWOW64_DIR)
         val wineArch = if (info.is64Bit) "x86_64-windows" else "i386-windows"
-        val searchDirs = listOf(folder, systemDir) +
-            listOf("lib/wine/$wineArch", "lib64/wine/$wineArch").map { File(dir, it) }
-        val available = searchDirs.flatMap { it.list()?.toList().orEmpty() }.map { it.lowercase() }.toSet()
-        val missing = info.imports.filter { name ->
-            val lower = name.lowercase()
-            !lower.startsWith("api-ms-") && !lower.startsWith("ext-ms-") && lower !in available
+        val wineDirs = listOf("lib/wine/$wineArch", "lib64/wine/$wineArch").map { File(dir, it) }
+        if (!info.is64Bit && !systemDir.isDirectory && wineDirs.none { it.isDirectory }) {
+            // Every import would read as missing; say what's actually wrong.
+            log.error("program files check: ${program.name} is 32-bit, but this Wine build has no i386-windows DLLs (no WoW64)")
+            return LaunchResult.Failed(
+                "${exe.name} is a 32-bit program and this container's Wine build has no 32-bit support. " +
+                    "Pick a WoW64 Wine build for the container",
+            )
         }
+        val searchDirs = listOf(folder, systemDir) + wineDirs
+        val available = searchDirs.flatMap { it.list()?.toList().orEmpty() }.map { it.lowercase() }.toSet()
+        fun isMissing(name: String): Boolean {
+            val lower = name.lowercase()
+            return !lower.startsWith("api-ms-") && !lower.startsWith("ext-ms-") && lower !in available
+        }
+        // The DLLs the game brings along have imports of their own (UnityPlayer.dll: the VC++
+        // runtime, d3d11, xinput, …); Wine's loader fails the whole program on any of them. Only
+        // logged: a builtin Fable can't see on disk shouldn't block a launch that would work.
+        val folderFiles = folder.listFiles()?.associateBy { it.name.lowercase() }.orEmpty()
+        val nested = info.imports.mapNotNull { name -> folderFiles[name.lowercase()]?.takeIf { it.isFile } }
+            .flatMap { dll ->
+                val dllImports = PeImports.read(dll)?.imports.orEmpty()
+                if (dllImports.isNotEmpty()) log.line("${dll.name} imports: ${dllImports.joinToString()}")
+                dllImports.filter(::isMissing).map { "$it (needed by ${dll.name})" }
+            }
+        if (nested.isNotEmpty()) {
+            log.line("WARNING DLLs the game's own DLLs import that aren't on disk (Wine fails the program if it has no builtin): ${nested.distinct().joinToString()}")
+        }
+        val missing = info.imports.filter(::isMissing)
         val runtimes = VC_RUNTIME_DLLS.map { name -> "$name=${if (File(systemDir, name).isFile) "yes" else "NO"}" }
         log.line("VC++ runtime in ${systemDir.name} (Wine builtins): ${runtimes.joinToString()}")
 
@@ -1149,6 +1171,16 @@ class ContainerRepository internal constructor(
         val dataDir = program.nameWithoutExtension + "_Data"
         val unityDataMissing = usesUnity && folderNames.none { it.equals(dataDir, ignoreCase = true) }
         if (usesUnity) log.line("Unity game: $dataDir ${if (unityDataMissing) "is NOT next to the .exe" else "found"}")
+        if (folderNames.any { it.equals("steam_api64.dll", ignoreCase = true) || it.equals("steam_api.dll", ignoreCase = true) } &&
+            folderNames.none { it.equals("steam_appid.txt", ignoreCase = true) }
+        ) {
+            // Not a failure: but a Steamworks game asks Steam to relaunch it when Steam isn't
+            // running and quits, which looks the same as a crash right after the first window.
+            log.line(
+                "Steam game: steam_api DLL found, no steam_appid.txt next to the .exe; without Steam running it may " +
+                    "quit right after starting",
+            )
+        }
         if (missing.isEmpty() && !unityDataMissing) {
             log.line("program files check: every imported DLL was found")
             return null
