@@ -1295,9 +1295,15 @@ private fun PerformanceOverlaySection(
                 CardDivider()
                 OptionSelector(
                     label = "Position",
-                    options = HudPosition.entries.map { SelectOption(it, it.label) },
-                    selected = hud.position,
-                    onSelect = { onChange(hud.copy(position = it)) },
+                    // Drag the overlay on the display screen to put it anywhere; that shows as
+                    // "Custom" here, and picking a corner moves it back.
+                    options = HudPosition.entries.map { SelectOption<HudPosition?>(it, it.label) } +
+                        listOfNotNull(SelectOption<HudPosition?>(null, "Custom", "Where you dragged it").takeIf { hud.isCustomPosition }),
+                    selected = hud.position.takeUnless { hud.isCustomPosition },
+                    hint = "Drag the overlay on the display screen to move it anywhere",
+                    onSelect = { picked ->
+                        if (picked != null) onChange(hud.copy(position = picked, customX = null, customY = null))
+                    },
                 )
             }
         }

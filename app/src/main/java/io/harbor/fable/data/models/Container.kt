@@ -110,7 +110,17 @@ data class HudSettings(
     val showResolution: Boolean = true,
     val showCpu: Boolean = true,
     val position: HudPosition = HudPosition.TOP_START,
+    /**
+     * Where the user dragged the overlay on the display screen, as fractions (0–1) of the free
+     * space left/right and above/below it (`HudAnchor`). Null (the default, and after picking a
+     * corner in Settings) means [position].
+     */
+    val customX: Float? = null,
+    val customY: Float? = null,
 ) {
+    /** True when the overlay sits where it was dragged rather than in a corner. */
+    val isCustomPosition: Boolean get() = customX != null && customY != null
+
     /** True when the overlay would have nothing to show. */
     val isEmpty: Boolean get() = !showFps && !showResolution && !showCpu
 }

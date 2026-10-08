@@ -11,13 +11,17 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
+import android.text.SpannableStringBuilder
+import android.text.Spanned
 import android.text.TextUtils
+import android.text.style.ForegroundColorSpan
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -43,7 +47,6 @@ import io.harbor.fable.data.ContainerRepository
 import io.harbor.fable.data.WindowsProcess
 import io.harbor.fable.data.WindowsTasks
 import io.harbor.fable.data.WineFailure
-import io.harbor.fable.data.models.HudPosition
 import io.harbor.fable.data.models.HudSettings
 import com.winlator.xserver.Pointer
 import com.winlator.xserver.Window
@@ -172,10 +175,19 @@ class DisplayActivity : Activity() {
             isFocusable = true
             isFocusableInTouchMode = true
             addView(created)
-            addView(hud)
             addView(status)
             addView(controls)
+            // Above the controls overlay: a finger that lands on the HUD drags (or taps) it,
+            // every other finger still reaches the overlay (touchpad and controls). Split
+            // touch dispatch (on by default, set explicitly here) gives each view its own
+            // fingers, so dragging the HUD and steering the cursor work at the same time.
+            addView(hud)
             addView(menu)
+            isMotionEventSplittingEnabled = true
+            // Re-place the HUD when the screen changes size (rotation, multi-window).
+            addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+                if (r - l != or - ol || b - t != ob - ot) placeHud()
+            }
         }
         setContentView(content)
         root = content
@@ -1103,49 +1115,142 @@ class DisplayActivity : Activity() {
     }
 
     /**
-     * The performance HUD: a small glass chip in the corner [hudSettings] picks, carrying only the
-     * lines the user turned on (frame rate, X screen resolution, CPU usage). Doesn't take touches.
-     * Hidden entirely when the overlay is off or every line is.
+     * The performance HUD: a small, quiet chip (translucent black, no rim, dim labels and bright
+     * values) carrying only the readings the user turned on. It sits in the corner [hudSettings]
+     * picks or wherever it was last dragged ([HudAnchor]); dragging it moves it and remembers the
+     * spot for the container. Hidden entirely when the overlay is off or every reading is.
      */
     private fun createHud(xServer: XServer): TextView {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
-        val gravity = when (hudSettings.position) {
-            HudPosition.TOP_START -> Gravity.TOP or Gravity.START
-            HudPosition.TOP_END -> Gravity.TOP or Gravity.END
-            HudPosition.BOTTOM_START -> Gravity.BOTTOM or Gravity.START
-            HudPosition.BOTTOM_END -> Gravity.BOTTOM or Gravity.END
-        }
         return TextView(this).apply {
+            // Placed by translation from the top-left so it can go anywhere (placeHud()).
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-                gravity,
-            ).apply { setMargins(dp(10f), dp(10f), dp(10f), dp(10f)) }
-            setTextColor(0xE6FFFFFF.toInt())
-            textSize = 11f
+                Gravity.TOP or Gravity.START,
+            )
+            setTextColor(HUD_VALUE.toInt())
+            textSize = 10.5f
             typeface = Typeface.MONOSPACE
-            setLineSpacing(dp(1f).toFloat(), 1f)
-            setPadding(dp(8f), dp(5f), dp(8f), dp(5f))
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xA61C1C1E.toInt(), 0x8C0B0B0D.toInt()),
-            ).apply {
-                cornerRadius = 8f * density
-                setStroke((0.75f * density).toInt().coerceAtLeast(1), DRAWER_RIM.toInt())
+            includeFontPadding = false
+            setLineSpacing(dp(2f).toFloat(), 1f)
+            setPadding(dp(7f), dp(4f), dp(7f), dp(4f))
+            background = GradientDrawable().apply {
+                setColor(HUD_FILL.toInt())
+                cornerRadius = 6f * density
             }
-            isClickable = false
             isFocusable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             visibility = if (hudSettings.enabled && !hudSettings.isEmpty) View.VISIBLE else View.GONE
-            text = buildString {
-                if (hudSettings.showFps) append("FPS: --")
-                if (hudSettings.showResolution) {
-                    if (isNotEmpty()) append('\n')
-                    append(xServer.screenInfo)
+            alpha = 0f
+            text = hudLines(
+                listOfNotNull(
+                    ("FPS" to "--").takeIf { hudSettings.showFps },
+                    ("RES" to xServer.screenInfo.toString()).takeIf { hudSettings.showResolution },
+                    ("CPU" to "--").takeIf { hudSettings.showCpu },
+                ),
+            )
+            // Its width follows the text (FPS 9 → 120): keep it on its anchor as it changes.
+            addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
+                if (r - l != or - ol || b - t != ob - ot) placeHud()
+            }
+            setOnTouchListener(::onHudTouch)
+        }
+    }
+
+    private val hudDrag by lazy { HudDragTracker(touchSlopPx) }
+    private val hudMarginPx by lazy { dpPx(HUD_MARGIN_DP) }
+
+    /** Puts the HUD on its anchor (unless a finger is dragging it) and fades it in the first time. */
+    private fun placeHud() {
+        val hud = hudText ?: return
+        val parent = root ?: return
+        if (hudDrag.dragging || hud.width == 0 || parent.width == 0) return
+        val (x, y) = HudAnchor.of(hudSettings).toPixels(hud.width, hud.height, parent.width, parent.height, hudMarginPx)
+        hud.translationX = x
+        hud.translationY = y
+        if (hud.alpha == 0f) hud.animate().alpha(1f).setDuration(HUD_FADE_MS).start()
+    }
+
+    /**
+     * A finger on the HUD: past the touch slop it drags the HUD (kept on screen), a short touch
+     * is a tap. Only touches that land on the HUD come here, so the touchpad and the on-screen
+     * controls never lose a finger to it.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    private fun onHudTouch(v: View, event: MotionEvent): Boolean {
+        val parent = root ?: return false
+        val index = event.actionIndex
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                hudDrag.down(event.getPointerId(0), event.rawX, event.rawY, v.translationX, v.translationY)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                for (i in 0 until event.pointerCount) {
+                    val id = event.getPointerId(i)
+                    val (rawX, rawY) = rawPoint(event, i)
+                    val moved = hudDrag.move(id, rawX, rawY) ?: continue
+                    if (v.scaleX == 1f) v.animate().scaleX(HUD_DRAG_SCALE).scaleY(HUD_DRAG_SCALE).alpha(HUD_DRAG_ALPHA).setDuration(HUD_FADE_MS).start()
+                    v.translationX = moved.first.coerceIn(0f, (parent.width - v.width).coerceAtLeast(0).toFloat())
+                    v.translationY = moved.second.coerceIn(0f, (parent.height - v.height).coerceAtLeast(0).toFloat())
                 }
             }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                val (rawX, rawY) = rawPoint(event, index)
+                when (val result = hudDrag.up(event.getPointerId(index), rawX, rawY)) {
+                    is HudDragTracker.Result.Moved -> {
+                        v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(HUD_FADE_MS).start()
+                        saveHudAnchor(HudAnchor.fromPixels(result.left, result.top, v.width, v.height, parent.width, parent.height, hudMarginPx))
+                    }
+                    HudDragTracker.Result.Tap -> onHudTapped()
+                    HudDragTracker.Result.None -> Unit
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                hudDrag.cancel()
+                v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(HUD_FADE_MS).start()
+                placeHud()
+            }
         }
+        return true
+    }
+
+    /** Screen coordinates of pointer [index] (MotionEvent.getRawX(int) is API 29+). */
+    private fun rawPoint(event: MotionEvent, index: Int): Pair<Float, Float> {
+        val offsetX = event.rawX - event.x
+        val offsetY = event.rawY - event.y
+        return (event.getX(index) + offsetX) to (event.getY(index) + offsetY)
+    }
+
+    /** A tap on the HUD. Nothing yet beyond not reaching the touchpad. */
+    private fun onHudTapped() = Unit
+
+    /** Snaps the HUD to [anchor] and stores it on the container (only the position fields). */
+    private fun saveHudAnchor(anchor: HudAnchor) {
+        hudSettings = hudSettings.copy(customX = anchor.x, customY = anchor.y)
+        placeHud()
+        val id = containerId ?: return
+        uiScope.launch {
+            runCatching {
+                val repository = ContainerRepository.get(applicationContext)
+                val current = repository.containers.value.firstOrNull { it.id == id } ?: return@runCatching
+                repository.update(current.copy(hud = current.hud.copy(customX = anchor.x, customY = anchor.y)))
+            }.onFailure { Log.w(TAG, "Couldn't save the HUD position", it) }
+        }
+    }
+
+    /** "FPS 60" lines: labels dim, values bright. */
+    private fun hudLines(lines: List<Pair<String, String>>): CharSequence {
+        val out = SpannableStringBuilder()
+        lines.forEachIndexed { i, (label, value) ->
+            if (i > 0) out.append('\n')
+            val start = out.length
+            out.append(label)
+            out.setSpan(ForegroundColorSpan(HUD_LABEL.toInt()), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            out.append(' ').append(value)
+        }
+        return out
     }
 
     private fun startHud() {
@@ -1168,7 +1273,7 @@ class DisplayActivity : Activity() {
     }
 
     /** Runs on the HUD thread. */
-    private fun buildHudText(): String {
+    private fun buildHudText(): CharSequence {
         val now = SystemClock.elapsedRealtime()
         val elapsedMs = (now - hudLastSampleMs).coerceAtLeast(1L)
         hudLastSampleMs = now
@@ -1177,16 +1282,18 @@ class DisplayActivity : Activity() {
         val res = server?.screenInfo?.toString() ?: DisplayServer.resolution ?: "?"
         val cpu = if (hudSettings.showCpu) {
             cpuSampler.sample()?.let { usage ->
-                if (usage.systemWide) "CPU: ${usage.percent}%" else "CPU (app): ${usage.percent}%"
-            }
+                ("CPU" to "${usage.percent}%${if (usage.systemWide) "" else " app"}")
+            } ?: ("CPU" to "--")
         } else {
             null
         }
-        return listOfNotNull(
-            "FPS: $fps".takeIf { hudSettings.showFps },
-            res.takeIf { hudSettings.showResolution },
-            cpu,
-        ).joinToString("\n")
+        return hudLines(
+            listOfNotNull(
+                ("FPS" to fps.toString()).takeIf { hudSettings.showFps },
+                ("RES" to res).takeIf { hudSettings.showResolution },
+                cpu,
+            ),
+        )
     }
 
     @Suppress("DEPRECATION")
@@ -1206,6 +1313,13 @@ class DisplayActivity : Activity() {
         private const val TOUCH_SLOP_DP = 10f
         private const val TAP_TIMEOUT_MS = 200L
         private const val HUD_INTERVAL_MS = 1000L
+        private const val HUD_MARGIN_DP = 8f
+        private const val HUD_FADE_MS = 150L
+        private const val HUD_DRAG_SCALE = 1.06f
+        private const val HUD_DRAG_ALPHA = 0.85f
+        private const val HUD_FILL = 0x8C000000L
+        private const val HUD_LABEL = 0x99FFFFFFL
+        private const val HUD_VALUE = 0xF2FFFFFFL
 
         // Side menu: Fable's glass language (ui/theme/Color.kt) over the game. The panel is a
         // translucent dark sheet with a light rim, cards are a faint white wash on it, and the

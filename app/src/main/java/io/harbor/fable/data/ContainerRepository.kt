@@ -2233,6 +2233,10 @@ class FileContainerStore(private val file: File) : ContainerDao {
                 put("resolution", hud.showResolution)
                 put("cpu", hud.showCpu)
                 put("position", hud.position.name)
+                if (hud.customX != null && hud.customY != null) {
+                    put("x", hud.customX.toDouble())
+                    put("y", hud.customY.toDouble())
+                }
             },
         )
         put("hiddenTools", JSONArray().apply { hiddenTools.sorted().forEach { put(it) } })
@@ -2269,6 +2273,8 @@ class FileContainerStore(private val file: File) : ContainerDao {
                 showResolution = hud.optBoolean("resolution", true),
                 showCpu = hud.optBoolean("cpu", true),
                 position = HudPosition.fromName(hud.optString("position", "")),
+                customX = hud.optDouble("x").takeIf { hud.has("y") && !it.isNaN() }?.toFloat()?.coerceIn(0f, 1f),
+                customY = hud.optDouble("y").takeIf { hud.has("x") && !it.isNaN() }?.toFloat()?.coerceIn(0f, 1f),
             )
         } ?: HudSettings(),
         hiddenTools = optJSONArray("hiddenTools")?.let { array ->
