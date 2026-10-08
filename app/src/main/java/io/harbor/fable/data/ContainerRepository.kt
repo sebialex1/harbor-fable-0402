@@ -660,6 +660,8 @@ class ContainerRepository internal constructor(
         val arguments: List<String>
         // The app's own folder; Wine's Unix working directory as well as `start /d`'s.
         var programDir: File? = null
+        // What the folder copy saw, for the Unreal Engine launcher check.
+        var folderReport: GameFolders.Report? = null
         if (exe == null) {
             val root = downloadsDrive(dir, log) ?: "C:\\"
             arguments = listOf("/desktop=$DESKTOP_SHELL,$desktopSize", "/root,$root")
@@ -675,6 +677,7 @@ class ContainerRepository internal constructor(
                     withContext(NonCancellable) { setStatus(container.id, ContainerStatus.READY) }
                 }
                 report.describe().forEach { log.line(it) }
+                folderReport = report
                 report.exe?.absolutePath ?: run {
                     log.error("game folder unusable: ${report.error}")
                     return LaunchResult.Failed(report.error ?: "Can't open ${exe.name}'s folder. Add it again")
@@ -691,6 +694,7 @@ class ContainerRepository internal constructor(
             checkProgramFiles(runtime, exe, programFile, dir, log)?.let { return it }
             val windowsPath = toWindowsPath(path, dir)
             val windowsDir = windowsPath.substringBeforeLast('\\', missingDelimiterValue = "C:\\")
+            checkUnrealLauncher(runtime, exe, programFile, windowsDir, folderReport, dir, log)?.let { return it }
             programDir = programFile.parentFile?.takeIf { it.isDirectory }
             log.line("working directory: $windowsDir (start /d), Unix ${programDir?.absolutePath ?: "(container dir)"}")
             arguments = listOf("/desktop=$DESKTOP_NOGUI,$desktopSize", "start", "/d", windowsDir, windowsPath)
@@ -1264,6 +1268,51 @@ class ContainerRepository internal constructor(
             else -> "${exe.name} needs $what, which isn't in ${folder.absolutePath}. Is the game folder complete?"
         }
         return LaunchResult.Failed(reason, needsAllFilesAccess = copied && !allFiles)
+    }
+
+    /**
+     * Before Wine starts, when the program is an Unreal Engine packaged game's launcher
+     * ([Ue4Package]): finds the program it will CreateProcess (`Engine\Binaries\Win64\UE4Game.exe`
+     * for a content-only project) the way Wine will, and when it isn't there says which case it
+     * is — not in the folder the user picked, lost on the way into the container (the launcher
+     * was copied alone, or a copy failed), or on disk but not reachable through the Wine drive.
+     * Without this the launcher's own "Couldn't start: … CreateProcess() returned 2" dialog was
+     * all there was. Fails the launch only when the target is definitely missing from the
+     * folder the launcher runs from; everything else only logs. Never substitutes the target.
+     */
+    private fun checkUnrealLauncher(
+        runtime: WineRuntime,
+        exe: ExeEntry,
+        program: File,
+        windowsDir: String,
+        folder: GameFolders.Report?,
+        dir: File,
+        log: LaunchLog,
+    ): LaunchResult? {
+        if (exe.isTool || !program.isFile) return null
+        val bootstrap = Ue4Package.readBootstrap(program) ?: return null
+        val launcherDir = program.parentFile ?: return null
+        log.section("Unreal Engine launcher")
+        val copiedAlone = !exe.hasFolder && launcherDir.absolutePath.startsWith(File(dir, "drive_c/fable/${exe.id}").absolutePath)
+        val check = Ue4Package.check(
+            bootstrap = bootstrap,
+            prefix = dir,
+            launcherDir = launcherDir,
+            launcherWindowsDir = windowsDir,
+            copiedAlone = copiedAlone,
+            inPlace = folder?.inPlace == true || (!exe.hasFolder && !copiedAlone),
+            sourceFiles = folder?.sourceFiles,
+            launcherInSource = exe.folderExe,
+            copyFailures = folder?.failedPaths.orEmpty(),
+        )
+        log.line("added as: ${if (exe.hasFolder) "game folder (${exe.folderExe})" else if (copiedAlone) "single file, copied alone" else "single file, runs in place"}")
+        check.describe().forEach { line ->
+            if (check.state != Ue4Package.TargetState.PRESENT && line.startsWith("launcher target:")) log.error(line) else log.line(line)
+        }
+        val allFiles = runtime.hasAllFilesAccess()
+        val message = Ue4Package.userMessage(exe.name, program.name, check, allFiles) ?: return null
+        log.error("Unreal Engine launcher check: $message")
+        return LaunchResult.Failed(message, needsAllFilesAccess = copiedAlone && !allFiles)
     }
 
     /**

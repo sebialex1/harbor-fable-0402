@@ -39,6 +39,17 @@ internal class GameFolders(private val context: Context) {
         val upToDate: Int = 0,
         val failed: List<String> = emptyList(),
         val error: String? = null,
+        /**
+         * Lower-case `/` paths of every file the picked folder holds (what the copy worked from),
+         * or null when it wasn't listed (in place). Lets the launch tell a file the folder never
+         * had from one the copy lost.
+         */
+        val sourceFiles: Set<String>? = null,
+        /** Lower-case source path to why its copy failed. */
+        val failedPaths: Map<String, String> = emptyMap(),
+        /** The picked folder's top-level entries (folders end with `/`), for the launch log. */
+        val topLevel: List<String> = emptyList(),
+        val directories: Int = 0,
     ) {
         fun describe(): List<String> = buildList {
             when {
@@ -47,6 +58,13 @@ internal class GameFolders(private val context: Context) {
                 else -> add(
                     "game folder: copied $copied file(s) (${copiedBytes / (1024 * 1024)} MiB), $upToDate already up to date, " +
                         "into ${exe.parentFile?.absolutePath}",
+                )
+            }
+            if (sourceFiles != null) {
+                add(
+                    "source folder: ${sourceFiles.size} file(s) in $directories folder(s); top level: " +
+                        topLevel.take(TOP_LEVEL_SHOWN).joinToString().ifEmpty { "(empty)" } +
+                        if (topLevel.size > TOP_LEVEL_SHOWN) ", … ${topLevel.size - TOP_LEVEL_SHOWN} more" else "",
                 )
             }
             failed.take(10).forEach { add("couldn't copy $it") }
@@ -110,70 +128,109 @@ internal class GameFolders(private val context: Context) {
      * copy of [relativeExe]. Checks free space first. Honours cancellation between files.
      */
     suspend fun sync(tree: Uri, dest: File, relativeExe: String): Report = withContext(Dispatchers.IO) {
-        val entries = list(tree)
-        if (entries.isEmpty()) {
-            return@withContext Report(exe = null, error = "Fable can't read the game folder any more. Add the game again")
+        val source = object : Source {
+            override fun list(): List<Entry> = this@GameFolders.list(tree)
+            override fun open(entry: Entry) = context.contentResolver.openInputStream(documentUri(tree, entry))
         }
-        if (entries.none { !it.isDirectory && it.relativePath.equals(relativeExe, ignoreCase = true) }) {
-            return@withContext Report(exe = null, error = "$relativeExe isn't in the game folder any more. Add the game again")
-        }
-        if (!dest.isDirectory && !dest.mkdirs()) {
-            return@withContext Report(exe = null, error = "Couldn't create ${dest.absolutePath}")
-        }
-        val files = entries.filter { !it.isDirectory }
-        val todo = files.filter { entry ->
-            val target = File(dest, entry.relativePath)
-            !(target.isFile && entry.size >= 0 && target.length() == entry.size)
-        }
-        val needed = todo.sumOf { it.size.coerceAtLeast(0) }
-        val free = dest.usableSpace
-        if (needed > 0 && free in 1 until needed + FREE_SPACE_MARGIN) {
-            return@withContext Report(
-                exe = null,
-                error = "Not enough storage to copy the game folder: it needs ${needed / (1024 * 1024)} MiB, " +
-                    "${free / (1024 * 1024)} MiB are free. Free some space, or allow Fable \"All files access\" " +
-                    "so the game runs from its own folder",
-            )
-        }
-        entries.filter { it.isDirectory }.forEach { File(dest, it.relativePath).mkdirs() }
-        var copied = 0
-        var bytes = 0L
-        val failed = mutableListOf<String>()
-        for (entry in todo) {
-            currentCoroutineContext().ensureActive()
-            val target = File(dest, entry.relativePath)
-            val temp = File(target.parentFile, target.name + TMP_SUFFIX)
-            try {
-                target.parentFile?.mkdirs()
-                val input = context.contentResolver.openInputStream(documentUri(tree, entry))
-                    ?: throw IOException("provider returned no stream")
-                input.use { source -> temp.outputStream().use { sink -> bytes += source.copyTo(sink, COPY_BUFFER) } }
-                if (target.exists() && !target.delete()) throw IOException("couldn't replace the old copy")
-                if (!temp.renameTo(target)) throw IOException("rename failed")
-                target.setReadable(true, false)
-                copied++
-            } catch (error: IOException) {
-                temp.delete()
-                failed += "${entry.relativePath}: ${error.message ?: error.javaClass.simpleName}"
-            } catch (error: SecurityException) {
-                temp.delete()
-                failed += "${entry.relativePath}: ${error.message ?: "permission denied"}"
-            }
-        }
-        val exe = files.firstOrNull { it.relativePath.equals(relativeExe, ignoreCase = true) }
-            ?.let { File(dest, it.relativePath) }
-            ?.takeIf { it.isFile }
-        Report(
-            exe = exe,
-            copied = copied,
-            copiedBytes = bytes,
-            upToDate = files.size - todo.size,
-            failed = failed,
-            error = if (exe == null) "Couldn't copy $relativeExe into the container" else null,
-        )
+        copyTree(source, dest, relativeExe)
+    }
+
+    /** Where [copyTree] reads a game folder from: a SAF tree on device, a plain folder in tests. */
+    interface Source {
+        /** Every file and folder, relative paths with `/`; empty when it can't be read. */
+        fun list(): List<Entry>
+
+        /** The content of [entry], or null when the provider returns no stream. */
+        fun open(entry: Entry): java.io.InputStream?
     }
 
     companion object {
+        /**
+         * Copies everything [source] lists into [dest], keeping the folder structure and names
+         * exactly (an Unreal package's launcher finds `Engine\Binaries\Win64\UE4Game.exe` and
+         * `<Project>\<Project>.uproject` relative to itself), skipping files whose size already
+         * matches, and returns the copy of [relativeExe]. Checks free space first. Honours
+         * cancellation between files. No Android dependencies.
+         */
+        internal suspend fun copyTree(source: Source, dest: File, relativeExe: String): Report {
+            val entries = source.list()
+            if (entries.isEmpty()) {
+                return Report(exe = null, error = "Fable can't read the game folder any more. Add the game again")
+            }
+            val files = entries.filter { !it.isDirectory }
+            val sourceFiles = files.mapTo(HashSet()) { it.relativePath.lowercase() }
+            val topLevel = entries.filter { '/' !in it.relativePath }
+                .sortedWith(compareBy<Entry> { !it.isDirectory }.thenBy { it.relativePath.lowercase() })
+                .map { if (it.isDirectory) it.relativePath + "/" else it.relativePath }
+            val directories = entries.count { it.isDirectory }
+            fun report(exe: File?, error: String?, copied: Int = 0, bytes: Long = 0, upToDate: Int = 0, failed: List<Pair<String, String>> = emptyList()) =
+                Report(
+                    exe = exe, copied = copied, copiedBytes = bytes, upToDate = upToDate,
+                    failed = failed.map { "${it.first}: ${it.second}" }, error = error,
+                    sourceFiles = sourceFiles, failedPaths = failed.associate { it.first.lowercase() to it.second },
+                    topLevel = topLevel, directories = directories,
+                )
+            if (files.none { it.relativePath.equals(relativeExe, ignoreCase = true) }) {
+                return report(null, "$relativeExe isn't in the game folder any more. Add the game again")
+            }
+            if (!dest.isDirectory && !dest.mkdirs()) {
+                return report(null, "Couldn't create ${dest.absolutePath}")
+            }
+            val todo = files.filter { entry ->
+                val target = File(dest, entry.relativePath)
+                !(target.isFile && entry.size >= 0 && target.length() == entry.size)
+            }
+            val needed = todo.sumOf { it.size.coerceAtLeast(0) }
+            val free = dest.usableSpace
+            if (needed > 0 && free in 1 until needed + FREE_SPACE_MARGIN) {
+                return report(
+                    null,
+                    "Not enough storage to copy the game folder: it needs ${needed / (1024 * 1024)} MiB, " +
+                        "${free / (1024 * 1024)} MiB are free. Free some space, or allow Fable \"All files access\" " +
+                        "so the game runs from its own folder",
+                )
+            }
+            entries.filter { it.isDirectory }.forEach { File(dest, it.relativePath).mkdirs() }
+            var copied = 0
+            var bytes = 0L
+            val failed = mutableListOf<Pair<String, String>>()
+            for (entry in todo) {
+                currentCoroutineContext().ensureActive()
+                val target = File(dest, entry.relativePath)
+                val temp = File(target.parentFile, target.name + TMP_SUFFIX)
+                try {
+                    target.parentFile?.mkdirs()
+                    val input = source.open(entry) ?: throw IOException("provider returned no stream")
+                    input.use { from -> temp.outputStream().use { sink -> bytes += from.copyTo(sink, COPY_BUFFER) } }
+                    if (entry.size >= 0 && temp.length() != entry.size) {
+                        throw IOException("short copy: ${temp.length()} of ${entry.size} bytes")
+                    }
+                    if (target.exists() && !target.delete()) throw IOException("couldn't replace the old copy")
+                    if (!temp.renameTo(target)) throw IOException("rename failed")
+                    target.setReadable(true, false)
+                    copied++
+                } catch (error: IOException) {
+                    temp.delete()
+                    failed += entry.relativePath to (error.message ?: error.javaClass.simpleName)
+                } catch (error: SecurityException) {
+                    temp.delete()
+                    failed += entry.relativePath to (error.message ?: "permission denied")
+                }
+            }
+            val exe = files.firstOrNull { it.relativePath.equals(relativeExe, ignoreCase = true) }
+                ?.let { File(dest, it.relativePath) }
+                ?.takeIf { it.isFile }
+            return report(
+                exe = exe,
+                error = if (exe == null) "Couldn't copy $relativeExe into the container" else null,
+                copied = copied,
+                bytes = bytes,
+                upToDate = files.size - todo.size,
+                failed = failed,
+            )
+        }
+
+        private const val TOP_LEVEL_SHOWN = 24
         private const val TAG = "GameFolders"
         const val EXTERNAL_STORAGE_DOCUMENTS = "com.android.externalstorage.documents"
         private const val TMP_SUFFIX = ".fable-tmp"

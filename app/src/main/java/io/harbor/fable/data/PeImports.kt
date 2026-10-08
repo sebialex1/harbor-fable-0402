@@ -35,7 +35,7 @@ internal object PeImports {
 
     private class Section(val virtualAddress: Long, val virtualSize: Long, val rawSize: Long, val rawOffset: Long)
 
-    private class Pe(val channel: FileChannel, val sections: List<Section>) {
+    private class Pe(val channel: FileChannel, val sections: List<Section>, val machine: Int) {
         fun offsetOf(rva: Long): Long? {
             val section = sections.firstOrNull { s ->
                 rva >= s.virtualAddress && rva < s.virtualAddress + maxOf(s.virtualSize, s.rawSize)
@@ -73,7 +73,72 @@ internal object PeImports {
     private fun ByteBuffer.u16(at: Int): Int = getShort(at).toInt() and 0xFFFF
     private fun ByteBuffer.u32(at: Int): Long = getInt(at).toLong() and 0xFFFFFFFFL
 
+    /**
+     * The `RT_RCDATA` resources of [file] by numeric id (first language of each), at most
+     * [maxBytes] each; empty when it isn't a PE image or has none. Never throws. An Unreal Engine
+     * packaged game's launcher (BootstrapPackagedGame) keeps the program it starts and that
+     * program's arguments in RCDATA 201 / 202 (see [Ue4Package]).
+     */
+    fun rawDataResources(file: File, maxBytes: Int = 64 * 1024): Map<Int, ByteArray> = runCatching {
+        RandomAccessFile(file, "r").use { raf ->
+            val pe = open(raf.channel) ?: return@use emptyMap()
+            rcData(pe.first, pe.second(2), maxBytes)
+        }
+    }.getOrElse { emptyMap() }
+
     private fun read(channel: FileChannel): Info? {
+        val (pe, directoryRva) = open(channel) ?: return null
+        // Import descriptors are 20 bytes (name RVA at +12), delay-load descriptors 32 bytes
+        // (name RVA at +4); both lists end with an all-zero entry.
+        val imports = names(pe, directoryRva(1), entrySize = 20, nameAt = 12)
+        val delayImports = names(pe, directoryRva(13), entrySize = 32, nameAt = 4)
+        return Info(machine = pe.machine, imports = imports, delayImports = delayImports)
+    }
+
+    /** RT_RCDATA (type 10) leaves under the resource directory at [rootRva]. */
+    private fun rcData(pe: Pe, rootRva: Long, maxBytes: Int): Map<Int, ByteArray> {
+        if (rootRva == 0L) return emptyMap()
+        val root = pe.offsetOf(rootRva) ?: return emptyMap()
+        val size = pe.channel.size()
+        // (id or -1 for a named entry, offset relative to the resource root, isDirectory)
+        fun entries(dirOffset: Long): List<Triple<Int, Long, Boolean>> {
+            val at = root + dirOffset
+            if (dirOffset < 0 || at + 16 > size) return emptyList()
+            val header = pe.channel.readAt(at, 16)
+            val count = (header.u16(12) + header.u16(14)).coerceAtMost(MAX_RESOURCE_ENTRIES)
+            if (at + 16 + count * 8L > size) return emptyList()
+            val table = pe.channel.readAt(at + 16, count * 8)
+            return (0 until count).map { i ->
+                val name = table.u32(i * 8)
+                val target = table.u32(i * 8 + 4)
+                Triple(
+                    if (name and 0x80000000L != 0L) -1 else name.toInt(),
+                    target and 0x7FFFFFFFL,
+                    target and 0x80000000L != 0L,
+                )
+            }
+        }
+        val rcdata = entries(0).firstOrNull { it.first == RT_RCDATA && it.third } ?: return emptyMap()
+        val result = LinkedHashMap<Int, ByteArray>()
+        for ((id, offset, isDir) in entries(rcdata.second)) {
+            if (id < 0 || !isDir) continue
+            val leaf = entries(offset).firstOrNull { !it.third } ?: continue
+            val dataEntryAt = root + leaf.second
+            if (dataEntryAt + 16 > size) continue
+            val dataEntry = pe.channel.readAt(dataEntryAt, 16)
+            val dataRva = dataEntry.u32(0)
+            val dataSize = dataEntry.u32(4).coerceAtMost(maxBytes.toLong()).toInt()
+            val dataAt = pe.offsetOf(dataRva) ?: continue
+            if (dataSize <= 0 || dataAt + dataSize > size) continue
+            val bytes = ByteArray(dataSize)
+            pe.channel.readAt(dataAt, dataSize).get(bytes)
+            result[id] = bytes
+        }
+        return result
+    }
+
+    /** The section table and a data-directory lookup of the PE image in [channel], or null. */
+    private fun open(channel: FileChannel): Pair<Pe, (Int) -> Long>? {
         val size = channel.size()
         if (size < 64) return null
         val dos = channel.readAt(0, 64)
@@ -107,12 +172,7 @@ internal object PeImports {
                 rawOffset = sectionTable.u32(at + 20),
             )
         }
-        val pe = Pe(channel, sections)
-        // Import descriptors are 20 bytes (name RVA at +12), delay-load descriptors 32 bytes
-        // (name RVA at +4); both lists end with an all-zero entry.
-        val imports = names(pe, directoryRva(1), entrySize = 20, nameAt = 12)
-        val delayImports = names(pe, directoryRva(13), entrySize = 32, nameAt = 4)
-        return Info(machine = machine, imports = imports, delayImports = delayImports)
+        return Pe(channel, sections, machine) to ::directoryRva
     }
 
     private fun names(pe: Pe, tableRva: Long, entrySize: Int, nameAt: Int): List<String> {
@@ -134,4 +194,6 @@ internal object PeImports {
     }
 
     private const val MAX_IMPORTS = 512
+    private const val RT_RCDATA = 10
+    private const val MAX_RESOURCE_ENTRIES = 4096
 }
