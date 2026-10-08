@@ -448,7 +448,7 @@ class ContainerRepository internal constructor(
         }
         // One extraction at a time per container; later callers find the finished tree.
         return setupLocks.getOrPut(containerId) { Mutex() }.withLock {
-            val container = mutex.withLock { containersById[containerId] }
+            val container = mutex.withLock { containersById[container.id] }
                 ?: return@withLock Result.failure(IllegalStateException("Container not found"))
             val dir = directory(container.id).also { it.mkdirs() }
             val installed = runtime.installedWine(dir)
@@ -1508,8 +1508,8 @@ class ContainerRepository internal constructor(
 
     /**
      * Converts a host path to a Windows path Wine can open. Paths inside the container's
-     * `drive_c` directory map to `C:\\...` (where the Wine prefix's C: drive is); everything
-     * else maps to `Z:\\...` (Wine's default mapping of the host filesystem).
+     * `drive_c` directory map to `C:\...` (where the Wine prefix's C: drive is); everything
+     * else maps to `Z:\...` (Wine's default mapping of the host filesystem).
      *
      * This mirrors Winlator's `WineUtils.unixToDOSPath`, which walks the container's drives
      * (drive_c → C:, D:, E:, …) to find the shortest DOS path for a Unix path. Fable's
@@ -1823,11 +1823,22 @@ class ContainerRepository internal constructor(
             logDiagnosis(log, diagnosis, screen)
         }
         // explorer.exe's 0 says nothing about the app; leave it out of the message.
-        val status = if (clean) null else code?.let { if (it > 128) "killed by signal ${it - 128}" else "exit code $it" }
+        val signal = code?.takeIf { !clean && it > 128 }?.let { it - 128 }
+        val status = if (clean) {
+            null
+        } else {
+            code?.let { if (signal != null) "killed by signal $signal" else "exit code $it" }
+        }
         val detail = diagnosis.summary()
             ?: if (silentAppExit) {
                 "$label closed after ${String.format(java.util.Locale.US, "%.1f", uptimeMs / 1000f)} s without an error " +
                     "Wine could name. The launch log's \"Process output highlights\" section has Wine's messages"
+            } else if (signal != null) {
+                // SIGTERM/SIGKILL while the program was alive (the UE4 RTX launcher's "Couldn't
+                // start" dialog sat open until the launch was ended): not a crash — it was still
+                // running, so the last log line would be loader-trace noise, not a reason.
+                "$label was still running when it was terminated — it hadn't crashed or exited; " +
+                    "a window or dialog was likely waiting for input (or it hung)"
             } else {
                 WineRuntime.lastLogLine(dir)
             }
