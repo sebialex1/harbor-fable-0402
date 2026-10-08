@@ -9,6 +9,13 @@
 // 3. vkGetInstanceProcAddr is hooked: adrenotools_vkGetInstanceProcAddr and
 //    the per-handle getter forward to the ICD's vkGetInstanceProcAddr or
 //    vk_icdGetInstanceProcAddr.
+// 4. Drivers built purely as Android Vulkan HALs export nothing but HMI (the
+//    hwvulkan_module_t). That is how the Turnip packages Winlator users install
+//    are built (K11MCH1 "vulkan.ad07xx.so", whitebelyash
+//    "libvulkan_freedreno.so": the dynamic symbol table holds HMI and nothing
+//    else). For those the HAL device is opened ("vk0") and its
+//    GetInstanceProcAddr is the driver's entry point, exactly what Android's
+//    loader does with a HAL.
 
 #include <adrenotools/driver.h>
 #include <android_linker_ns.h>
@@ -40,6 +47,80 @@ namespace {
 
 using gpa_fn = void* (*)(void*, const char*);
 
+// Minimal copies of <hardware/hardware.h> / <hardware/hwvulkan.h>, which the
+// NDK does not ship. Layouts are the AOSP ones (64-bit).
+struct hw_module_t;
+struct hw_device_t;
+
+struct hw_module_methods_t {
+    int (*open)(const hw_module_t* module, const char* id, hw_device_t** device);
+};
+
+struct hw_module_t {
+    uint32_t tag;
+    uint16_t module_api_version;
+    uint16_t hal_api_version;
+    const char* id;
+    const char* name;
+    const char* author;
+    hw_module_methods_t* methods;
+    void* dso;
+#ifdef __LP64__
+    uint64_t reserved[32 - 7];
+#else
+    uint32_t reserved[32 - 7];
+#endif
+};
+
+struct hw_device_t {
+    uint32_t tag;
+    uint32_t version;
+    hw_module_t* module;
+#ifdef __LP64__
+    uint64_t reserved[12];
+#else
+    uint32_t reserved[12];
+#endif
+    int (*close)(hw_device_t* device);
+};
+
+struct hwvulkan_device_t {
+    hw_device_t common;
+    void* EnumerateInstanceExtensionProperties;
+    void* CreateInstance;
+    gpa_fn GetInstanceProcAddr;
+};
+
+constexpr uint32_t kHardwareModuleTag = ('H' << 24) | ('W' << 16) | ('M' << 8) | 'T';
+constexpr const char* kHwvulkanDevice0 = "vk0";
+
+// Opens the HAL device of a driver that only exports HMI. Returns the device
+// (to be closed with the session) or null with *why set.
+hwvulkan_device_t* open_hal_device(void* driver, std::string* why) {
+    auto* module = reinterpret_cast<hw_module_t*>(dlsym(driver, "HMI"));
+    if (!module) {
+        *why = "no HMI";
+        return nullptr;
+    }
+    if (module->tag != kHardwareModuleTag || !module->methods || !module->methods->open) {
+        *why = "HMI is not a hardware module";
+        return nullptr;
+    }
+    hw_device_t* device = nullptr;
+    const int rc = module->methods->open(module, kHwvulkanDevice0, &device);
+    if (rc != 0 || !device) {
+        *why = "HAL open(vk0) failed (" + std::to_string(rc) + ")";
+        return nullptr;
+    }
+    auto* vk = reinterpret_cast<hwvulkan_device_t*>(device);
+    if (!vk->GetInstanceProcAddr) {
+        if (device->close) device->close(device);
+        *why = "HAL device has no GetInstanceProcAddr";
+        return nullptr;
+    }
+    return vk;
+}
+
 struct Mapping {
     std::string driver_dir;
     std::string redirect_dir;
@@ -51,6 +132,8 @@ struct Session {
     void* loader = nullptr;
     gpa_fn driver_gpa = nullptr;
     gpa_fn icd_gpa = nullptr;
+    // Set when the entry point came from the Android HAL interface (HMI only).
+    hwvulkan_device_t* hal_device = nullptr;
     std::string path;
     std::string dir;
     std::string name;
@@ -346,10 +429,20 @@ void* adrenotools_open_libvulkan(int dlopenMode,
     session->icd_gpa = reinterpret_cast<gpa_fn>(dlsym(driver, "vk_icdGetInstanceProcAddr"));
     if (!session->driver_gpa) session->driver_gpa = session->icd_gpa;
     if (!session->driver_gpa) {
-        dlclose(driver);
-        delete session;
-        set_error("Driver does not export vkGetInstanceProcAddr or vk_icdGetInstanceProcAddr");
-        return nullptr;
+        // A HAL-only build (Turnip packages): go through HMI like Android's loader.
+        std::string why;
+        session->hal_device = open_hal_device(driver, &why);
+        if (session->hal_device) {
+            session->driver_gpa = session->hal_device->GetInstanceProcAddr;
+            FABLE_LOGI("%s exports only HMI; using the HAL device's GetInstanceProcAddr",
+                       session->name.c_str());
+        } else {
+            dlclose(driver);
+            delete session;
+            set_error("Driver exports neither vkGetInstanceProcAddr, vk_icdGetInstanceProcAddr nor a usable "
+                      "Vulkan HAL (" + why + ")");
+            return nullptr;
+        }
     }
 
     if (mapping_import) {
@@ -399,6 +492,7 @@ bool adrenotools_close(void* handle) {
     void* loader = nullptr;
     adrenotools_gpu_mapping* mapping = nullptr;
     bool owns_mapping = false;
+    hwvulkan_device_t* hal_device = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_mu);
         session = session_from(handle);
@@ -407,6 +501,8 @@ bool adrenotools_close(void* handle) {
         if (g_active == session) g_active = nullptr;
         session->driver_gpa = nullptr;
         session->icd_gpa = nullptr;
+        hal_device = session->hal_device;
+        session->hal_device = nullptr;
         driver = session->driver;
         loader = session->loader;
         mapping = session->mapping;
@@ -414,6 +510,7 @@ bool adrenotools_close(void* handle) {
         g_sessions.erase(session);
         if (owns_mapping && mapping) g_mappings.erase(mapping);
     }
+    if (hal_device && hal_device->common.close) hal_device->common.close(&hal_device->common);
     if (driver) dlclose(driver);
     if (loader && loader != driver) dlclose(loader);
     delete mapping;

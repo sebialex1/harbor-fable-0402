@@ -25,6 +25,8 @@
 #pragma once
 
 #include <string>
+#include <cstdint>
+#include <vector>
 
 namespace fable {
 
@@ -47,7 +49,23 @@ struct DriverMeta {
     // Zip entry name of the driver library (meta_dir + library_name, or a
     // unique basename match).
     std::string library_entry;
+    // How the driver is entered, from its dynamic symbol table: "icd" when it
+    // exports vk_icdGetInstanceProcAddr / vkGetInstanceProcAddr (RADV Xclipse
+    // exports both those and HMI), "hal" when HMI is all there is (the Turnip
+    // packages), "" when the ELF had no readable symbol table.
+    std::string entry_point;
 };
+
+// Which Vulkan entry points an ELF shared object exports (dynamic symbols).
+struct VulkanExports {
+    bool readable = false;  // a .dynsym section was found and parsed
+    bool hmi = false;
+    bool icd_gpa = false;   // vk_icdGetInstanceProcAddr
+    bool gpa = false;       // vkGetInstanceProcAddr
+};
+
+// Reads the dynamic symbol table of a 64-bit little-endian ELF in memory.
+VulkanExports read_vulkan_exports(const std::vector<uint8_t>& elf);
 
 // Parse a meta.json document. Does not check that the library exists.
 bool parse_driver_meta_json(const std::string& json_text, DriverMeta* out, std::string* error);

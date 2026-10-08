@@ -181,6 +181,13 @@ bool is_arm64_elf(const std::vector<uint8_t>& bytes, std::string* error) {
     return true;
 }
 
+template <typename T>
+bool read_at(const std::vector<uint8_t>& bytes, uint64_t offset, T* out) {
+    if (offset > bytes.size() || bytes.size() - offset < sizeof(T)) return false;
+    std::memcpy(out, bytes.data() + offset, sizeof(T));
+    return true;
+}
+
 const ZipEntry* locate_meta(const ZipArchive& zip) {
     const ZipEntry* best = nullptr;
     size_t best_depth = 0;
@@ -239,6 +246,23 @@ bool load_meta_from_zip(const ZipArchive& zip, DriverMeta* meta, std::string* er
     // object also verifies CRC before we claim the package is valid.
     if (!zip.read(*lib, &elf, error)) return false;
     if (!is_arm64_elf(elf, error)) return false;
+
+    // The library must be enterable: an ICD entry point, or an Android Vulkan HAL (HMI). Turnip
+    // packages are HAL-only builds; the loader opens their HAL device to get the entry point.
+    const VulkanExports exports = read_vulkan_exports(elf);
+    if (exports.readable) {
+        if (exports.icd_gpa || exports.gpa) {
+            meta->entry_point = "icd";
+        } else if (exports.hmi) {
+            meta->entry_point = "hal";
+        } else {
+            if (error) {
+                *error = "Driver library '" + meta->library_name +
+                         "' exports no Vulkan entry point (vk_icdGetInstanceProcAddr, vkGetInstanceProcAddr or HMI)";
+            }
+            return false;
+        }
+    }
     return true;
 }
 
@@ -343,6 +367,40 @@ std::string parent_dir(const std::string& path) {
 }
 
 }  // namespace
+
+VulkanExports read_vulkan_exports(const std::vector<uint8_t>& elf) {
+    VulkanExports out;
+    Elf64_Ehdr eh{};
+    if (!read_at(elf, 0, &eh)) return out;
+    if (std::memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 || eh.e_ident[EI_CLASS] != ELFCLASS64) return out;
+    if (eh.e_shoff == 0 || eh.e_shentsize != sizeof(Elf64_Shdr) || eh.e_shnum == 0) return out;
+    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
+        Elf64_Shdr sh{};
+        if (!read_at(elf, eh.e_shoff + static_cast<uint64_t>(i) * sizeof(Elf64_Shdr), &sh)) return out;
+        if (sh.sh_type != SHT_DYNSYM || sh.sh_entsize != sizeof(Elf64_Sym)) continue;
+        Elf64_Shdr strtab{};
+        if (sh.sh_link >= eh.e_shnum ||
+            !read_at(elf, eh.e_shoff + static_cast<uint64_t>(sh.sh_link) * sizeof(Elf64_Shdr), &strtab)) {
+            return out;
+        }
+        if (strtab.sh_offset > elf.size() || elf.size() - strtab.sh_offset < strtab.sh_size) return out;
+        const uint64_t count = sh.sh_size / sizeof(Elf64_Sym);
+        out.readable = true;
+        for (uint64_t k = 0; k < count; ++k) {
+            Elf64_Sym sym{};
+            if (!read_at(elf, sh.sh_offset + k * sizeof(Elf64_Sym), &sym)) break;
+            if (sym.st_shndx == SHN_UNDEF || sym.st_name >= strtab.sh_size) continue;
+            const char* name = reinterpret_cast<const char*>(elf.data() + strtab.sh_offset + sym.st_name);
+            const size_t max = static_cast<size_t>(strtab.sh_size - sym.st_name);
+            const std::string symbol(name, strnlen(name, max));
+            if (symbol == "HMI") out.hmi = true;
+            else if (symbol == "vk_icdGetInstanceProcAddr") out.icd_gpa = true;
+            else if (symbol == "vkGetInstanceProcAddr") out.gpa = true;
+        }
+        return out;
+    }
+    return out;
+}
 
 void set_device_sdk_override(int sdk) { g_sdk_override = sdk; }
 
@@ -511,6 +569,7 @@ std::string install_driver_zip(const std::string& zip_path, const std::string& d
                        "  \"minApi\": " + std::to_string(meta.min_api) + ",\n" +
                        "  \"vulkan\": \"" + json_escape(meta.vulkan) + "\",\n" +
                        "  \"libraryPath\": \"" + json_escape(installed) + "\"";
+    if (!meta.entry_point.empty()) json += ",\n  \"entryPoint\": \"" + json_escape(meta.entry_point) + "\"";
     if (!meta.name.empty()) json += ",\n  \"name\": \"" + json_escape(meta.name) + "\"";
     if (!meta.description.empty()) json += ",\n  \"description\": \"" + json_escape(meta.description) + "\"";
     if (!meta.vendor.empty()) json += ",\n  \"vendor\": \"" + json_escape(meta.vendor) + "\"";
