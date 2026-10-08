@@ -46,6 +46,14 @@ internal object WineProcessLauncher {
          * own file so its output isn't truncated away by the launch that follows it.
          */
         val processLogName: String = WineRuntime.LAUNCH_LOG,
+        /**
+         * Unix working directory of the Wine process; the container directory when null. For an
+         * app it is the folder of its .exe, so the cwd Wine derives for the first process
+         * (explorer.exe) already is the game's folder. `start /d <dir>` sets the same directory
+         * for the game itself; this keeps the two in agreement (Unity games resolve
+         * `<Name>_Data` and their plugins against it).
+         */
+        val workingDir: File? = null,
     )
 
     sealed interface Outcome {
@@ -186,7 +194,9 @@ internal object WineProcessLauncher {
         }
         note(processLog, header.trimEnd())
 
-        builder.directory(dir)
+        val cwd = request.workingDir?.takeIf { it.isDirectory } ?: dir
+        note(processLog, "[fable] cwd ${cwd.absolutePath}")
+        builder.directory(cwd)
         builder.redirectInput(ProcessBuilder.Redirect.from(File("/dev/null")))
         builder.redirectErrorStream(true)
         builder.redirectOutput(ProcessBuilder.Redirect.appendTo(processLog))

@@ -30,6 +30,18 @@ internal object WineDiagnosis {
     private val DLL_NOT_LOADED = Regex("""could not load ([\w.\-]+\.dll), status ([0-9a-fA-Fx]+)""")
     /** `err:module:import_dll Library UnityPlayer.dll (which is needed by L"C:\\...\\Game.exe") not found`. */
     private val IMPORT_NOT_FOUND = Regex("""Library ([\w.\-]+) \(which is needed by L?"([^"]+)"\) not found""")
+    /** `err:module:loader_init Importing dlls for L"C:\\...\\Game.exe" failed, status c0000135`. */
+    private val IMPORTS_FAILED = Regex("""Importing dlls for L?"([^"]+)" failed, status ([0-9a-fA-Fx]+)""")
+
+    /**
+     * A program crashing on its own: Wine's unhandled-exception banner (`wine: Unhandled page
+     * fault on read access to …`), `err:seh` lines and access violations (`c0000005`) from the
+     * `+seh` trace. A game that crashes before Direct3D init used to look like a clean exit.
+     */
+    private val CRASH = Regex(
+        """(wine: Unhandled .*|Unhandled exception: .*|err:seh:.*|.*code=c0000005.*|.*EXCEPTION_ACCESS_VIOLATION.*)""",
+    )
+    private const val MAX_CRASHES = 5
     private val SYMBOL_NOT_FOUND = Regex("""cannot locate symbol "([^"]+)" referenced by "([^"]+)"""")
     private const val FREETYPE_MISSING = "Wine cannot find the FreeType font library"
     private const val FREETYPE_TOO_OLD = "Wine cannot find certain functions that it needs inside the FreeType font library"
@@ -69,14 +81,19 @@ internal object WineDiagnosis {
         val graphicsErrors: List<String> = emptyList(),
         /** WineD3D couldn't get OpenGL: DXVK isn't installed or isn't loaded as native. */
         val openGlUnavailable: Boolean = false,
+        /** Programs whose imports failed to load, with the NTSTATUS: `ULTRAKILL.exe (c0000135)`. */
+        val failedImports: List<String> = emptyList(),
+        /** The first few crash lines: unhandled exceptions, `err:seh`, access violations. */
+        val crashes: List<String> = emptyList(),
     ) {
         val isEmpty: Boolean
             get() = missingLibraries.isEmpty() && nativeInitFailures.isEmpty() && failedDlls.isEmpty() &&
                 missingSymbols.isEmpty() && !freeTypeMissing && !freeTypeTooOld && graphicsErrors.isEmpty() &&
-                missingImports.isEmpty()
+                missingImports.isEmpty() && failedImports.isEmpty() && crashes.isEmpty()
 
         /** Findings that mean the program itself couldn't start, even when Wine exited with 0. */
-        val programFailed: Boolean get() = missingImports.isNotEmpty() || failedDlls.isNotEmpty()
+        val programFailed: Boolean
+            get() = missingImports.isNotEmpty() || failedDlls.isNotEmpty() || failedImports.isNotEmpty() || crashes.isNotEmpty()
 
         /** Short user-facing explanation, or null when nothing was recognized. */
         fun summary(): String? {
@@ -93,6 +110,10 @@ internal object WineDiagnosis {
                     add("missing ${missingImports.joinToString()} (the game's files must be next to its .exe)")
                 }
                 if (failedDlls.isNotEmpty()) add("Wine couldn't load ${failedDlls.joinToString()}")
+                if (missingImports.isEmpty() && failedImports.isNotEmpty()) {
+                    add("couldn't load the DLLs ${failedImports.first()} imports")
+                }
+                if (crashes.isNotEmpty()) add("crashed: ${crashes.first().take(120)}")
                 when {
                     openGlUnavailable -> add("Direct3D fell back to WineD3D, which needs OpenGL (download DXVK in Assets)")
                     graphicsErrors.isNotEmpty() -> add("graphics error: ${graphicsErrors.first().take(120)}")
@@ -110,6 +131,8 @@ internal object WineDiagnosis {
             if (freeTypeTooOld) add("Wine loaded a FreeType without the functions it needs (Android's libft2.so?); see the Native libraries section")
             missingImports.forEach { add("program import not found: $it") }
             failedDlls.forEach { add("Wine couldn't load $it") }
+            failedImports.forEach { add("imports failed to load for $it") }
+            crashes.forEach { add("crash: $it") }
             if (failedDlls.any { it.startsWith("kernel32.dll", ignoreCase = true) && it.contains("c0000135", ignoreCase = true) }) {
                 // STATUS_DLL_NOT_FOUND for the first DLL a process loads: outside wineboot's
                 // bootstrap Wine only loads builtins that exist in C:\windows\system32.
@@ -149,7 +172,10 @@ internal object WineDiagnosis {
         var lscpu = false
         val graphics = LinkedHashSet<String>()
         var noOpenGl = false
-        for (line in output) {
+        val importFailures = LinkedHashSet<String>()
+        val crashes = LinkedHashSet<String>()
+        for (raw in output) {
+            val line = raw.trimEnd('\r')
             if (graphics.size < MAX_GRAPHICS_ERRORS) {
                 GRAPHICS_ERROR.find(line)?.let { graphics += it.value.trim().take(200) }
             }
@@ -166,6 +192,11 @@ internal object WineDiagnosis {
             if (line.contains(FREETYPE_MISSING)) freeType = true
             if (line.contains(FREETYPE_TOO_OLD)) freeTypeOld = true
             if (line.contains(LSCPU_MISSING)) lscpu = true
+            IMPORTS_FAILED.find(line)?.let {
+                val program = it.groupValues[1].replace("\\\\", "\\").substringAfterLast('\\')
+                importFailures += "$program (${it.groupValues[2]})"
+            }
+            if (crashes.size < MAX_CRASHES) CRASH.find(line)?.let { crashes += it.value.trim().take(200) }
         }
         return Diagnosis(
             missingLibraries = missing.toList(),
@@ -178,6 +209,8 @@ internal object WineDiagnosis {
             lscpuMissing = lscpu,
             graphicsErrors = graphics.toList(),
             openGlUnavailable = noOpenGl,
+            failedImports = importFailures.toList(),
+            crashes = crashes.toList(),
         )
     }
 }

@@ -631,6 +631,8 @@ class ContainerRepository internal constructor(
         //    C:\ (the prefix's Windows tree) only when Downloads can't be reached.
         val program = "explorer"
         val arguments: List<String>
+        // The app's own folder; Wine's Unix working directory as well as `start /d`'s.
+        var programDir: File? = null
         if (exe == null) {
             val root = downloadsDrive(dir, log) ?: "C:\\"
             arguments = listOf("/desktop=$DESKTOP_SHELL,$desktopSize", "/root,$root")
@@ -645,6 +647,8 @@ class ContainerRepository internal constructor(
             checkProgramFiles(runtime, exe, programFile, dir, log)?.let { return it }
             val windowsPath = toWindowsPath(path, dir)
             val windowsDir = windowsPath.substringBeforeLast('\\', missingDelimiterValue = "C:\\")
+            programDir = programFile.parentFile?.takeIf { it.isDirectory }
+            log.line("working directory: $windowsDir (start /d), Unix ${programDir?.absolutePath ?: "(container dir)"}")
             arguments = listOf("/desktop=$DESKTOP_NOGUI,$desktopSize", "start", "/d", windowsDir, windowsPath)
         }
         val label = exe?.name ?: "${current.name} desktop"
@@ -791,6 +795,7 @@ class ContainerRepository internal constructor(
                         args = arguments,
                         env = environment,
                         driverPath = driver,
+                        workingDir = programDir,
                     ),
                     log,
                 )
@@ -1477,7 +1482,7 @@ class ContainerRepository internal constructor(
             val stoppedByUser = processes[containerId]?.contains(started) != true
             processes[containerId]?.remove(started)
             if (!stoppedByUser) {
-                runCatching { reportUnexpectedExit(containerId, label, started, uptimeMs, log, processLog, screen) }
+                runCatching { reportUnexpectedExit(containerId, label, exeId != null, started, uptimeMs, log, processLog, screen) }
                     .onFailure { Log.w(TAG, "Couldn't analyze the exit of pid $pid", it) }
             }
             val remaining = runningPids[containerId]?.also { it.remove(pid) }
@@ -1500,6 +1505,7 @@ class ContainerRepository internal constructor(
     private fun reportUnexpectedExit(
         containerId: String,
         label: String,
+        isApp: Boolean,
         started: WineProcess,
         uptimeMs: Long,
         log: LaunchLog,
@@ -1510,19 +1516,36 @@ class ContainerRepository internal constructor(
         val dir = processLog.parentFile ?: return
         val clean = if (started.process != null) code == 0 else WineRuntime.exitedCleanly(dir)
         val diagnosis = WineDiagnosis.analyze(processLog)
+        val duringStartup = uptimeMs < STARTUP_FAILURE_WINDOW_MS
+        // An app (not the Wine desktop) whose explorer.exe exits 0 within the startup window
+        // never got going either, recognized pattern or not: a game doesn't open and close by
+        // itself in a few seconds. Without this the display stayed black with no explanation.
+        val silentAppExit = clean && isApp && duringStartup
         if (clean) {
             log.line("process ${started.pid} exited cleanly after ${uptimeMs}ms")
             // explorer.exe /desktop exits with 0 once the program it started is gone, also when
             // that program never got going (a missing UnityPlayer.dll ends the game in the loader
             // and leaves a black desktop that closes): only Wine's err lines tell.
             logDiagnosis(log, diagnosis, screen)
-            if (!diagnosis.programFailed) return
+            if (!diagnosis.programFailed && !silentAppExit) return
+            if (silentAppExit) {
+                log.line(
+                    "status 0 is explorer.exe's, not $label's; an app ending within ${STARTUP_FAILURE_WINDOW_MS}ms " +
+                        "of the launch is reported as a failed start",
+                )
+            }
         } else {
             logDiagnosis(log, diagnosis, screen)
         }
-        val duringStartup = uptimeMs < STARTUP_FAILURE_WINDOW_MS
-        val status = code?.let { if (it > 128) "killed by signal ${it - 128}" else "exit code $it" }
-        val detail = diagnosis.summary() ?: WineRuntime.lastLogLine(dir)
+        // explorer.exe's 0 says nothing about the app; leave it out of the message.
+        val status = if (clean) null else code?.let { if (it > 128) "killed by signal ${it - 128}" else "exit code $it" }
+        val detail = diagnosis.summary()
+            ?: if (silentAppExit) {
+                "$label closed after ${String.format(java.util.Locale.US, "%.1f", uptimeMs / 1000f)} s without an error " +
+                    "Wine could name. The launch log's \"Process output highlights\" section has Wine's messages"
+            } else {
+                WineRuntime.lastLogLine(dir)
+            }
         val reason = listOfNotNull(detail, status?.let { "($it)" }).joinToString(" ").ifBlank { "no output" }
         log.error(
             "$label ${if (duringStartup) "failed during startup" else "stopped"} after ${uptimeMs}ms: $reason",
