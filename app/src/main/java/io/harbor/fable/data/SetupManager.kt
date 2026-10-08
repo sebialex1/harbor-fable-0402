@@ -142,6 +142,9 @@ class SetupManager internal constructor(
 
     private val _installing = MutableStateFlow(false)
 
+    /** Set once the first-run setup screen has started [installRecommended] in this process. */
+    private val firstRunStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+
     /** True while [installRecommended] is refreshing the catalog and queueing downloads. */
     val installing: StateFlow<Boolean> = _installing.asStateFlow()
 
@@ -155,6 +158,16 @@ class SetupManager internal constructor(
     ) { entries, releases, installed, installing, snapshot ->
         compute(entries, releases, installed, installing, snapshot)
     }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), SetupState())
+
+    /**
+     * [installRecommended], but at most once per process: the setup screen starts it by itself
+     * on first launch (there is no welcome page to tap through), and an Activity recreation must
+     * not queue everything again. Returns null when it already ran.
+     */
+    suspend fun installRecommendedOnce(): SetupResult? {
+        if (!firstRunStarted.compareAndSet(false, true)) return null
+        return installRecommended()
+    }
 
     /**
      * Refreshes the catalog, then downloads the latest bionic Wine (.wcp), Box64, RADV Xclipse, DXVK

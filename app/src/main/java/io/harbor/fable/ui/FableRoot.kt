@@ -150,8 +150,10 @@ private fun NavHostController.navigateToTab(route: String) {
 }
 
 /**
- * Root of the UI. Shows the first-run [SetupScreen] until setup has been finished or skipped,
- * then the main shell (tabs, tab bar, sheets). The hand-over is one continuous motion: the setup
+ * Root of the UI. The start destination depends on setup state: a first run goes straight to
+ * [SetupScreen] (its download step; there is no welcome page in front of it), and once setup has
+ * been finished or skipped every later launch opens the main shell (tabs, tab bar, sheets) on
+ * Home. The hand-over is one continuous motion: the setup
  * canvas zooms through and fades while the shell settles in from slightly below.
  */
 @Composable
@@ -160,14 +162,17 @@ fun FableRoot() {
     val app = remember(context) { FableApp.from(context) }
     // Process-wide, not per composition: the notice it holds must outlive every screen.
     val fableUi = app.fableUi
-    val settings by app.settingsRepository.settings.collectAsStateWithLifecycle()
-
     // An install that predates the setup screen but already has containers is not a first run.
-    LaunchedEffect(Unit) {
+    // Decided before the first frame (both stores are read synchronously), because the setup
+    // screen now starts its downloads as soon as it appears: an existing user must go straight
+    // to Home without setup flashing up and queueing anything.
+    remember(app) {
         if (!app.settingsRepository.current.setupComplete && app.containerRepository.list().isNotEmpty()) {
             app.settingsRepository.markSetupComplete()
         }
     }
+    val settings by app.settingsRepository.settings.collectAsStateWithLifecycle()
+
 
     CompositionLocalProvider(
         LocalFableUi provides fableUi,

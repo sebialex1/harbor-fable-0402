@@ -107,13 +107,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import io.harbor.fable.ui.icons.FableIcons
 
-private enum class SetupStep { WELCOME, DOWNLOAD, READY }
+private enum class SetupStep { DOWNLOAD, READY }
 
 /**
- * First-open setup. Three steps on a plain black canvas: a welcome,
- * a download step that shows the real progress of the recommended Wine, Box64, RADV Xclipse,
- * DXVK and VKD3D-Proton packages (through [io.harbor.fable.data.SetupManager]), and a ready step that hands over
- * to the app. [onFinished] is called when the user continues or skips; the caller persists it.
+ * First-open setup. Two steps on a plain black canvas: a download step that shows the real
+ * progress of the recommended Wine, Box64, graphics driver, DXVK and VKD3D-Proton packages (through [io.harbor.fable.data.SetupManager]), and a ready step that
+ * hands over to the app. [onFinished] is called when the user continues or skips; the caller
+ * persists it.
+ *
+ * There is no welcome page any more: a first install lands straight on the download step and
+ * setup starts by itself (once per process, see [io.harbor.fable.data.SetupManager.installRecommendedOnce]).
+ * What the welcome page showed — the device's GPU, Vulkan version and driver — now sits on the
+ * download step under the progress ring. "Skip" still leaves setup for later.
  */
 @Composable
 fun SetupScreen(onFinished: () -> Unit) {
@@ -124,15 +129,20 @@ fun SetupScreen(onFinished: () -> Unit) {
     val preparing by setupManager.installing.collectAsStateWithLifecycle()
     val fableUi = LocalFableUi.current
 
-    var step by rememberSaveable { mutableStateOf(SetupStep.WELCOME) }
+    var step by rememberSaveable { mutableStateOf(SetupStep.DOWNLOAD) }
     var lastMessage by remember { mutableStateOf<String?>(null) }
 
     // Downloads run as a foreground service; on Android 13+ its notification needs permission.
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    fun startDownloads() {
+    fun startDownloads(firstRun: Boolean = false) {
         fableUi.scope.launch {
-            val result = setupManager.installRecommended()
+            val result = if (firstRun) {
+                // Null when this process already kicked setup off (an Activity recreation).
+                setupManager.installRecommendedOnce() ?: return@launch
+            } else {
+                setupManager.installRecommended()
+            }
             lastMessage = when {
                 result.busy -> null
                 result.failed.isNotEmpty() || (!result.catalogReachable && result.unavailable.isNotEmpty()) -> result.message
@@ -141,18 +151,24 @@ fun SetupScreen(onFinished: () -> Unit) {
         }
     }
 
+    // First launch goes straight into setup: no welcome page, no "Set Up" tap. The permission
+    // prompt for the download notification and the downloads themselves start right away.
+    var autoStarted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!autoStarted && step == SetupStep.DOWNLOAD) {
+            autoStarted = true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                runCatching { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
+            }
+            startDownloads(firstRun = true)
+        }
+    }
+
     SetupContent(
         step = step,
         setup = setup,
         preparing = preparing,
         message = lastMessage,
-        onStart = {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            step = SetupStep.DOWNLOAD
-            startDownloads()
-        },
         onRetry = {
             lastMessage = null
             startDownloads()
@@ -169,7 +185,6 @@ private fun SetupContent(
     setup: SetupState,
     preparing: Boolean,
     message: String?,
-    onStart: () -> Unit,
     onRetry: () -> Unit,
     onContinue: () -> Unit,
     onSkip: () -> Unit,
@@ -197,7 +212,6 @@ private fun SetupContent(
             modifier = Modifier.fillMaxSize(),
         ) { current ->
             when (current) {
-                SetupStep.WELCOME -> WelcomeStep(onStart = onStart, onSkip = onSkip)
                 SetupStep.DOWNLOAD -> DownloadStep(
                     setup = setup,
                     preparing = preparing,
@@ -212,60 +226,23 @@ private fun SetupContent(
     }
 }
 
-// --- Step 1: welcome -------------------------------------------------------------------------
+// --- Device card (shown on the download step) ------------------------------------------------
 
 /**
- * The first screen is about the device, not the brand: a small app mark, then what this phone
- * can actually run — the GPU, the Vulkan version and driver the system ships, and a one-line
- * verdict on whether DXVK 2.x / VKD3D-Proton (both need Vulkan 1.3) will work. The probe runs
- * off the main thread; the card fills in as results arrive.
+ * What this phone can actually run — the GPU, the Vulkan version and driver the system ships,
+ * and a one-line verdict on whether DXVK 2.x / VKD3D-Proton (both need Vulkan 1.3) will work.
+ * This used to be the welcome page; it now rides along under the progress ring so first launch
+ * goes straight to setup. The probe runs off the main thread; the card fills in as results arrive.
  */
 @Composable
-private fun WelcomeStep(onStart: () -> Unit, onSkip: () -> Unit) {
+private fun DeviceSummary() {
     var gpu by remember { mutableStateOf<DeviceGpuInfo?>(null) }
     var vulkan by remember { mutableStateOf<VulkanProbeResult?>(null) }
     LaunchedEffect(Unit) {
         gpu = withContext(Dispatchers.IO) { DeviceProbe.read() }
         vulkan = VulkanProbe.probe(VulkanSource.SYSTEM, null)
     }
-    SetupColumn {
-        Spacer(Modifier.weight(0.7f))
-        Staggered(index = 0) { AppMark(size = 64.dp) }
-        Spacer(Modifier.height(Spacing.xl))
-        Staggered(index = 1) {
-            Text(
-                text = "Your Device",
-                style = MaterialTheme.typography.headlineLarge,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        Spacer(Modifier.height(Spacing.xs))
-        Staggered(index = 2) {
-            Text(
-                text = "What this phone brings to Windows games",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),
-            )
-        }
-        Spacer(Modifier.height(Spacing.xxl))
-        Staggered(index = 3) { DeviceCapabilityCard(gpu = gpu, vulkan = vulkan) }
-        Spacer(Modifier.weight(1f))
-        Staggered(index = 4) {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                FableButton(
-                    text = "Set Up",
-                    primary = true,
-                    onClick = onStart,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(Spacing.sm))
-                TextAction(text = "Not Now", onClick = onSkip)
-            }
-        }
-        Spacer(Modifier.height(Spacing.lg))
-    }
+    DeviceCapabilityCard(gpu = gpu, vulkan = vulkan)
 }
 
 /**
@@ -469,7 +446,9 @@ private fun DownloadStep(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(Spacing.xxl))
+        Spacer(Modifier.height(Spacing.xl))
+        Staggered(index = 3) { DeviceSummary() }
+        Spacer(Modifier.height(Spacing.md))
         AnimatedVisibility(visible = message != null, enter = fadeIn(Motion.enter()), exit = fadeOut(Motion.exit())) {
             Column {
                 Spacer(Modifier.height(Spacing.md))
