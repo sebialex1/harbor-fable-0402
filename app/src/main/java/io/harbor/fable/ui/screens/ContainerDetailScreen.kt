@@ -43,7 +43,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import io.harbor.fable.ui.theme.FableBlue
 import io.harbor.fable.ui.theme.PillRadius
 import io.harbor.fable.ui.theme.PlayGradientBottom
 import io.harbor.fable.ui.theme.PlayGradientTop
@@ -327,16 +326,8 @@ internal fun ContainerDetailContent(
                         FableCard(Modifier.animateItem().entrance(appear, 1)) {
                             apps.forEachIndexed { index, exe ->
                                 if (index > 0) CardDivider(afterIcon = true)
-                                val isPrimary = container.exePath == exe.path
                                 ListRow(
                                     title = exe.name,
-                                    // The launch card above already names the primary app; here a
-                                    // blue dot marks it instead of repeating the word on the row.
-                                    titleBadge = if (isPrimary) {
-                                        { PrimaryDot() }
-                                    } else {
-                                        null
-                                    },
                                     leading = { ExeIcon(name = exe.name, iconPath = exe.icon) },
                                     showChevron = false,
                                     // No per-row play button: tapping a row makes it the primary
@@ -505,20 +496,6 @@ internal fun ContainerDetailContent(
                 }
             }
         }
-    }
-}
-
-/** Marks the primary app in the Apps list: a small blue dot with a soft glow. */
-@Composable
-private fun PrimaryDot() {
-    Box(
-        Modifier
-            .size(14.dp)
-            .semantics { contentDescription = "Primary app" },
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(Modifier.size(14.dp).clip(CircleShape).background(FableBlue.copy(alpha = 0.18f)))
-        Box(Modifier.size(6.dp).clip(CircleShape).background(FableBlue))
     }
 }
 
