@@ -40,7 +40,7 @@ class FableApp : Application() {
     val downloadManager: DownloadManager
         get() = DownloadManager.get(this)
 
-    /** RADV Xclipse releases, downloaded packages and the single active driver. */
+    /** RADV Xclipse and Turnip releases, downloaded packages and the single active driver. */
     val driverRepository: DriverRepository
         get() = DriverRepository.get(this)
 

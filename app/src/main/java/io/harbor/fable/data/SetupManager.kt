@@ -28,7 +28,8 @@ import kotlinx.coroutines.flow.stateIn
 enum class RecommendedKind(val label: String, val required: Boolean = true) {
     WINE("Wine"),
     BOX64("Box64"),
-    DRIVER("RADV Xclipse"),
+    /** Turnip on Adreno GPUs, RADV Xclipse otherwise (see [DriverRepository.recommendedFamily]). */
+    DRIVER("GPU driver"),
     DXVK("DXVK"),
     VKD3D("VKD3D-Proton"),
     FEX("FEX", required = false),
@@ -130,8 +131,9 @@ data class SetupResult(
  * are on disk, and queues the missing ones on the download manager (progress shows in the
  * Assets list and the download notification).
  *
- * Wine, Box64 and DXVK come from the asset catalog; the graphics driver is the latest RADV
- * Xclipse release from [DriverRepository], which has its own feed and install lifecycle.
+ * Wine, Box64 and DXVK come from the asset catalog; the graphics driver is the latest release of
+ * the family this GPU needs — Turnip on Adreno, RADV Xclipse otherwise — from [DriverRepository],
+ * which has its own feeds and install lifecycle.
  */
 class SetupManager internal constructor(
     private val assets: AssetRepository,
@@ -170,7 +172,8 @@ class SetupManager internal constructor(
     }
 
     /**
-     * Refreshes the catalog, then downloads the latest bionic Wine (.wcp), Box64, RADV Xclipse, DXVK
+     * Refreshes the catalog, then downloads the latest bionic Wine (.wcp), Box64, GPU driver (Turnip
+     * on Adreno, RADV Xclipse otherwise), DXVK
      * and VKD3D-Proton packages that are not on disk yet. The driver is installed as the active driver as soon as
      * its download completes.
      */
@@ -270,7 +273,9 @@ class SetupManager internal constructor(
         RecommendedKind.VKD3D -> assets.downloadedFiles(AssetType.VKD3D).isNotEmpty() ||
             (assets.downloadedFiles(AssetType.DXVK) + assets.downloadedFiles(AssetType.OTHER))
                 .any { WineRuntime.isVkd3dPackageName(it.name) }
-        RecommendedKind.DRIVER -> installedDriver != null
+        // A driver of the wrong family (RADV Xclipse on an Adreno GPU) does not count: it finds
+        // no device there, so setup offers the right one instead.
+        RecommendedKind.DRIVER -> installedDriver != null && drivers.gpu.value.matches(installedDriver.family)
         RecommendedKind.FEX -> assets.downloadedFiles(AssetType.FEX).isNotEmpty()
     }
 
@@ -300,7 +305,8 @@ class SetupManager internal constructor(
         entries.filter { it.type == AssetType.FEX && !it.name.endsWith(".wcp", ignoreCase = true) }
             .minByOrNull { box64Rank(it.name) }
             ?.let { picks[RecommendedKind.FEX] = Pick(it.id, it.fileSizeBytes, isDriver = false) }
-        releases.firstOrNull { it.channel == ReleaseChannel.LATEST }
+        val family = drivers.recommendedFamily
+        releases.firstOrNull { it.family == family && it.channel == ReleaseChannel.LATEST }
             ?.let { picks[RecommendedKind.DRIVER] = Pick(it.tag, it.asset.sizeBytes, isDriver = true, taskId = it.id) }
         return picks
     }

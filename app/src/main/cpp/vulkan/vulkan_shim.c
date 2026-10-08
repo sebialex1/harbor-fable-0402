@@ -54,7 +54,8 @@
  *
  * Which Vulkan implementation sits behind the shim (real.direct_icd, an enum shim_mode):
  *
- *   SHIM_MODE_SPLIT (2)      FABLE_VULKAN_DRIVER set (RADV Xclipse vulkan.radeon.so) — the default.
+ *   SHIM_MODE_SPLIT (2)      FABLE_VULKAN_DRIVER set (RADV Xclipse vulkan.radeon.so, or Turnip
+ *                            vulkan.ad07xx.so / libvulkan_freedreno.so on Adreno) — the default.
  *                            Winlator/adrenotools-style injection (vulkan_hal_inject.c): a private
  *                            instance of Android's system loader is opened and its HAL lookup is
  *                            redirected to the custom driver. The system loader provides instance
@@ -598,8 +599,23 @@ static int split_check_instance_extensions(PFN_vkEnumerateInstanceExtensionPrope
     return 1;
 }
 
+/* True when a physical device belongs to one of the Mesa drivers Fable injects: RADV (Samsung
+ * Xclipse) or Turnip (Qualcomm Adreno). Decided by VkPhysicalDeviceDriverProperties.driverID when
+ * the device reports it, else by name ("AMD Radeon ... (RADV ...)", "Turnip Adreno (TM) 740"). */
+static int is_injected_mesa_device(const VkPhysicalDeviceDriverProperties *driver_props, const char *device_name) {
+    if (driver_props->driverID == VK_DRIVER_ID_MESA_RADV || driver_props->driverID == VK_DRIVER_ID_MESA_TURNIP) return 1;
+    if (driver_props->driverID == VK_DRIVER_ID_SAMSUNG_PROPRIETARY ||
+        driver_props->driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY ||
+        driver_props->driverID == VK_DRIVER_ID_ARM_PROPRIETARY) {
+        return 0;
+    }
+    if (!device_name) return 0;
+    return strstr(device_name, "RADV") != NULL || strstr(device_name, "Turnip") != NULL ||
+           strstr(device_name, "turnip") != NULL;
+}
+
 /* Start-up probe: a throw-away instance on the split loader, then every physical device it
- * reports. Split mode is only kept if at least one device really is the injected driver (RADV)
+ * reports. Split mode is only kept if at least one device really is the injected driver (RADV/Turnip)
  * and the loader exposes VK_KHR_swapchain on it (i.e. the driver's VK_ANDROID_native_buffer was
  * accepted). Logs what DXVK is going to see. */
 static int split_probe_devices(PFN_vkGetInstanceProcAddr gipa, const char *driver_path) {
@@ -692,7 +708,10 @@ static int split_probe_devices(PFN_vkGetInstanceProcAddr gipa, const char *drive
                 free(exts);
             }
         }
-        const int is_radv = driver_props.driverID == VK_DRIVER_ID_MESA_RADV || strstr(props.deviceName, "RADV") != NULL;
+        /* The injected HAL is a Mesa driver: RADV Xclipse (Samsung Xclipse) or Turnip (Adreno).
+         * The vendor's own driver showing up instead (SAMSUNG_PROPRIETARY, QUALCOMM_PROPRIETARY)
+         * means the redirect did not take. */
+        const int is_injected = is_injected_mesa_device(&driver_props, props.deviceName);
         LOGI("split probe: device %u \"%s\" vendor 0x%04x device 0x%04x api %u.%u.%u driverID %s (%s %s) "
              "textureCompressionBC=%d %s=%s -> %s",
              i, props.deviceName, props.vendorID, props.deviceID, VK_API_VERSION_MAJOR(props.apiVersion),
@@ -701,8 +720,8 @@ static int split_probe_devices(PFN_vkGetInstanceProcAddr gipa, const char *drive
              driver_props.driverName[0] ? driver_props.driverName : "?",
              driver_props.driverInfo[0] ? driver_props.driverInfo : "",
              (int)features.textureCompressionBC, VK_KHR_SWAPCHAIN_EXTENSION_NAME, has_swapchain ? "yes" : "NO",
-             !is_radv ? "not the injected driver" : has_swapchain ? "usable" : "no presentation");
-        if (!is_radv) foreign++;
+             !is_injected ? "not the injected driver" : has_swapchain ? "usable" : "no presentation");
+        if (!is_injected) foreign++;
         else if (!has_swapchain) no_swapchain++;
         else usable++;
     }
@@ -1457,7 +1476,7 @@ VK_SHIM_EXPORT VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice physicalDevic
 static void force_texture_compression_bc(VkPhysicalDeviceFeatures *features) {
     static int logged;
     if (real.direct_icd == SHIM_MODE_SPLIT) {
-        /* RADV answers truthfully on RDNA2; report it once, never override it. Forcing it would
+        /* RADV (RDNA2) and Turnip (Adreno) answer truthfully; report it once, never override it. Forcing it would
          * only move the failure to vkCreateDevice (VK_ERROR_FEATURE_NOT_PRESENT). */
         if (features && !__atomic_exchange_n(&logged, 1, __ATOMIC_ACQ_REL)) {
             LOGI("vkGetPhysicalDeviceFeatures: %s reports textureCompressionBC = %d (split mode, not overridden)",

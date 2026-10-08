@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /** Which Vulkan implementation an extension list was read from. */
 enum class VulkanSource(val label: String) {
-    /** The RADV Xclipse ICD that is installed and active, opened through the adrenotools loader. */
+    /** The installed, active driver (Turnip or RADV Xclipse), opened through the adrenotools loader. */
     INSTALLED_DRIVER("Installed driver"),
 
     /** `libvulkan.so`: the driver the device vendor ships. */

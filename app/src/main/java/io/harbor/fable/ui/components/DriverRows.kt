@@ -55,8 +55,12 @@ internal fun releaseUiState(release: RadvRelease, task: DownloadTask?, installed
         else -> ReleaseUiState.AVAILABLE
     }
 
-/** "Mesa 26.3.0-devel · 4.2 MB · 5 Oct 2026", dropping whatever is unknown. */
+/**
+ * "Mesa 26.3.0-devel · 4.2 MB · 5 Oct 2026", dropping whatever is unknown. Turnip builds come
+ * from several repositories, so they also name the publisher ("K11MCH1").
+ */
 internal fun releaseSubtitle(release: RadvRelease, note: String? = null): String = listOfNotNull(
+    release.sourceRepo?.substringBefore('/')?.takeIf { release.family == io.harbor.fable.data.models.DriverFamily.TURNIP },
     release.mesaVersion?.let { "Mesa $it" },
     formatBytes(release.asset.sizeBytes).takeIf { release.asset.sizeBytes > 0 },
     release.publishedAt.takeIf { it > 0 }?.let { DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(it)) },
@@ -64,7 +68,7 @@ internal fun releaseSubtitle(release: RadvRelease, note: String? = null): String
 ).joinToString(" · ")
 
 /**
- * One RADV Xclipse release. The title is the tag with a channel badge ("Latest", "Pre-release");
+ * One driver release (RADV Xclipse or Turnip). The title is the tag with a channel badge ("Latest", "Pre-release");
  * the trailing control is one [MorphPill] that walks through download → progress → downloaded →
  * active, stretching and filling as it goes (Install appears as a button once the zip is on disk).
  *

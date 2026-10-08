@@ -277,7 +277,7 @@ private fun VulkanSummaryCard(
                 result == null || ok != true -> {
                     val title = when {
                         source == VulkanSource.INSTALLED_DRIVER && installed == null -> "No driver installed"
-                        source == VulkanSource.INSTALLED_DRIVER -> installed?.name ?: "RADV Xclipse ${installed?.tag}"
+                        source == VulkanSource.INSTALLED_DRIVER -> installed?.name ?: "${installed?.family?.displayName ?: "Driver"} ${installed?.tag}"
                         else -> "System Vulkan"
                     }
                     val subtitle = when {

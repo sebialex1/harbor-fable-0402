@@ -748,6 +748,8 @@ class ContainerRepository internal constructor(
             addAll(translator.environment)
             // What Winlator's bionic Wine reads instead of /etc/resolv.conf and netlink.
             addAll(runtime.bionicWineEnvironment())
+            // Turnip: TU_DEBUG=noconform (see WineRuntime.activeDriverEnvironment).
+            addAll(runtime.activeDriverEnvironment())
             // WINEDLLPATH / WINELOADER / WINESERVER: explicit locations of the container's Wine
             // files. Belt and braces: Wine derives the same paths from ntdll.so's location, and
             // WINEDLLPATH can't stand in for missing system32 files (see WinePrefix).
@@ -787,6 +789,7 @@ class ContainerRepository internal constructor(
         log.section("Command")
         log.line("${translator.executable.absolutePath} ${wineBinary.absolutePath} $program ${arguments.joinToString(" ")}".trim())
         log.line("driver: ${driver ?: "none (system Vulkan)"}")
+        log.line(runtime.activeDriverSummary())
         if (screen != null) {
             // winevulkan dlopens libvulkan.so.1 from LD_LIBRARY_PATH; it must be the APK's shim
             // (cpp/vulkan/vulkan_shim.c), whose "[vulkan_shim]" lines then appear in the process log.

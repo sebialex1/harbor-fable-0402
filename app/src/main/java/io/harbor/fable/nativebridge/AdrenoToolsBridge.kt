@@ -11,7 +11,8 @@ object AdrenoToolsBridge {
 
     /**
      * Validate a driver zip package.
-     * Checks for meta.json, vulkan.radeon.so (or equivalent), and correct ABI.
+     * Checks for meta.json, the driver library it names (vulkan.radeon.so for RADV Xclipse,
+     * vulkan.ad07xx.so / libvulkan_freedreno.so for Turnip), and correct ABI.
      * Returns null on success, error message on failure.
      */
     external fun validateDriverZip(zipPath: String): String?

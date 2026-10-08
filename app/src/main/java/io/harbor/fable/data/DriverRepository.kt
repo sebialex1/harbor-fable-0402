@@ -2,10 +2,14 @@ package io.harbor.fable.data
 
 import android.content.Context
 import android.util.Log
+import io.harbor.fable.data.models.DriverFamily
 import io.harbor.fable.data.models.InstalledDriver
 import io.harbor.fable.data.models.RadvRelease
 import io.harbor.fable.data.models.ReleaseChannel
 import io.harbor.fable.nativebridge.AdrenoToolsBridge
+import io.harbor.fable.nativebridge.GpuDetector
+import io.harbor.fable.nativebridge.GpuIdentity
+import io.harbor.fable.data.models.VulkanDevice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,10 +39,10 @@ sealed interface DriverInstallResult {
     /** One line for a snackbar. */
     val message: String
         get() = when (this) {
-            is Installed -> if (replaced != null && replaced.tag != driver.tag) {
-                "Installed ${driver.tag}, replacing ${replaced.tag}"
+            is Installed -> if (replaced != null && (replaced.tag != driver.tag || replaced.family != driver.family)) {
+                "Installed ${driver.family.displayName} ${driver.tag}, replacing ${replaced.family.displayName} ${replaced.tag}"
             } else {
-                "Installed ${driver.tag}"
+                "Installed ${driver.family.displayName} ${driver.tag}"
             }
             is Failed -> reason
             Busy -> "Another install is running"
@@ -46,14 +50,24 @@ sealed interface DriverInstallResult {
 }
 
 /**
- * Owns everything about the RADV Xclipse driver: the release list from [RadvReleaseProvider],
- * the downloaded zips, and the single installed (active) driver.
+ * Owns everything about the custom Vulkan drivers: the release lists of both driver families —
+ * RADV Xclipse ([RadvReleaseProvider], for Samsung Xclipse GPUs) and Turnip
+ * ([TurnipReleaseProvider], for Qualcomm Adreno GPUs) — the downloaded zips, and the single
+ * installed (active) driver.
+ *
+ * Which family is *recommended* follows the GPU ([GpuDetector]): Turnip on Adreno, RADV Xclipse
+ * otherwise. Both families stay listed and installable; [latest] (what setup installs and the
+ * Drivers screen offers first) is the newest stable release of the [recommendedFamily].
+ *
+ * Releases are addressed by [RadvRelease.id] (`radv-xclipse/<tag>`, `turnip/<owner>/<repo>/<tag>`);
+ * the public methods also accept a bare tag, resolved within the recommended family first.
  *
  * Layout under `filesDir/drivers/`:
  * ```
- * packages/<asset>.zip   downloaded release packages (one per version, kept for rollback)
- * active/<tag>/          the extracted driver that Wine loads; at most one at any time
- * active.json            which release is installed and where its library is
+ * packages/<asset>.zip          downloaded RADV packages (one per version, kept for rollback)
+ * packages/turnip/<asset>.zip   downloaded Turnip packages
+ * active/<family>-<tag>/        the extracted driver that Wine loads; at most one at any time
+ * active.json                   which release is installed (and its family) and where its library is
  * ```
  *
  * Exactly one driver can be active. [install] removes whatever is in `active/` (and the record)
@@ -66,12 +80,15 @@ class DriverRepository internal constructor(
     private val provider: RadvReleaseProvider,
     private val downloads: DownloadManager,
     private val root: File,
+    private val turnipProvider: TurnipReleaseProvider? = null,
+    private val gpuDetector: () -> GpuIdentity = { GpuDetector.detect() },
 ) {
     private val mutex = Mutex()
     private val installMutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val packagesDir = File(root, "packages")
+    private val turnipPackagesDir = File(packagesDir, "turnip")
     private val activeRoot = File(root, "active")
     private val activeFile = File(root, "active.json")
 
@@ -81,14 +98,24 @@ class DriverRepository internal constructor(
     private val _isRefreshing = MutableStateFlow(false)
     private val _refreshError = MutableStateFlow<String?>(null)
     private val _stale = MutableStateFlow(false)
+    private val _gpu = MutableStateFlow(runCatching(gpuDetector).getOrElse { GpuIdentity(io.harbor.fable.nativebridge.GpuKind.UNKNOWN, null, null, "detection failed") })
 
-    /** Every known release, newest first, with download state. */
+    /** What GPU this device has, as far as driver choice goes; refined by [refineGpu]. */
+    val gpu: StateFlow<GpuIdentity> = _gpu.asStateFlow()
+
+    /** The family to recommend on this device: Turnip on Adreno, RADV Xclipse otherwise. */
+    val recommendedFamily: DriverFamily get() = _gpu.value.recommendedFamily
+
+    /**
+     * Every known release with download state: the recommended family's releases first (newest
+     * first), then the other family's.
+     */
     val releases: StateFlow<List<RadvRelease>> = _releases.asStateFlow()
 
     /** The one active driver, or null when none is installed. */
     val installed: StateFlow<InstalledDriver?> = _installed.asStateFlow()
 
-    /** Tag of the release being extracted right now, or null. */
+    /** [RadvRelease.id] of the release being extracted right now, or null. */
     val installing: StateFlow<String?> = _installing.asStateFlow()
 
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
@@ -102,6 +129,7 @@ class DriverRepository internal constructor(
     init {
         root.mkdirs()
         packagesDir.mkdirs()
+        turnipPackagesDir.mkdirs()
         migrateLegacyPackages()
         _installed.value = loadInstalled()
         // A crash between "remove old" and "extract new" can leave half a driver behind.
@@ -114,9 +142,40 @@ class DriverRepository internal constructor(
 
     // --- Queries ------------------------------------------------------------------------------
 
-    val latest: RadvRelease? get() = _releases.value.firstOrNull { it.channel == ReleaseChannel.LATEST }
+    /** The newest stable release of the [recommendedFamily]: what setup installs. */
+    val latest: RadvRelease? get() = latestFor(recommendedFamily)
 
-    fun release(tag: String): RadvRelease? = _releases.value.firstOrNull { it.tag == tag }
+    fun latestFor(family: DriverFamily): RadvRelease? =
+        _releases.value.firstOrNull { it.family == family && it.channel == ReleaseChannel.LATEST }
+
+    /**
+     * The release with id [key], or (for callers that still pass a tag) the release with that
+     * tag, preferring the recommended family.
+     */
+    fun release(key: String): RadvRelease? {
+        val all = _releases.value
+        return all.firstOrNull { it.id == key }
+            ?: all.firstOrNull { it.tag == key && it.family == recommendedFamily }
+            ?: all.firstOrNull { it.tag == key }
+    }
+
+    /** True when the installed driver is of the family this GPU needs (always true for unknown GPUs). */
+    fun installedMatchesGpu(): Boolean {
+        val current = _installed.value ?: return false
+        return _gpu.value.matches(current.family)
+    }
+
+    /**
+     * Refines GPU detection with the system Vulkan driver's primary device (more reliable than
+     * sysfs, which SELinux may hide). Re-sorts the list when the recommendation changes.
+     */
+    fun refineGpu(device: VulkanDevice?) {
+        val refined = runCatching { GpuDetector.refine(device) }.getOrNull() ?: return
+        if (refined == _gpu.value) return
+        val familyChanged = refined.recommendedFamily != _gpu.value.recommendedFamily
+        _gpu.value = refined
+        if (familyChanged) _releases.value = order(_releases.value)
+    }
 
     /** The most recent download task for [release], if any. */
     fun taskFor(release: RadvRelease): DownloadTask? = downloads.taskForAsset(release.id)
@@ -124,11 +183,11 @@ class DriverRepository internal constructor(
     /** The downloaded zip for [release], or null when it is not on disk. */
     fun downloadedZip(release: RadvRelease): File? = zipFor(release).takeIf { it.isFile && it.length() > 0L }
 
-    /** Zips on disk, newest first, whether or not the catalog knows them. */
-    fun downloadedZips(): List<File> = packagesDir.listFiles()
-        ?.filter { it.isFile && it.length() > 0L && it.name.endsWith(".zip", ignoreCase = true) }
-        ?.sortedByDescending { it.lastModified() }
-        .orEmpty()
+    /** Zips on disk (both families), newest first, whether or not the catalog knows them. */
+    fun downloadedZips(): List<File> = listOf(packagesDir, turnipPackagesDir)
+        .flatMap { dir -> dir.listFiles()?.toList().orEmpty() }
+        .filter { it.isFile && it.length() > 0L && it.name.endsWith(".zip", ignoreCase = true) }
+        .sortedByDescending { it.lastModified() }
 
     /** True when at least one release package has been downloaded. */
     fun hasDownloadedPackage(): Boolean = downloadedZips().isNotEmpty()
@@ -147,44 +206,69 @@ class DriverRepository internal constructor(
 
     // --- Refresh ------------------------------------------------------------------------------
 
-    /** Fetches the release list. Failures are reported through [refreshError], never thrown. */
+    /**
+     * Fetches both release lists. Failures are reported through [refreshError], never thrown;
+     * one family failing keeps the other's list (and that family's previous list, if any).
+     * [refreshError] is set when the recommended family could not be loaded.
+     */
     suspend fun refresh(forceRefresh: Boolean = false) = mutex.withLock {
         _isRefreshing.value = true
         try {
-            val feed = provider.fetch(forceRefresh)
-            _releases.value = feed.releases.map(::reconcile)
-            _stale.value = feed.stale
-            _refreshError.value = null
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            val message = when (error) {
-                is GitHubFetchException -> if (error.httpCode > 0) "HTTP ${error.httpCode}: ${error.message}" else error.message
-                is IOException -> error.message ?: "Network error"
-                else -> error.message ?: error.javaClass.simpleName
+            val previous = _releases.value
+            val radv = fetchFamily(DriverFamily.RADV_XCLIPSE) { provider.fetch(forceRefresh) }
+            val turnip = turnipProvider?.let { p -> fetchFamily(DriverFamily.TURNIP) { p.fetch(forceRefresh) } }
+            val radvReleases = radv.feed?.releases ?: previous.filter { it.family == DriverFamily.RADV_XCLIPSE }
+            val turnipReleases = turnip?.feed?.releases ?: previous.filter { it.family == DriverFamily.TURNIP }
+            _releases.value = order((radvReleases + turnipReleases).map(::reconcile))
+            _stale.value = (radv.feed?.stale ?: false) || (turnip?.feed?.stale ?: false)
+            val recommendedError = when (recommendedFamily) {
+                DriverFamily.RADV_XCLIPSE -> radv.error
+                DriverFamily.TURNIP -> turnip?.error ?: radv.error.takeIf { turnipProvider == null }
             }
-            _refreshError.value = message ?: "Couldn't load releases"
-            Log.w(TAG, "Release refresh failed", error)
+            _refreshError.value = recommendedError
+                ?: if (radv.error != null && (turnip == null || turnip.error != null)) radv.error else null
         } finally {
             _isRefreshing.value = false
         }
     }
 
+    private class FamilyFetch(val feed: RadvReleaseFeed?, val error: String?)
+
+    private suspend fun fetchFamily(family: DriverFamily, fetch: suspend () -> RadvReleaseFeed): FamilyFetch = try {
+        FamilyFetch(fetch(), null)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        val message = when (error) {
+            is GitHubFetchException -> if (error.httpCode > 0) "HTTP ${error.httpCode}: ${error.message}" else error.message
+            is IOException -> error.message ?: "Network error"
+            else -> error.message ?: error.javaClass.simpleName
+        }
+        Log.w(TAG, "${family.displayName} release refresh failed", error)
+        FamilyFetch(null, message ?: "Couldn't load ${family.displayName} releases")
+    }
+
+    /** Recommended family first; each family keeps its provider's order (newest first). */
+    private fun order(releases: List<RadvRelease>): List<RadvRelease> {
+        val recommended = recommendedFamily
+        return releases.filter { it.family == recommended } + releases.filter { it.family != recommended }
+    }
+
     // --- Download -----------------------------------------------------------------------------
 
     /**
-     * Queues the zip for [tag]. Returns the task, or null when the release is unknown or the zip
-     * is already on disk.
+     * Queues the zip for [key] (a release id or tag). Returns the task, or null when the release
+     * is unknown or the zip is already on disk.
      */
-    suspend fun download(tag: String): DownloadTask? {
-        val release = release(tag) ?: return null
+    suspend fun download(key: String): DownloadTask? {
+        val release = release(key) ?: return null
         if (downloadedZip(release) != null) return null
         val dest = zipFor(release)
         return withContext(Dispatchers.IO) {
             downloads.enqueue(
                 url = release.asset.downloadUrl,
                 dest = dest,
-                displayName = "${RadvReleaseProvider.DISPLAY_NAME} ${release.tag}",
+                displayName = release.label,
                 expectedSha256 = release.asset.sha256,
                 assetId = release.id,
                 recordKind = RecordKind.DRIVER,
@@ -193,8 +277,8 @@ class DriverRepository internal constructor(
     }
 
     /** Removes a downloaded zip. The active driver is unaffected: it was extracted elsewhere. */
-    suspend fun deletePackage(tag: String): Boolean = withContext(Dispatchers.IO) {
-        val release = release(tag) ?: return@withContext false
+    suspend fun deletePackage(key: String): Boolean = withContext(Dispatchers.IO) {
+        val release = release(key) ?: return@withContext false
         downloads.cancelForAsset(release.id)
         val removed = zipFor(release).delete()
         reconcileAll()
@@ -204,16 +288,16 @@ class DriverRepository internal constructor(
     // --- Install / uninstall ------------------------------------------------------------------
 
     /**
-     * Makes [tag] the active driver: validates the downloaded zip, removes the previously
+     * Makes [key] (a release id or tag) the active driver, whichever family it is: validates the downloaded zip, removes the previously
      * installed driver (files and record), extracts the new package through the native loader
      * and records it. Returns [DriverInstallResult.Failed] when the zip is missing or rejected;
      * in that case the previous driver is already gone, which is reported in the reason.
      */
-    suspend fun install(tag: String): DriverInstallResult {
-        val release = release(tag) ?: return DriverInstallResult.Failed("Unknown release $tag")
-        val zip = downloadedZip(release) ?: return DriverInstallResult.Failed("Download ${release.tag} first")
+    suspend fun install(key: String): DriverInstallResult {
+        val release = release(key) ?: return DriverInstallResult.Failed("Unknown release $key")
+        val zip = downloadedZip(release) ?: return DriverInstallResult.Failed("Download ${release.label} first")
         if (!installMutex.tryLock()) return DriverInstallResult.Busy
-        _installing.value = tag
+        _installing.value = release.id
         try {
             return withContext(Dispatchers.IO) { installLocked(release, zip) }
         } finally {
@@ -237,7 +321,7 @@ class DriverRepository internal constructor(
         removeActiveFiles()
 
         // 3. Extract into a fresh directory.
-        val dir = activeDirFor(release.tag)
+        val dir = activeDirFor(release)
         val library = runCatching { AdrenoToolsBridge.installDriver(zip.absolutePath, dir.absolutePath) }
             .onFailure { Log.w(TAG, "installDriver threw for ${release.tag}", it) }
             .getOrNull()
@@ -259,11 +343,15 @@ class DriverRepository internal constructor(
             driverVersion = driverVersion,
             vulkanVersion = meta?.stringOrNull("vulkan")?.takeIf { it.isNotBlank() && it != "0.0.0" }
                 ?: driverVersion?.let { VERSION_TRIPLET.find(it)?.value },
-            mesaVersion = release.mesaVersion ?: RadvReleaseProvider.parseMesaVersion(meta?.stringOrNull("name")),
+            mesaVersion = release.mesaVersion
+                ?: RadvReleaseProvider.parseMesaVersion(meta?.stringOrNull("name"))
+                ?: TurnipReleaseProvider.parseMesaVersion(meta?.stringOrNull("name")),
             installedAt = System.currentTimeMillis(),
+            family = release.family,
+            releaseId = release.id,
         )
         writeInstalledRecord(record)
-        Log.i(TAG, "Active driver is now ${record.tag} (${record.libraryPath})")
+        Log.i(TAG, "Active driver is now ${release.label} (${record.libraryPath})")
         return DriverInstallResult.Installed(record, previous)
     }
 
@@ -280,21 +368,21 @@ class DriverRepository internal constructor(
     }
 
     /**
-     * Downloads [tag] when the zip is not on disk, then installs it as the active driver once
-     * the download completes. Returns the download task when one was started, or null when the
-     * install started straight away (or [tag] is already active).
+     * Downloads [key] (a release id or tag) when the zip is not on disk, then installs it as the
+     * active driver once the download completes. Returns the download task when one was started,
+     * or null when the install started straight away (or the release is already active).
      */
-    suspend fun downloadAndInstall(tag: String): DownloadTask? {
-        val release = release(tag) ?: return null
-        if (_installed.value?.tag == tag) return null
+    suspend fun downloadAndInstall(key: String): DownloadTask? {
+        val release = release(key) ?: return null
+        if (_installed.value?.isFrom(release) == true) return null
         if (downloadedZip(release) != null) {
-            scope.launch { install(tag) }
+            scope.launch { install(release.id) }
             return null
         }
-        val task = download(tag) ?: return null
+        val task = download(release.id) ?: return null
         scope.launch {
             val finished = downloads.await(task.id)
-            if (finished.status == DownloadStatus.COMPLETED) install(tag)
+            if (finished.status == DownloadStatus.COMPLETED) install(release.id)
         }
         return task
     }
@@ -310,9 +398,17 @@ class DriverRepository internal constructor(
 
     // --- Installed record ---------------------------------------------------------------------
 
-    internal fun zipFor(release: RadvRelease): File = File(packagesDir, sanitizeFileName(release.asset.name))
+    internal fun zipFor(release: RadvRelease): File = when (release.family) {
+        DriverFamily.RADV_XCLIPSE -> File(packagesDir, sanitizeFileName(release.asset.name))
+        // Repositories reuse asset names across releases ("turnip_a8xx.zip"), so the tag is part
+        // of the file name.
+        DriverFamily.TURNIP -> File(turnipPackagesDir, sanitizeFileName("${release.tag}-${release.asset.name}"))
+    }
 
-    internal fun activeDirFor(tag: String): File = File(root, "active/${sanitizeFileName(tag)}")
+    internal fun activeDirFor(release: RadvRelease): File = when (release.family) {
+        DriverFamily.RADV_XCLIPSE -> File(root, "active/${sanitizeFileName(release.tag)}")
+        DriverFamily.TURNIP -> File(root, "active/${sanitizeFileName("turnip-${release.tag}")}")
+    }
 
     internal fun writeInstalledRecord(record: InstalledDriver?) {
         if (record == null) {
@@ -385,10 +481,12 @@ class DriverRepository internal constructor(
         fun get(context: Context): DriverRepository {
             instance?.let { return it }
             val app = context.applicationContext
+            val fetcher = GitHubReleaseFetcher.get(app)
             val created = DriverRepository(
-                provider = RadvReleaseProvider(GitHubReleaseFetcher.get(app)),
+                provider = RadvReleaseProvider(fetcher),
                 downloads = DownloadManager.get(app),
                 root = File(app.filesDir, "drivers"),
+                turnipProvider = TurnipReleaseProvider(fetcher, preferA8xx = { GpuDetector.detect().isAdreno8xx }),
             )
             instance = created
             return created

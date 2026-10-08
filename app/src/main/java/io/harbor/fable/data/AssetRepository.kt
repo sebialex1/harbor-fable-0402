@@ -62,8 +62,9 @@ data class CatalogSource(
  * records from the filtered assets. [download] enqueues a transfer through
  * [DownloadManager].
  *
- * The RADV Xclipse Vulkan driver is deliberately not part of this catalog. It
- * has its own release feed and install lifecycle in [DriverRepository]; a
+ * The Vulkan drivers (RADV Xclipse for Xclipse GPUs, Turnip for Adreno GPUs) are
+ * deliberately not part of this catalog. They have their own release feeds and
+ * install lifecycle in [DriverRepository]; a
  * persisted catalog from an earlier build that still lists a driver source is
  * migrated on load.
  *
@@ -571,7 +572,7 @@ class AssetRepository internal constructor(
          * return a client error for repos with no releases, which is recorded
          * in [refreshErrors] rather than crashing the refresh.
          *
-         * The RADV Xclipse driver is not listed here: see [DriverRepository].
+         * The Vulkan drivers (RADV Xclipse, Turnip) are not listed here: see [DriverRepository].
          */
         val defaultCatalog: List<CatalogSource> = listOf(
             // Wine must be a Winlator-style bionic build: x86_64 Wine linked against Android's

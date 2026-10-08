@@ -22,8 +22,9 @@ data class RadvReleaseFeed(
  * [ReleaseChannel.VERSIONED]; anything the publisher flagged is [ReleaseChannel.PRERELEASE].
  *
  * RADV is kept apart from the generic asset catalog on purpose: it has its own lifecycle
- * (download, then install as the single active driver) and must never be confused with
- * Turnip/Adreno packages, which this app does not offer.
+ * (download, then install as the single active driver). It is the driver for Samsung Xclipse
+ * GPUs only; Adreno GPUs get Turnip from [TurnipReleaseProvider] instead, and [DriverRepository]
+ * recommends one or the other by GPU.
  */
 class RadvReleaseProvider(
     private val fetcher: GitHubReleaseFetcher,

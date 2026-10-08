@@ -111,7 +111,8 @@ private enum class SetupStep { DOWNLOAD, READY }
 
 /**
  * First-open setup. Two steps on a plain black canvas: a download step that shows the real
- * progress of the recommended Wine, Box64, graphics driver, DXVK and VKD3D-Proton packages (through [io.harbor.fable.data.SetupManager]), and a ready step that
+ * progress of the recommended Wine, Box64, graphics driver (Turnip on Adreno, RADV Xclipse
+ * elsewhere), DXVK and VKD3D-Proton packages (through [io.harbor.fable.data.SetupManager]), and a ready step that
  * hands over to the app. [onFinished] is called when the user continues or skips; the caller
  * persists it.
  *
@@ -366,7 +367,11 @@ private fun vulkanVerdict(vulkan: VulkanProbeResult?): Pair<Boolean, String> {
     return if (major > 1 || (major == 1 && minor >= 3)) {
         true to "Vulkan ${device.apiGeneration}: ready for DXVK 2.x and VKD3D-Proton"
     } else {
-        false to "Vulkan ${device.apiGeneration}: a RADV driver unlocks DXVK 2.x"
+        // Adreno needs Turnip; RADV Xclipse is only for Samsung's Xclipse GPUs.
+        val driver = io.harbor.fable.nativebridge.GpuDetector.fromVulkan(device).let { id ->
+            if (id.kind == io.harbor.fable.nativebridge.GpuKind.UNKNOWN) io.harbor.fable.nativebridge.GpuDetector.detect() else id
+        }.recommendedFamily.displayName
+        false to "Vulkan ${device.apiGeneration}: a $driver driver unlocks DXVK 2.x"
     }
 }
 

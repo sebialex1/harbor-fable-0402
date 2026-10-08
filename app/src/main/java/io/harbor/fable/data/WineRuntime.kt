@@ -494,10 +494,39 @@ internal class WineRuntime(
     }.getOrNull()?.takeIf { it.isNotBlank() } ?: DEFAULT_DNS
 
     /**
-     * Library path of the active RADV Xclipse driver, or null when none is installed. There is a
-     * single active driver for the whole app, so every container launches with the same one.
+     * Library path of the active custom Vulkan driver (Turnip or RADV Xclipse), or null when none
+     * is installed. There is a single active driver for the whole app, so every container
+     * launches with the same one. Both families are Android Vulkan HALs and take the same path
+     * through the libvulkan shim (FABLE_VULKAN_DRIVER, split mode).
      */
     fun activeDriverLibrary(): String? = drivers.activeLibraryPath()
+
+    /**
+     * One line for the launch log: which driver family is active, which GPU this is, and whether
+     * they fit. RADV Xclipse on an Adreno GPU finds no device, which shows up only as a Direct3D
+     * app exiting silently (no d3d11/dxgi ever loaded), so the log says it up front.
+     */
+    fun activeDriverSummary(): String {
+        val gpu = drivers.gpu.value
+        val driver = drivers.installed.value
+            ?: return "driver family: none (system Vulkan); GPU ${gpu.kind.label} (${gpu.evidence})"
+        val fit = if (gpu.matches(driver.family)) "matches" else
+            "MISMATCH — ${driver.family.displayName} is for ${driver.family.targetGpus}; install ${gpu.recommendedFamily.displayName}"
+        return "driver family: ${driver.family.displayName} ${driver.tag}; GPU ${gpu.kind.label} (${gpu.evidence}); $fit"
+    }
+
+    /**
+     * Driver-specific environment for the active driver. Turnip gets `TU_DEBUG=noconform`, as
+     * Winlator sets for it: Turnip otherwise hides features on Adreno models Mesa has not run
+     * conformance on, and DXVK needs them. Container variables come later and win.
+     */
+    fun activeDriverEnvironment(): List<String> {
+        val driver = drivers.installed.value ?: return emptyList()
+        return when (driver.family) {
+            io.harbor.fable.data.models.DriverFamily.TURNIP -> listOf("TU_DEBUG=noconform")
+            io.harbor.fable.data.models.DriverFamily.RADV_XCLIPSE -> emptyList()
+        }
+    }
 
     private fun queryDisplayName(uri: Uri): String? = runCatching {
         appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
