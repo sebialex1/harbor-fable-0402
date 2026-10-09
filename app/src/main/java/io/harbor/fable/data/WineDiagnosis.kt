@@ -34,15 +34,38 @@ internal object WineDiagnosis {
     private val IMPORTS_FAILED = Regex("""Importing dlls for L?"([^"]+)" failed, status ([0-9a-fA-Fx]+)""")
 
     /**
-     * A program crashing on its own: Wine's unhandled-exception banner (`wine: Unhandled page
-     * fault on read access to …`), `err:seh` lines, access violations (`c0000005`) and breakpoint
-     * exceptions (`80000003`, an int3 a program raises on a fatal CHECK when no debugger is
-     * attached — CEF/Chromium games die this way) from the `+seh` trace. A game that crashes
-     * before Direct3D init used to look like a clean exit.
+     * Confirmed crash evidence: what Wine prints when an exception was NOT handled — the
+     * `wine: Unhandled page fault on read access to …` / `wine: Unhandled exception 0x80000003 at
+     * address …` banner, `Unhandled exception: …`, and `err:seh:…` lines (`raise_exception …
+     * (unhandled)`). A `Backtrace:` header (see [BACKTRACE]) counts too.
+     *
+     * Deliberately NOT here: `trace:seh:dispatch_exception code=…`. The `+seh` trace writes that
+     * record for EVERY exception, handled or not — .NET/Unity null checks, `IsBadReadPtr`
+     * probes, debugger-detection `int3`s and C++ throws all land there while the program runs
+     * on. DRAPLINE was reported as "crashed" off one such line (see [FIRST_CHANCE]); counting it
+     * as a crash is a guess. A breakpoint CAN be fatal (Chromium/CEF games CHECK-fail on `int3`),
+     * but then Wine also prints the banner above, or the process dies — that's the evidence.
      */
-    private val CRASH = Regex(
-        """(wine: Unhandled .*|Unhandled exception: .*|err:seh:.*|.*code=c0000005.*|.*EXCEPTION_ACCESS_VIOLATION.*|.*code=80000003.*|.*EXCEPTION_BREAKPOINT.*)""",
+    private val CRASH = Regex("""(wine: Unhandled .*|Unhandled exception: .*|err:seh:.*)""")
+    private val BACKTRACE = Regex("""^\s*Backtrace:\s*$""")
+
+    /**
+     * `0140:trace:seh:dispatch_exception code=80000003 (EXCEPTION_BREAKPOINT) flags=0 addr=0000000140E03C6C`:
+     * a first-chance exception record. Context only (see [CRASH]): it says an exception was
+     * raised, not that anything failed to handle it.
+     */
+    private val FIRST_CHANCE = Regex(
+        """:trace:seh:dispatch_exception code=([0-9a-fA-F]+)(?: \(([^)]*)\))? flags=\S+ addr=([0-9a-fA-F]+)""",
     )
+
+    /**
+     * Exception codes programs raise on purpose all the time and that mean nothing here:
+     * `DBG_PRINTEXCEPTION_C` (OutputDebugString), `DBG_PRINTEXCEPTION_WIDE_C`, the MSVC
+     * thread-name exception, and C++ `throw` (`e06d7363`).
+     */
+    private val ROUTINE_EXCEPTIONS = setOf("40010006", "4001000a", "406d1388", "e06d7363")
+    private const val MAX_EXCEPTIONS = 5
+    const val BREAKPOINT_CODE = "80000003"
     private const val MAX_CRASHES = 5
     private val SYMBOL_NOT_FOUND = Regex("""cannot locate symbol "([^"]+)" referenced by "([^"]+)"""")
     private const val FREETYPE_MISSING = "Wine cannot find the FreeType font library"
@@ -65,13 +88,24 @@ internal object WineDiagnosis {
 
     /**
      * `warn:module:LdrGetProcedureAddress "IsUserCetAvailableInEnvironment" (ordinal 0) not found
-     * in L"C:\windows\system32\kernel32.dll"`: the program asked for an export this Wine build
-     * doesn't have. Programs often probe and carry on, so this alone isn't a failure — but
-     * Chromium-based apps (CEF games like DRAPLINE) CHECK-fail on it and die on a breakpoint
-     * right after, so it's recorded to explain the crash.
+     * in L"C:\windows\system32\kernel32.dll"`: someone called GetProcAddress for an export this
+     * Wine build doesn't have. The line doesn't say who. Most callers probe and carry on, so it's
+     * context, not a failure — it is only worth blaming when a confirmed crash follows it
+     * ([Diagnosis.crashAfterMissingExport]).
      */
     private val MISSING_EXPORT = Regex(
         """LdrGetProcedureAddress "([^"]+)"(?: \(ordinal \d+\))? not found in L?"[^"]*?([\w.\-]+\.dll)"""",
+    )
+
+    /**
+     * Exports that Wine's own code looks up (COM's `CoFreeUnusedLibraries` asks every loaded
+     * DLL, ole32.dll included, for `DllCanUnloadNow`; explorer.exe / the service host asks
+     * `wevtsvc.dll` for `SvchostPushServiceGlobals`). They show up in every launch's log and are
+     * never "what the program asked for". Anything else in the log may be the game's own probe.
+     */
+    private val WINE_INTERNAL_PROBES = setOf(
+        "dllcanunloadnow", "dllgetclassobject", "dllregisterserver", "dllunregisterserver",
+        "svchostpushserviceglobals", "servicemain",
     )
     private const val MAX_MISSING_EXPORTS = 5
 
@@ -128,16 +162,34 @@ internal object WineDiagnosis {
         val openGlUnavailable: Boolean = false,
         /** Programs whose imports failed to load, with the NTSTATUS: `ULTRAKILL.exe (c0000135)`. */
         val failedImports: List<String> = emptyList(),
-        /** The first few crash lines: unhandled exceptions, `err:seh`, access violations. */
+        /**
+         * Confirmed crash evidence, first few lines: Wine's unhandled-exception banner,
+         * `err:seh` lines, a backtrace. Never a bare `trace:seh:dispatch_exception` record
+         * (see [exceptionsObserved]).
+         */
         val crashes: List<String> = emptyList(),
+        /**
+         * First-chance exceptions the `+seh` trace recorded (`EXCEPTION_BREAKPOINT (80000003) at
+         * 0000000140E03C6C`), first few distinct ones. Context: the trace logs every exception
+         * whether or not something handled it, so this is not crash evidence by itself.
+         */
+        val exceptionsObserved: List<String> = emptyList(),
         /** VKD3D-Proton's error messages (`function: message`), first few. */
         val vkd3dErrors: List<String> = emptyList(),
         /**
-         * Exports the program asked for that this Wine build doesn't have
-         * (`IsUserCetAvailableInEnvironment (kernel32.dll)`). Not a failure by itself — most
-         * programs probe and carry on — but it explains a breakpoint crash right after.
+         * Exports somebody looked up that this Wine build doesn't have
+         * (`IsUserCetAvailableInEnvironment (kernel32.dll)`), excluding [wineProbes]. Not a
+         * failure by itself — most callers probe and carry on; a candidate cause only when a
+         * confirmed crash follows ([crashAfterMissingExport]).
          */
         val missingExports: List<String> = emptyList(),
+        /**
+         * Missing exports that Wine's own code asked for (`DllCanUnloadNow (ole32.dll)`,
+         * `SvchostPushServiceGlobals (wevtsvc.dll)`): in every launch's log, never the program's.
+         */
+        val wineProbes: List<String> = emptyList(),
+        /** A confirmed crash line came after a [missingExports] line in the log. */
+        val crashAfterMissingExport: Boolean = false,
         /** VKD3D-Proton printed "DXR support enabled." (the device can report D3D12 ray tracing). */
         val dxrEnabled: Boolean = false,
         /** VKD3D-Proton printed "Overriding feature level" (VKD3D_FEATURE_LEVEL forced capabilities). */
@@ -152,9 +204,16 @@ internal object WineDiagnosis {
             get() = missingLibraries.isEmpty() && nativeInitFailures.isEmpty() && failedDlls.isEmpty() &&
                 missingSymbols.isEmpty() && !freeTypeMissing && !freeTypeTooOld && graphicsErrors.isEmpty() &&
                 missingImports.isEmpty() && failedImports.isEmpty() && crashes.isEmpty() && vkd3dErrors.isEmpty() &&
-                missingExports.isEmpty()
+                missingExports.isEmpty() && wineProbes.isEmpty() && exceptionsObserved.isEmpty()
 
-        /** Findings that mean the program itself couldn't start, even when Wine exited with 0. */
+        /** An `int3` / `EXCEPTION_BREAKPOINT` was raised (first-chance; may or may not have been fatal). */
+        val breakpointObserved: Boolean get() = exceptionsObserved.any { it.contains(BREAKPOINT_CODE) }
+
+        /**
+         * Findings that mean the program itself couldn't start, even when Wine exited with 0.
+         * [crashes] is confirmed evidence only; [exceptionsObserved] and [missingExports] never
+         * make this true.
+         */
         val programFailed: Boolean
             get() = missingImports.isNotEmpty() || failedDlls.isNotEmpty() || failedImports.isNotEmpty() || crashes.isNotEmpty()
 
@@ -177,8 +236,10 @@ internal object WineDiagnosis {
                     add("couldn't load the DLLs ${failedImports.first()} imports")
                 }
                 if (crashes.isNotEmpty()) add("crashed: ${crashes.first().take(120)}")
-                if (missingExports.isNotEmpty()) {
-                    add("this Wine build lacks ${missingExports.joinToString()}, which the program asked for")
+                // A missing export is only a suspect when a confirmed crash follows it, and even
+                // then the log can't say the crash was caused by it.
+                if (crashes.isNotEmpty() && crashAfterMissingExport && missingExports.isNotEmpty()) {
+                    add("before the crash the log shows a lookup of ${missingExports.joinToString()}, missing in this Wine build (possible cause, not confirmed)")
                 }
                 if (vkd3dErrors.isNotEmpty()) add("VKD3D-Proton (Direct3D 12) error: ${vkd3dErrors.first().take(160)}")
                 if (featureLevelOverridden) add("VKD3D_FEATURE_LEVEL forced Direct3D 12 capabilities the driver may not have")
@@ -188,6 +249,24 @@ internal object WineDiagnosis {
                 }
             }
             return parts.takeIf { it.isNotEmpty() }?.joinToString("; ")
+        }
+
+        /**
+         * What the log observed without proving it caused anything: first-chance exceptions and
+         * missing exports. Worded as observations, for messages that have no confirmed cause.
+         */
+        fun context(): List<String> = buildList {
+            if (breakpointObserved) {
+                add(
+                    "Wine's trace logged a breakpoint exception (int3); Chromium-based games raise one when an " +
+                        "internal check fails, but the trace also records handled ones, so it's a lead, not proof",
+                )
+            }
+            val others = exceptionsObserved.filterNot { it.contains(BREAKPOINT_CODE) }
+            if (others.isNotEmpty()) add("first-chance exceptions logged: ${others.joinToString()}")
+            if (missingExports.isNotEmpty()) {
+                add("a lookup of ${missingExports.joinToString()} failed (missing in this Wine build; programs often probe and carry on)")
+            }
         }
 
         /** Every finding, one per line, for the launch log. */
@@ -201,7 +280,12 @@ internal object WineDiagnosis {
             failedDlls.forEach { add("Wine couldn't load $it") }
             failedImports.forEach { add("imports failed to load for $it") }
             crashes.forEach { add("crash: $it") }
-            missingExports.forEach { add("missing export: $it") }
+            exceptionsObserved.forEach { add("first-chance exception (trace records handled ones too; not a crash by itself): $it") }
+            missingExports.forEach { add("missing export (lookup failed; caller not identified): $it") }
+            wineProbes.forEach { add("missing export asked by Wine itself (harmless): $it") }
+            if (crashes.isNotEmpty() && crashAfterMissingExport && missingExports.isNotEmpty()) {
+                add("the crash came after a missing-export lookup (possible cause, not confirmed)")
+            }
             if (failedDlls.any { it.startsWith("kernel32.dll", ignoreCase = true) && it.contains("c0000135", ignoreCase = true) }) {
                 // STATUS_DLL_NOT_FOUND for the first DLL a process loads: outside wineboot's
                 // bootstrap Wine only loads builtins that exist in C:\windows\system32.
@@ -257,6 +341,9 @@ internal object WineDiagnosis {
         val crashes = LinkedHashSet<String>()
         val vkd3d = LinkedHashSet<String>()
         val exports = LinkedHashSet<String>()
+        val wineProbes = LinkedHashSet<String>()
+        val exceptions = LinkedHashSet<String>()
+        var crashAfterExport = false
         var dxr = false
         var flOverride = false
         val graphicsDlls = LinkedHashMap<String, String>()
@@ -293,9 +380,29 @@ internal object WineDiagnosis {
                 val program = it.groupValues[1].replace("\\\\", "\\").substringAfterLast('\\')
                 importFailures += "$program (${it.groupValues[2]})"
             }
-            if (crashes.size < MAX_CRASHES) CRASH.find(line)?.let { crashes += it.value.trim().take(200) }
-            if (exports.size < MAX_MISSING_EXPORTS) {
-                MISSING_EXPORT.find(line)?.let { exports += "${it.groupValues[1]} (${it.groupValues[2]})" }
+            if (crashes.size < MAX_CRASHES) {
+                val crash = CRASH.find(line)?.value ?: if (BACKTRACE.containsMatchIn(line)) "Backtrace:" else null
+                if (crash != null) {
+                    if (crashes.isEmpty() && exports.isNotEmpty()) crashAfterExport = true
+                    crashes += crash.trim().take(200)
+                }
+            }
+            if (exceptions.size < MAX_EXCEPTIONS && line.contains(":trace:seh:")) {
+                FIRST_CHANCE.find(line)?.let {
+                    val code = it.groupValues[1].lowercase().padStart(8, '0')
+                    if (code !in ROUTINE_EXCEPTIONS) {
+                        val name = it.groupValues[2].ifBlank { "exception" }
+                        exceptions += "$name ($code) at ${it.groupValues[3].uppercase()}"
+                    }
+                }
+            }
+            MISSING_EXPORT.find(line)?.let {
+                val export = "${it.groupValues[1]} (${it.groupValues[2]})"
+                if (it.groupValues[1].lowercase() in WINE_INTERNAL_PROBES) {
+                    if (wineProbes.size < MAX_MISSING_EXPORTS) wineProbes += export
+                } else if (exports.size < MAX_MISSING_EXPORTS) {
+                    exports += export
+                }
             }
         }
         return Diagnosis(
@@ -311,8 +418,11 @@ internal object WineDiagnosis {
             openGlUnavailable = noOpenGl,
             failedImports = importFailures.toList(),
             crashes = crashes.toList(),
+            exceptionsObserved = exceptions.toList(),
             vkd3dErrors = vkd3d.toList(),
             missingExports = exports.toList(),
+            wineProbes = wineProbes.toList(),
+            crashAfterMissingExport = crashAfterExport,
             dxrEnabled = dxr,
             featureLevelOverridden = flOverride,
             graphicsDlls = graphicsDlls,

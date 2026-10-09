@@ -1801,53 +1801,31 @@ class ContainerRepository internal constructor(
         val dir = processLog.parentFile ?: return
         val clean = if (started.process != null) code == 0 else WineRuntime.exitedCleanly(dir)
         val diagnosis = WineDiagnosis.analyze(processLog)
-        val duringStartup = uptimeMs < STARTUP_FAILURE_WINDOW_MS
-        // An app (not the Wine desktop) whose explorer.exe exits 0 within the startup window
-        // never got going either, recognized pattern or not: a game doesn't open and close by
-        // itself in a few seconds. Without this the display stayed black with no explanation.
-        val silentAppExit = clean && isApp && duringStartup
         if (clean) {
             log.line("process ${started.pid} exited cleanly after ${uptimeMs}ms")
-            // explorer.exe /desktop exits with 0 once the program it started is gone, also when
-            // that program never got going (a missing UnityPlayer.dll ends the game in the loader
-            // and leaves a black desktop that closes): only Wine's err lines tell.
-            logDiagnosis(log, diagnosis, screen)
-            if (!diagnosis.programFailed && !silentAppExit) return
-            if (silentAppExit) {
-                log.line(
-                    "status 0 is explorer.exe's, not $label's; an app ending within ${STARTUP_FAILURE_WINDOW_MS}ms " +
-                        "of the launch is reported as a failed start",
-                )
-            }
-        } else {
-            logDiagnosis(log, diagnosis, screen)
         }
-        // explorer.exe's 0 says nothing about the app; leave it out of the message.
-        val signal = code?.takeIf { !clean && it > 128 }?.let { it - 128 }
-        val status = if (clean) {
-            null
-        } else {
-            code?.let { if (signal != null) "killed by signal $signal" else "exit code $it" }
-        }
-        val detail = diagnosis.summary()
-            ?: if (silentAppExit) {
-                "$label closed after ${String.format(java.util.Locale.US, "%.1f", uptimeMs / 1000f)} s without an error " +
-                    "Wine could name. The launch log's \"Process output highlights\" section has Wine's messages"
-            } else if (signal != null) {
-                // SIGTERM/SIGKILL while the program was alive (the UE4 RTX launcher's "Couldn't
-                // start" dialog sat open until the launch was ended): not a crash — it was still
-                // running, so the last log line would be loader-trace noise, not a reason.
-                "$label was still running when it was terminated — it hadn't crashed or exited; " +
-                    "a window or dialog was likely waiting for input (or it hung)"
-            } else {
-                WineRuntime.lastLogLine(dir)
-            }
+        // explorer.exe /desktop exits with 0 once the program it started is gone, also when that
+        // program never got going (a missing UnityPlayer.dll ends the game in the loader and
+        // leaves a black desktop that closes): only Wine's err lines tell.
+        logDiagnosis(log, diagnosis, screen)
+        // How sure the message may sound depends on the evidence (see [LaunchExitReport]): a
+        // first-chance exception or a missing export in the trace is context, not a crash.
         val d3d12Hint = d3d12ExitHint(diagnosis, d3d12Supports[containerId])
+        val report = LaunchExitReport.compose(
+            label = label,
+            isApp = isApp,
+            diagnosis = diagnosis,
+            uptimeMs = uptimeMs,
+            code = code,
+            clean = clean,
+            d3d12Hint = d3d12Hint,
+            lastLogLine = { WineRuntime.lastLogLine(dir) },
+        ) ?: return
+        report.notes.forEach { log.line(it) }
         d3d12Hint?.let { log.line(it) }
-        val reason = listOfNotNull(detail, d3d12Hint, status?.let { "($it)" }).joinToString(" ").ifBlank { "no output" }
-        log.error(
-            "$label ${if (duringStartup) "failed during startup" else "stopped"} after ${uptimeMs}ms: $reason",
-        )
+        val reason = report.reason
+        val duringStartup = report.duringStartup
+        log.error(report.logLine)
         val failure = WineFailure(
             containerId = containerId,
             label = label,
@@ -1947,7 +1925,7 @@ class ContainerRepository internal constructor(
          * take several seconds to get from exec to the first window, well past
          * [EARLY_EXIT_WINDOW_MS].
          */
-        private const val STARTUP_FAILURE_WINDOW_MS = 30_000L
+        private const val STARTUP_FAILURE_WINDOW_MS = LaunchExitReport.STARTUP_FAILURE_WINDOW_MS
         private const val STARTUP_POLL_MS = 400L
         private const val REAPER_GRACE_MS = 200L
 

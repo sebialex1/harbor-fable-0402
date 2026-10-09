@@ -1,0 +1,36 @@
+0140:trace:module:LdrGetDllHandleEx L"kernel32.dll" -> 000000028B4C0000 (load path (null))
+0140:warn:module:LdrGetProcedureAddress "IsUserCetAvailableInEnvironment" (ordinal 0) not found in L"C:\\windows\\system32\\kernel32.dll"
+0140:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000807EEDC0, base 00000000807EEDB8.
+0140:trace:module:LdrGetDllHandleEx L"Kernel32.dll" -> 000000028B4C0000 (load path (null))
+0140:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000807EED60, base 00000000807EED58.
+0140:trace:module:LdrGetDllHandleEx L"kernelbase.dll" -> 000000028B3B0000 (load path (null))
+0140:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000807EED60, base 00000000807EED58.
+0140:trace:module:LdrGetDllHandleEx L"kernelbase.dll" -> 000000028B3B0000 (load path (null))
+0140:trace:module:LdrGetDllHandleEx flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 00000000807EED60, base 00000000807EED58.
+0140:trace:module:LdrGetDllHandleEx L"kernelbase.dll" -> 000000028B3B0000 (load path (null))
+0140:trace:seh:dispatch_exception code=80000003 (EXCEPTION_BREAKPOINT) flags=0 addr=0000000140E03C6C
+0140:trace:seh:dispatch_exception  info[0]=0000000000000000
+0140:trace:seh:dispatch_exception rip=0000000140e03c6c rsp=00000000807eed50 rbp=000000004ac93b00 eflags=00010297
+0140:trace:seh:dispatch_exception rax=0000000000000019 rbx=000000000000002f rcx=0000000000000027 rdx=0000000000000027
+0140:trace:seh:dispatch_exception rsi=000000014ac53c18 rdi=000000014ac53c88  r8=00000000807eec84  r9=000000028b3ed45b
+0140:trace:seh:dispatch_exception r10=0000003f000baf50 r11=0000000000000202 r12=0000000c00008120 r13=0000000c0000810c
+0140:trace:seh:dispatch_exception r14=aaaaaaaaaaaaaaaa r15=000000000000001c mxcsr=00001f80
+0140:trace:seh:call_seh_handlers calling handler 00000001448035B0 (rec=00000000807EEC30, frame=807eff40 context=00000000807EE740, dispatch=00000000807EDF28)
+0140:trace:seh:call_seh_handlers handler at 00000001448035B0 returned 1
+0140:trace:seh:call_seh_handlers calling handler 000000028B542770 (rec=00000000807EEC30, frame=807effb0 context=00000000807EE740, dispatch=00000000807EDF28)
+0140:trace:process:NtQueryInformationProcess (0xffffffffffffffff,0x0000000c,0x807edb84,0x00000004,0x0)
+0114:warn:esync:get_object Failed to retrieve fd for handle 0xf4, status 0xc0000002.
+0114:warn:esync:get_object Failed to retrieve fd for handle 0xf4, status 0xc0000002.
+0130:warn:esync:get_object Failed to retrieve fd for handle 0xa0, status 0xc0000002.
+0130:warn:esync:get_object Failed to retrieve fd for handle 0xa0, status 0xc0000002.
+0130:warn:esync:get_object Failed to retrieve fd for handle 0xa0, status 0xc0000002.
+0130:warn:esync:get_object Failed to retrieve fd for handle 0xa0, status 0xc0000002.
+0024:trace:process:NtQueryInformationProcess (0x60,0x00000000,0x800e75a8,0x00000030,0x0)
+0130:warn:rpc:RPCRT4_default_receive_fragment flags 0x1, load_path 0000000000000000, dll_characteristics 0000000000000000, name 0000000080EEF8A0, base 0000000080EEF898.
+0130:trace:module:LdrGetDllHandleEx L"ntdll.dll" -> 000000027FF60000 (load path (null))
+Short read of header, -1 bytes
+0130:warn:rpc:RPCRT4_io_thread receive failed with error 6be
+012c:warn:sync:RtlpWaitForCriticalSection process L"C:\\windows\\system32\\explorer.exe" is shutting down, returning STATUS_SUCCESS
+[fable] exit code 0
+
+2026-10-09 11:04:07.897  process 6478 exited cleanly after 18904ms
