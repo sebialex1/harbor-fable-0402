@@ -61,8 +61,11 @@ import com.winlator.xserver.XKeycode
 import com.winlator.xserver.XServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -85,9 +88,10 @@ import kotlinx.coroutines.withContext
  * [createDrawer]) that slides in from the right edge over the X screen: on-screen controls
  * (Winlator-compatible control presets — buttons, d-pads, sticks, trackpads — that inject X
  * key and mouse events, see [createControlsOverlay]), the Android soft keyboard,
- * the control preset and the performance HUD, a mini task manager (`wine tasklist` /
+ * the control preset and the performance HUD, a self-refreshing task manager (`wine tasklist` /
  * `taskkill`), pausing / resuming Wine (SIGSTOP / SIGCONT on the prefix's processes) and Stop Wine, which is
- * what Back used to do. A second Back closes the menu.
+ * what Back used to do. The menu is a compact root with entries that open nested pages; Back steps
+ * sub-page, root, closed.
  *
  * A small performance HUD in the top-left corner shows the display's frame rate (frames the
  * renderer actually drew — it renders on demand, so an idle desktop reads low), the X screen
@@ -115,11 +119,30 @@ class DisplayActivity : Activity() {
     private var controlsSwitch: Switch? = null
     private var presetList: LinearLayout? = null
     private var presetsLoading = false
-    private var taskList: LinearLayout? = null
-    private var tasksLoading = false
     private var winePaused = false
     private var pauseItem: TextView? = null
     private var pauseIcon: ImageView? = null
+
+    // Menu pages (see [MenuPage]): all built once, the current one visible.
+    private val menuNav = MenuNavigator()
+    private var menuPages: Map<MenuPage, View> = emptyMap()
+    private var menuScroll: ScrollView? = null
+    private var menuTitle: TextView? = null
+    private var menuBackButton: View? = null
+    private var menuRefreshButton: View? = null
+    private var menuExportButton: View? = null
+    private var menuExit: View? = null
+    private var presetSummary: TextView? = null
+    private var wineSummary: TextView? = null
+
+    // Task manager page: refreshed every [TaskPollGate.INTERVAL_MS] while it is on screen.
+    private var taskList: LinearLayout? = null
+    private val taskGate = TaskPollGate()
+    private var taskPoll: Job? = null
+    private var resumed = false
+    private var shownTasks: List<WindowsProcess>? = null
+    private var taskDetailViews: List<TextView> = emptyList()
+    private var taskNote: String? = null
 
     private val touchSlopPx by lazy { TOUCH_SLOP_DP * resources.displayMetrics.density }
 
@@ -231,15 +254,21 @@ class DisplayActivity : Activity() {
         super.onResume()
         view?.onResume()
         startHud()
+        resumed = true
+        updateTaskPolling()
     }
 
     override fun onPause() {
+        resumed = false
+        updateTaskPolling()
         stopHud()
         view?.onPause()
         super.onPause()
     }
 
     override fun onDestroy() {
+        taskPoll?.cancel()
+        taskPoll = null
         uiScope.cancel()
         failureDialog?.dismiss()
         failureDialog = null
@@ -260,6 +289,18 @@ class DisplayActivity : Activity() {
         controlsSwitch = null
         presetList = null
         taskList = null
+        shownTasks = null
+        taskDetailViews = emptyList()
+        taskNote = null
+        menuPages = emptyMap()
+        menuScroll = null
+        menuTitle = null
+        menuBackButton = null
+        menuRefreshButton = null
+        menuExportButton = null
+        menuExit = null
+        presetSummary = null
+        wineSummary = null
         pauseItem = null
         pauseIcon = null
         // Only a real exit stops Wine; a recreate (config change not covered by the manifest)
@@ -284,9 +325,10 @@ class DisplayActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_BACK) {
-            // Back toggles the side menu and never reaches the framework (which would finish the
-            // activity and stop Wine). Acting on UP avoids re-triggering on key repeat.
-            if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) setDrawerOpen(!drawerOpen)
+            // Back opens the side menu, then steps sub-page -> root -> closed; it never reaches the
+            // framework (which would finish the activity and stop Wine). Acting on UP avoids
+            // re-triggering on key repeat.
+            if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) handleBack()
             return true
         }
         val handled = runCatching { server?.keyboard?.onKeyEvent(event) == true }.getOrDefault(false)
@@ -295,19 +337,31 @@ class DisplayActivity : Activity() {
 
     // ---- Side menu ---------------------------------------------------------------------------
 
+    /** One Back step: opens the menu, goes from a sub-page to the root, or closes the menu. */
+    private fun handleBack() {
+        when {
+            !drawerOpen -> setDrawerOpen(true)
+            menuNav.back() -> showPage(MenuPage.ROOT)
+            else -> setDrawerOpen(false)
+        }
+    }
+
     private fun setDrawerOpen(open: Boolean) {
         val scrim = drawer ?: return
         val panel = drawerPanel ?: return
         if (open == drawerOpen) return
         drawerOpen = open
+        // Always opens on the root; leaving the drawer (or the Tasks page) stops task polling.
+        if (open) showPage(MenuPage.ROOT, animate = false)
+        updateTaskPolling()
         // Slide distance: the panel's width plus its margin, once laid out; the screen's before.
         val offscreen = (panel.width.takeIf { it > 0 }?.plus(dpPx(DRAWER_MARGIN_DP)) ?: resources.displayMetrics.widthPixels).toFloat()
         scrim.animate().cancel()
         panel.animate().cancel()
         if (open) {
-            // Fresh lists each time: presets dropped into the import folders, programs started or ended.
+            // Fresh preset list each time: presets dropped into the import folders. The task list
+            // refreshes itself once its page is opened.
             reloadPresets()
-            refreshTasks()
             scrim.visibility = View.VISIBLE
             scrim.alpha = 0f
             scrim.animate().alpha(1f).setDuration(DRAWER_ANIMATION_MS).setInterpolator(DRAWER_EASE_OUT).start()
@@ -361,6 +415,7 @@ class DisplayActivity : Activity() {
         winePaused = paused
         repository.setPausedInBackground(id, paused)
         pauseItem?.text = if (paused) "Resume Wine" else "Pause Wine"
+        wineSummary?.text = if (paused) "Paused" else "Running"
         pauseIcon?.setImageDrawable(menuIcon(if (paused) R.drawable.ic_menu_play else R.drawable.ic_menu_pause))
         statusText?.let { label ->
             if (paused) {
@@ -375,12 +430,20 @@ class DisplayActivity : Activity() {
     /**
      * The side menu: a light tap-to-close scrim over the whole screen with a floating glass panel
      * on the right — translucent so the game stays visible behind it, with a light-catching rim
-     * and no branding header. A compact close button sits at the top, then short sections on
-     * glass cards — Overlays (on-screen controls, performance HUD, keyboard), Control preset
-     * (every preset, tap to switch live; export), Wine (pause) and Tasks (the container's Windows
-     * processes with an End button each, refreshed whenever the menu opens) — and a neutral
-     * glass Exit button pinned at the bottom.
-     * Hidden until Back opens it ([setDrawerOpen]).
+     * and no branding header. The panel is a small stack of pages ([MenuPage]) swapped in place:
+     *
+     *  - **Root**: a compact 2x2 grid of tiles — Overlays, Control preset, Wine, Tasks — with the
+     *    glass Exit pill pinned at the bottom.
+     *  - **Overlays**: on-screen controls, performance HUD, keyboard.
+     *  - **Control preset**: every preset (tap to switch live); export is a small button in the
+     *    header corner.
+     *  - **Wine**: pause / resume.
+     *  - **Tasks**: the container's Windows processes, refreshed by itself while the page is open
+     *    ([updateTaskPolling]); a small refresh button sits in the header corner.
+     *
+     * Sub-pages show a small round back button in the top-left corner; the close button stays in
+     * the top-right. Android Back goes sub-page, root, closed ([handleBack]). Hidden until Back
+     * opens it ([setDrawerOpen]).
      *
      * Touch handling is unchanged: while the menu is closed the scrim is GONE, so every touch
      * reaches the X server view underneath; while it is open the scrim takes taps outside the
@@ -389,34 +452,56 @@ class DisplayActivity : Activity() {
     private fun createDrawer(): View {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
+        val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+        val match = ViewGroup.LayoutParams.MATCH_PARENT
 
-        // Top row: a small caption on the left, close on the right. No app name.
-        val topRow = LinearLayout(this).apply {
+        // Header: [back] title ... [page action] [close]. The back button and the page actions
+        // only show where they apply (see [showPage]).
+        val backButton = menuCornerButton(R.drawable.ic_menu_back, "Back to menu") { handleBack() }
+        val title = TextView(this).apply {
+            setTextColor(DRAWER_TEXT_DIM.toInt())
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        val refreshButton = menuCornerButton(R.drawable.ic_menu_refresh, "Refresh tasks now") { refreshTasks() }
+        val exportButton = menuCornerButton(R.drawable.ic_menu_export, "Export the selected preset as .icp to Download/Fable/profiles") {
+            exportSelectedPreset()
+        }
+        val closeButton = menuCornerButton(R.drawable.ic_menu_close, "Close menu") { setDrawerOpen(false) }
+        val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(TextView(this@DisplayActivity).apply {
-                setTextColor(DRAWER_TEXT_DIM.toInt())
-                textSize = 12f
-                typeface = fableFont(R.font.inter_medium)
-                letterSpacing = 0.06f
-                isAllCaps = true
-                text = "Menu"
-                setPadding(dp(4f), 0, 0, 0)
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(FrameLayout(this@DisplayActivity).apply {
-                background = glassPill(DRAWER_BUTTON_FILL, DRAWER_BUTTON_PRESSED, cornerDp = 16f)
-                contentDescription = "Close menu"
-                isClickable = true
-                setOnClickListener { setDrawerOpen(false) }
-                addView(ImageView(this@DisplayActivity).apply {
-                    setImageDrawable(menuIcon(R.drawable.ic_menu_close, DRAWER_TEXT_SOFT.toInt()))
-                }, FrameLayout.LayoutParams(dp(16f), dp(16f), Gravity.CENTER))
-            }, LinearLayout.LayoutParams(dp(32f), dp(32f)))
+            addView(backButton)
+            addView(title, LinearLayout.LayoutParams(0, wrap, 1f))
+            addView(refreshButton)
+            addView(exportButton)
+            addView(closeButton)
         }
 
-        val sections = LinearLayout(this).apply {
+        // Root: tiles, not rows.
+        fun tileRow(left: View, right: View) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(left, LinearLayout.LayoutParams(0, dp(MENU_TILE_HEIGHT_DP), 1f).apply { marginEnd = dp(4f) })
+            addView(right, LinearLayout.LayoutParams(0, dp(MENU_TILE_HEIGHT_DP), 1f).apply { marginStart = dp(4f) })
+        }
+        val overlaysTile = menuTile("Overlays", "Controls, HUD, keyboard", R.drawable.ic_menu_gamepad, TONE_BLUE) { showPage(MenuPage.OVERLAYS) }
+        val presetsTile = menuTile("Control preset", selectedProfile?.profile?.name ?: "Loading presets…", R.drawable.ic_menu_gamepad, TONE_INDIGO) {
+            showPage(MenuPage.PRESETS)
+        }.also { presetSummary = it.findViewById(ROW_SUBTITLE_ID) }
+        val wineTile = menuTile("Wine", if (winePaused) "Paused" else "Running", R.drawable.ic_menu_pause, TONE_TEAL) {
+            showPage(MenuPage.WINE)
+        }.also { wineSummary = it.findViewById(ROW_SUBTITLE_ID) }
+        val tasksTile = menuTile("Tasks", "Running programs", R.drawable.ic_menu_end_task, TONE_SLATE) { showPage(MenuPage.TASKS) }
+        val rootPage = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(menuSectionLabel("Overlays", first = true))
+            setPadding(0, dp(8f), 0, 0)
+            addView(tileRow(overlaysTile, presetsTile), LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dp(8f) })
+            addView(tileRow(wineTile, tasksTile))
+        }
+
+        val overlaysPage = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8f), 0, 0)
             addView(menuCard(
                 menuSwitch("On-screen controls", R.drawable.ic_menu_gamepad, selectedProfile?.profile?.name ?: "Loading presets…", TONE_BLUE) {
                     setControlsShown(it)
@@ -435,24 +520,27 @@ class DisplayActivity : Activity() {
                     showKeyboard()
                 }.also { it.contentDescription = "Open Android's keyboard to type into Wine" },
             ))
+        }
 
-            // Control presets: one row per preset, tap to apply (see [renderPresets]).
-            addView(menuSectionLabel("Control preset"))
+        // Control presets: one row per preset, tap to apply (see [renderPresets]).
+        val presetsPage = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8f), 0, 0)
             addView(menuCard(
                 LinearLayout(this@DisplayActivity).apply {
                     orientation = LinearLayout.VERTICAL
                     presetList = this
                 },
-                menuDivider(),
-                menuItem("Export preset", R.drawable.ic_menu_gamepad, "Save as .icp to Download/Fable/profiles", TONE_SLATE) {
-                    exportSelectedPreset()
-                },
             ))
+            addView(menuHint("Export (top right) saves the selected preset as .icp to Download/Fable/profiles."))
             addView(menuHint("Import: copy Winlator .icp files to Android/data/$packageName/files/profiles or Download/Winlator/profiles."))
+        }
 
-            addView(menuSectionLabel("Wine"))
+        val winePage = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8f), 0, 0)
             addView(menuCard(
-                menuItem("Pause Wine", R.drawable.ic_menu_pause, "Freeze every process", TONE_TEAL) {
+                menuItem(if (winePaused) "Resume Wine" else "Pause Wine", if (winePaused) R.drawable.ic_menu_play else R.drawable.ic_menu_pause, "Freeze every process", TONE_TEAL) {
                     setWinePaused(!winePaused)
                     setDrawerOpen(false)
                 }.also {
@@ -460,20 +548,74 @@ class DisplayActivity : Activity() {
                     pauseIcon = it.findViewById(ROW_ICON_ID)
                 },
             ))
-
-            // Mini task manager: the container's Windows processes, each with an End button.
-            addView(menuSectionLabel("Tasks"))
-            addView(menuCard(
-                menuItem("Refresh", R.drawable.ic_menu_refresh, "Running Windows programs", TONE_INDIGO) { refreshTasks() },
-                LinearLayout(this@DisplayActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    taskList = this
-                },
-            ))
         }
+
+        // Task manager: the container's Windows processes, each with an End button; the list
+        // refreshes itself while this page is open (see [updateTaskPolling]).
+        val tasksPage = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8f), 0, 0)
+            addView(LinearLayout(this@DisplayActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                taskList = this
+            })
+            addView(menuHint("Updates every ${TaskPollGate.INTERVAL_MS / 1000} seconds while this page is open."))
+        }
+
+        val pages = linkedMapOf(
+            MenuPage.ROOT to rootPage as View,
+            MenuPage.OVERLAYS to overlaysPage,
+            MenuPage.PRESETS to presetsPage,
+            MenuPage.WINE to winePage,
+            MenuPage.TASKS to tasksPage,
+        )
+        val pageHost = FrameLayout(this).apply {
+            pages.values.forEach { page ->
+                page.visibility = View.GONE
+                addView(page, FrameLayout.LayoutParams(match, wrap))
+            }
+        }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(pageHost)
+        }
+
+        // Exit: the one big primary action, a neutral full-round glass pill (not a red slab).
+        // The power glyph and the words say what it does. Root only.
+        val exit = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            background = glassPill(DRAWER_BUTTON_FILL, DRAWER_BUTTON_PRESSED, cornerDp = MENU_EXIT_HEIGHT_DP / 2f)
+            isClickable = true
+            contentDescription = "Exit container and stop all Wine processes"
+            // onDestroy calls stopContainerInBackground, including for paused Wine.
+            setOnClickListener { finish() }
+            addView(ImageView(this@DisplayActivity).apply {
+                setImageDrawable(menuIcon(R.drawable.ic_menu_power, DRAWER_TEXT_SOFT.toInt()))
+            }, LinearLayout.LayoutParams(dp(18f), dp(18f)).apply { marginEnd = dp(8f) })
+            addView(TextView(this@DisplayActivity).apply {
+                text = "Exit Container"
+                textSize = 15f
+                typeface = fableFont(R.font.inter_medium)
+                setTextColor(0xFFFFFFFF.toInt())
+            })
+        }
+
+        menuPages = pages
+        menuScroll = scroll
+        menuTitle = title
+        menuBackButton = backButton
+        menuRefreshButton = refreshButton
+        menuExportButton = exportButton
+        menuExit = exit
+        menuNav.reset()
+        showPage(MenuPage.ROOT, animate = false)
+
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14f), dp(14f), dp(14f), dp(14f))
+            setPadding(dp(14f), dp(10f), dp(14f), dp(14f))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 intArrayOf(DRAWER_GLASS_TOP.toInt(), DRAWER_GLASS_BOTTOM.toInt()),
@@ -483,37 +625,11 @@ class DisplayActivity : Activity() {
             }
             elevation = 0f
             isClickable = true
-            addView(topRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            // Landscape screens can be shorter than the grouped rows. Keep Exit outside the
-            // scrollable content so it never gets clipped or pushed off the bottom.
-            addView(ScrollView(this@DisplayActivity).apply {
-                isFillViewport = false
-                isVerticalScrollBarEnabled = false
-                overScrollMode = View.OVER_SCROLL_NEVER
-                addView(sections)
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            // Exit: a neutral glass button, not a red slab. The power glyph and the words say
-            // what it does.
-            addView(LinearLayout(this@DisplayActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                background = glassPill(DRAWER_BUTTON_FILL, DRAWER_BUTTON_PRESSED, cornerDp = MENU_CARD_RADIUS_DP)
-                isClickable = true
-                contentDescription = "Exit container and stop all Wine processes"
-                // onDestroy calls stopContainerInBackground, including for paused Wine.
-                setOnClickListener { finish() }
-                addView(ImageView(this@DisplayActivity).apply {
-                    setImageDrawable(menuIcon(R.drawable.ic_menu_power, DRAWER_TEXT_SOFT.toInt()))
-                }, LinearLayout.LayoutParams(dp(18f), dp(18f)).apply { marginEnd = dp(8f) })
-                addView(TextView(this@DisplayActivity).apply {
-                    text = "Exit Container"
-                    textSize = 15f
-                    typeface = fableFont(R.font.inter_medium)
-                    setTextColor(0xFFFFFFFF.toInt())
-                })
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46f)).apply {
-                topMargin = dp(12f)
-            })
+            addView(header, LinearLayout.LayoutParams(match, wrap))
+            // Landscape screens can be shorter than the page. Keep Exit outside the scrollable
+            // content so it never gets clipped or pushed off the bottom.
+            addView(scroll, LinearLayout.LayoutParams(match, 0, 1f))
+            addView(exit, LinearLayout.LayoutParams(match, dp(MENU_EXIT_HEIGHT_DP)).apply { topMargin = dp(12f) })
         }
         drawerPanel = panel
         return FrameLayout(this).apply {
@@ -531,6 +647,121 @@ class DisplayActivity : Activity() {
             addView(panel, FrameLayout.LayoutParams(dp(DRAWER_WIDTH_DP), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply {
                 val m = dp(DRAWER_MARGIN_DP)
                 setMargins(m, m, m, m)
+            })
+        }
+    }
+
+    /**
+     * Shows [page] in the side menu: swaps the visible page, restyles the header (a small caption
+     * on the root; a back button, a title and the page's own corner actions on sub-pages), shows
+     * Exit only on the root and (re)evaluates task polling.
+     */
+    private fun showPage(page: MenuPage, animate: Boolean = true) {
+        menuNav.open(page)
+        val root = page == MenuPage.ROOT
+        menuPages.forEach { (p, v) -> v.visibility = if (p == page) View.VISIBLE else View.GONE }
+        menuTitle?.apply {
+            text = page.title
+            isAllCaps = root
+            textSize = if (root) 12f else 16f
+            letterSpacing = if (root) 0.06f else 0f
+            typeface = fableFont(R.font.inter_medium)
+            setTextColor(if (root) DRAWER_TEXT_DIM.toInt() else 0xFFFFFFFF.toInt())
+            setPadding(dpPx(if (root) 4f else 8f), 0, 0, 0)
+        }
+        menuBackButton?.visibility = if (root) View.GONE else View.VISIBLE
+        menuRefreshButton?.visibility = if (page == MenuPage.TASKS) View.VISIBLE else View.GONE
+        menuExportButton?.visibility = if (page == MenuPage.PRESETS) View.VISIBLE else View.GONE
+        menuExit?.visibility = if (root) View.VISIBLE else View.GONE
+        menuScroll?.scrollTo(0, 0)
+        menuPages[page]?.let { shown ->
+            shown.animate().cancel()
+            if (animate) {
+                // A short slide from the side the page came from: sub-pages in from the right,
+                // the root back in from the left.
+                shown.alpha = 0f
+                shown.translationX = dpPx(if (root) -14f else 14f).toFloat()
+                shown.animate().alpha(1f).translationX(0f).setDuration(PAGE_ANIMATION_MS).setInterpolator(DRAWER_EASE_OUT).start()
+            } else {
+                shown.alpha = 1f
+                shown.translationX = 0f
+            }
+        }
+        updateTaskPolling()
+    }
+
+    /**
+     * A small round icon button for a corner of the panel or of a card: a 30dp glass disc inside a
+     * 40dp touch target. Secondary actions use these instead of full-width rows.
+     */
+    private fun menuCornerButton(iconRes: Int, description: String, onClick: () -> Unit): View {
+        fun dp(v: Float) = dpPx(v)
+        return FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(MENU_CORNER_TOUCH_DP), dp(MENU_CORNER_TOUCH_DP))
+            contentDescription = description
+            isClickable = true
+            setOnClickListener { onClick() }
+            addView(FrameLayout(this@DisplayActivity).apply {
+                background = glassPill(DRAWER_BUTTON_FILL, DRAWER_BUTTON_PRESSED, cornerDp = MENU_CORNER_VISUAL_DP / 2f)
+                // Lights up with the touch target it sits in.
+                isDuplicateParentStateEnabled = true
+                addView(ImageView(this@DisplayActivity).apply {
+                    isDuplicateParentStateEnabled = true
+                    setImageDrawable(menuIcon(iconRes, DRAWER_TEXT_SOFT.toInt()))
+                }, FrameLayout.LayoutParams(dp(16f), dp(16f), Gravity.CENTER))
+            }, FrameLayout.LayoutParams(dp(MENU_CORNER_VISUAL_DP), dp(MENU_CORNER_VISUAL_DP), Gravity.CENTER))
+        }
+    }
+
+    /**
+     * A root entry: a glass tile with a round icon, title and one-line summary ([ROW_SUBTITLE_ID])
+     * and a small chevron in the top corner saying it opens a page.
+     */
+    private fun menuTile(label: String, summary: String, iconRes: Int, tone: IntArray, onClick: () -> Unit): View {
+        fun dp(v: Float) = dpPx(v)
+        val density = resources.displayMetrics.density
+        return FrameLayout(this).apply {
+            background = glassPill(DRAWER_BUTTON_FILL, DRAWER_BUTTON_PRESSED, cornerDp = MENU_TILE_RADIUS_DP)
+            contentDescription = label
+            isClickable = true
+            setOnClickListener { onClick() }
+            addView(LinearLayout(this@DisplayActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12f), dp(12f), dp(12f), dp(10f))
+                addView(FrameLayout(this@DisplayActivity).apply {
+                    background = GradientDrawable(GradientDrawable.Orientation.TL_BR, tone).apply {
+                        shape = GradientDrawable.OVAL
+                        setStroke((0.75f * density).toInt().coerceAtLeast(1), DRAWER_RIM.toInt())
+                    }
+                    addView(ImageView(this@DisplayActivity).apply {
+                        setImageDrawable(menuIcon(iconRes))
+                    }, FrameLayout.LayoutParams(dp(MENU_ICON_DP), dp(MENU_ICON_DP), Gravity.CENTER))
+                }, LinearLayout.LayoutParams(dp(34f), dp(34f)))
+                addView(View(this@DisplayActivity), LinearLayout.LayoutParams(0, 0, 1f))
+                addView(TextView(this@DisplayActivity).apply {
+                    setTextColor(0xFFFFFFFF.toInt())
+                    textSize = 15f
+                    typeface = fableFont(R.font.inter_medium)
+                    letterSpacing = -0.01f
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    text = label
+                })
+                addView(TextView(this@DisplayActivity).apply {
+                    id = ROW_SUBTITLE_ID
+                    setTextColor(DRAWER_TEXT_DIM.toInt())
+                    textSize = 11f
+                    typeface = fableFont(R.font.inter_regular)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    text = summary
+                })
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(ImageView(this@DisplayActivity).apply {
+                setImageDrawable(menuIcon(R.drawable.ic_menu_chevron, DRAWER_TEXT_DIM.toInt()))
+            }, FrameLayout.LayoutParams(dp(14f), dp(14f), Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(12f)
+                marginEnd = dp(10f)
             })
         }
     }
@@ -771,6 +1002,7 @@ class DisplayActivity : Activity() {
             if (chosen?.profile != controlsOverlay?.currentProfile) controlsOverlay?.setProfile(chosen?.profile)
             selectedProfile = chosen
             controlsSubtitle?.text = chosen?.profile?.name ?: "No presets found"
+            presetSummary?.text = chosen?.profile?.name ?: "No presets found"
             renderPresets()
         }
     }
@@ -781,6 +1013,7 @@ class DisplayActivity : Activity() {
         controlsOverlay?.setProfile(preset.profile)
         profileRepository.select(preset, containerId)
         controlsSubtitle?.text = preset.profile.name
+        presetSummary?.text = preset.profile.name
         // Picking a preset means wanting to see it.
         controlsSwitch?.let { if (!it.isChecked) it.isChecked = true }
         renderPresets()
@@ -834,44 +1067,131 @@ class DisplayActivity : Activity() {
     // ---- Mini task manager -------------------------------------------------------------------
 
     /**
+     * Starts or stops the Tasks page's poll: it runs only while that page is on screen, the
+     * drawer is open and the activity is resumed ([TaskPollGate.shouldPoll]); every other state
+     * cancels it. [refreshTasks] skips a round while the previous query is still running.
+     */
+    private fun updateTaskPolling() {
+        if (!TaskPollGate.shouldPoll(menuNav.current, drawerOpen, resumed)) {
+            taskPoll?.cancel()
+            taskPoll = null
+            return
+        }
+        if (taskPoll?.isActive == true) return
+        taskPoll = uiScope.launch {
+            while (isActive) {
+                refreshTasks()
+                delay(TaskPollGate.INTERVAL_MS)
+            }
+        }
+    }
+
+    /**
      * Lists the container's Windows processes ([ContainerRepository.listWindowsProcesses]:
-     * `wine tasklist`, or `/proc` as a fallback) into the side menu.
+     * `wine tasklist`, or `/proc` as a fallback) into the Tasks page. The query runs on the IO
+     * dispatcher; only one runs at a time ([taskGate]) and the list is updated in place, so the
+     * page doesn't flicker or eat a tap on End when it refreshes.
      */
     private fun refreshTasks() {
         val list = taskList ?: return
         val id = containerId ?: return
-        if (tasksLoading) return
-        list.removeAllViews()
         if (winePaused) {
             // A stopped wineserver can't answer tasklist.
-            list.addView(menuInfoRow("Resume Wine to list processes"))
+            showTaskNote(list, "Resume Wine to list processes")
             return
         }
-        list.addView(menuInfoRow("Loading…"))
-        tasksLoading = true
+        if (!taskGate.tryBegin()) return
+        if (shownTasks == null) showTaskNote(list, "Loading…")
         uiScope.launch {
-            val processes = runCatching { ContainerRepository.get(applicationContext).listWindowsProcesses(id) }.getOrDefault(emptyList())
-            tasksLoading = false
+            val processes = try {
+                runCatching { ContainerRepository.get(applicationContext).listWindowsProcesses(id) }.getOrDefault(emptyList())
+            } finally {
+                taskGate.end()
+            }
             renderTasks(processes)
         }
     }
 
+    /** Replaces the task list with one dim line, unless it already shows exactly that. */
+    private fun showTaskNote(list: LinearLayout, note: String) {
+        if (taskNote == note) return
+        list.removeAllViews()
+        list.addView(menuInfoRow(note))
+        taskNote = note
+        shownTasks = null
+        taskDetailViews = emptyList()
+    }
+
     private fun renderTasks(processes: List<WindowsProcess>) {
         val list = taskList ?: return
+        if (winePaused) return
+        val previous = shownTasks
+        if (previous != null && sameTaskRows(previous, processes)) {
+            // Same programs: refresh their memory / PID text without rebuilding the rows.
+            processes.forEachIndexed { index, process -> taskDetailViews.getOrNull(index)?.text = taskDetail(process) }
+            shownTasks = processes
+            return
+        }
         list.removeAllViews()
+        taskNote = null
+        shownTasks = processes
         if (processes.isEmpty()) {
+            taskDetailViews = emptyList()
             list.addView(menuInfoRow("No Windows processes found"))
             return
         }
+        val details = ArrayList<TextView>(processes.size)
         processes.forEach { process ->
-            list.addView(menuDivider())
             val system = process.name.lowercase() in WindowsTasks.SYSTEM_PROCESSES
-            val detail = buildList {
-                process.windowsPid?.let { add("PID $it") } ?: process.linuxPid?.let { add("pid $it") }
-                process.memory?.let { add(it) }
-                if (system) add("Wine")
-            }.joinToString(" · ")
-            list.addView(menuTextRow(process.name, detail, endAction = { confirmEndTask(process, system) }))
+            val row = menuTaskRow(process, system)
+            details += row.findViewById<TextView>(ROW_SUBTITLE_ID)
+            list.addView(row)
+        }
+        taskDetailViews = details
+    }
+
+    private fun taskDetail(process: WindowsProcess): String = buildList {
+        process.windowsPid?.let { add("PID $it") } ?: process.linuxPid?.let { add("pid $it") }
+        process.memory?.let { add(it) }
+        if (process.name.lowercase() in WindowsTasks.SYSTEM_PROCESSES) add("Wine")
+    }.joinToString(" · ")
+
+    /** One program: its own small card with name and details, End pinned in the corner. */
+    private fun menuTaskRow(process: WindowsProcess, system: Boolean): View {
+        fun dp(v: Float) = dpPx(v)
+        return LinearLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { bottomMargin = dp(6f) }
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(48f)
+            setPadding(dp(12f), dp(4f), dp(4f), dp(4f))
+            background = GradientDrawable().apply {
+                setColor(DRAWER_CARD.toInt())
+                cornerRadius = dp(MENU_TASK_RADIUS_DP).toFloat()
+                setStroke((0.75f * resources.displayMetrics.density).toInt().coerceAtLeast(1), DRAWER_CARD_RIM.toInt())
+            }
+            addView(LinearLayout(this@DisplayActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(this@DisplayActivity).apply {
+                    setTextColor(0xFFFFFFFF.toInt())
+                    textSize = 14f
+                    typeface = fableFont(R.font.inter_regular)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    text = process.name
+                })
+                addView(TextView(this@DisplayActivity).apply {
+                    id = ROW_SUBTITLE_ID
+                    setTextColor(DRAWER_TEXT_DIM.toInt())
+                    textSize = 11f
+                    typeface = fableFont(R.font.inter_regular)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    text = taskDetail(process)
+                })
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(menuCornerButton(R.drawable.ic_menu_end_task, "End ${process.name}") { confirmEndTask(process, system) })
         }
     }
 
@@ -927,13 +1247,12 @@ class DisplayActivity : Activity() {
 
     /**
      * A text-only list row: title and detail, optionally a [trailing] mark (the active preset's
-     * tick) and an end button ([endAction], the task manager's End).
+     * tick).
      */
     private fun menuTextRow(
         title: String,
         detail: String?,
         trailing: String? = null,
-        endAction: (() -> Unit)? = null,
         onClick: (() -> Unit)? = null,
     ): View {
         val density = resources.displayMetrics.density
@@ -969,15 +1288,6 @@ class DisplayActivity : Activity() {
                 typeface = fableFont(R.font.inter_medium)
                 text = trailing
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8f) })
-            if (endAction != null) addView(FrameLayout(this@DisplayActivity).apply {
-                background = glassPill(DRAWER_BUTTON_FILL, DRAWER_BUTTON_PRESSED, cornerDp = 14f)
-                contentDescription = "End $title"
-                isClickable = true
-                setOnClickListener { endAction() }
-                addView(ImageView(this@DisplayActivity).apply {
-                    setImageDrawable(menuIcon(R.drawable.ic_menu_end_task, DRAWER_TEXT_SOFT.toInt()))
-                }, FrameLayout.LayoutParams(dp(16f), dp(16f), Gravity.CENTER))
-            }, LinearLayout.LayoutParams(dp(28f), dp(28f)).apply { marginStart = dp(8f) })
             if (onClick != null) {
                 background = menuRowBackground()
                 setOnClickListener { onClick() }
@@ -1398,6 +1708,7 @@ class DisplayActivity : Activity() {
         private const val DRAWER_RADIUS_DP = 22f
         private const val DRAWER_ANIMATION_MS = 260L
         private const val DRAWER_CLOSE_MS = 200L
+        private const val PAGE_ANIMATION_MS = 160L
         private val DRAWER_EASE_OUT = PathInterpolator(0.16f, 1f, 0.3f, 1f)
         private val DRAWER_EASE_IN = PathInterpolator(0.7f, 0f, 0.84f, 0f)
         private const val DRAWER_GLASS_TOP = 0xB81C1C1EL
@@ -1416,6 +1727,13 @@ class DisplayActivity : Activity() {
         private const val SWITCH_ON_TRACK = 0xFF4A9EFFL
         private const val SWITCH_OFF_TRACK = 0x4DFFFFFFL
         private const val MENU_CARD_RADIUS_DP = 14f
+        private const val MENU_TILE_RADIUS_DP = 18f
+        private const val MENU_TASK_RADIUS_DP = 12f
+        private const val MENU_EXIT_HEIGHT_DP = 46f
+        private const val MENU_TILE_HEIGHT_DP = 96f
+        /** Touch target of the small corner buttons; the drawn disc inside is [MENU_CORNER_VISUAL_DP]. */
+        private const val MENU_CORNER_TOUCH_DP = 40f
+        private const val MENU_CORNER_VISUAL_DP = 30f
         private const val MENU_ROW_MIN_DP = 50f
         private const val MENU_TILE_DP = 30f
         private const val MENU_ICON_DP = 18f
