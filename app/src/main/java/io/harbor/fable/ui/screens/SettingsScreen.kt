@@ -45,7 +45,7 @@ import io.harbor.fable.ui.components.*
 import io.harbor.fable.ui.theme.FableError
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onOpenControls: () -> Unit = {}) {
     val context = LocalContext.current
     val app = remember(context) { FableApp.from(context) }
     val settingsRepo = app.settingsRepository
@@ -66,6 +66,7 @@ fun SettingsScreen() {
         versionName = BuildConfig.VERSION_NAME,
         onUpdate = { transform -> settingsRepo.update(transform) },
         onResetClick = { showResetConfirm = true },
+        onOpenControls = onOpenControls,
     )
 
     logText?.let { text ->
@@ -111,6 +112,7 @@ internal fun SettingsContent(
     versionName: String,
     onUpdate: ((AppSettings) -> AppSettings) -> Unit,
     onResetClick: () -> Unit,
+    onOpenControls: () -> Unit = {},
 ) {
     val resolutionOptions = ContainerDefaults.RESOLUTION_PRESETS.map { SelectOption(it, it) }
     val translatorOptions = TRANSLATOR_OPTIONS
@@ -167,6 +169,18 @@ internal fun SettingsContent(
                     title = "VSync",
                     checked = settings.vsync,
                     onCheckedChange = { v -> onUpdate { it.copy(vsync = v) } },
+                )
+            }
+        }
+
+        item(key = "controls-label") { SectionLabel("Input", Modifier.animateItem().entrance(appear, 1)) }
+        item(key = "controls") {
+            FableCard(Modifier.animateItem().entrance(appear, 1)) {
+                ListRow(
+                    title = "Controls",
+                    subtitle = "On-screen control presets: add, rename, import, export",
+                    icon = FableIcons.Apps,
+                    onClick = onOpenControls,
                 )
             }
         }

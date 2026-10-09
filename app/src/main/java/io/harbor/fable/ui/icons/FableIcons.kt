@@ -357,6 +357,14 @@ object FableIcons {
         )
     }
 
+    /** Row actions: Phosphor `dots-three-vertical` (Regular). */
+    val More: ImageVector by lazy {
+        phosphor(
+            "More",
+            listOf("M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128ZM128,72a12,12,0,1,0-12-12A12,12,0,0,0,128,72Zm0,112a12,12,0,1,0,12,12A12,12,0,0,0,128,184Z"),
+        )
+    }
+
     /**
      * Remove / delete: Phosphor `trash` (Regular), verbatim. The earlier hand-edited copy had its
      * two bars shifted right of the bin's centre (x 112–128 and 160–176 in a 64–192 body, so the

@@ -74,6 +74,9 @@ private object Routes {
     const val VULKAN_EXTENSIONS = "drivers/vulkan"
     const val ASSETS = "assets"
     const val SETTINGS = "settings"
+    const val CONTROLS = "settings/controls"
+    // Next phase: the visual editor, e.g. CONTROL_EDITOR = "settings/controls/edit/{file}", pushed from
+    // ControlsScreen's onEdit (which is null, so the Edit action stays hidden, until it exists).
 
     val topLevel = setOf(HOME, CONTAINERS, DRIVERS, ASSETS, SETTINGS)
 }
@@ -83,7 +86,7 @@ private fun tabIndex(route: String?): Int = when (route) {
     Routes.CONTAINERS, Routes.CONTAINER_DETAIL -> 1
     Routes.DRIVERS, Routes.VULKAN_EXTENSIONS -> 2
     Routes.ASSETS -> 3
-    Routes.SETTINGS -> 4
+    Routes.SETTINGS, Routes.CONTROLS -> 4
     else -> 0
 }
 
@@ -355,7 +358,16 @@ private fun MainShell() {
                 exitTransition = TabExit,
                 popEnterTransition = TabPopEnter,
                 popExitTransition = TabPopExit,
-            ) { SettingsScreen() }
+            ) { SettingsScreen(onOpenControls = { navController.navigate(Routes.CONTROLS) }) }
+            composable(
+                route = Routes.CONTROLS,
+                enterTransition = DetailEnter,
+                exitTransition = DetailExit,
+                popEnterTransition = DetailPopEnter,
+                popExitTransition = DetailPopExit,
+            ) {
+                ControlsScreen(onBack = { navController.popBackStack() })
+            }
         }
 
         if (showAddApp) {
